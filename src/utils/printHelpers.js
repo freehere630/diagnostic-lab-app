@@ -291,10 +291,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             justify-content: space-between;
             page-break-inside: avoid;
           }
-          .receipt-border {
-            border: 1.5px solid #000000;
-            border-radius: 6px;
-            padding: 8px 10px;
+          .receipt-border { 
             height: 100%;
             display: flex;
             flex-direction: column;
@@ -556,7 +553,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
       }
 
       if (block.id === "footer") {
-        return `<p style="text-align: center; font-size: ${block.fontSize || 7}pt; color: ${block.textColor}; margin: 15px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px; font-family: ${fontFam};">${reportFooter}</p>`;
+        return `<p style="text-align: center; font-size: ${block.fontSize || 7}pt; color: ${block.textColor}; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px; font-family: ${fontFam};">${reportFooter}</p>`;
       }
 
       return "";
