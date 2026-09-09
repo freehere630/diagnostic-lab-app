@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  /* 1. Barcode Sticker Printing */
+  body.printing-barcode #thermal-barcode-sticker,
+  body.printing-barcode #thermal-barcode-sticker * {
+    visibility: visible;
+  }
+
+  body.printing-barcode #thermal-barcode-sticker {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 50mm !important;
+    height: 25mm !important;
+    margin: 0 !important;
+    padding: 2mm !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  /* 2. POS Money Receipt Printing */
+  body.printing-receipt #thermal-money-receipt,
+  body.printing-receipt #thermal-money-receipt * {
+    visibility: visible;
+  }
+
+  body.printing-receipt #thermal-money-receipt {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    margin: 0 !important;
+    padding: 4mm !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  @page {
+    margin: 0;
+  }
+}
