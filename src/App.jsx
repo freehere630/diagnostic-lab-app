@@ -227,12 +227,17 @@ export default function App() {
   };
 
   // Save Settings and update React state immediately
+ // Save Settings and update React state + localStorage immediately
   const handleSaveSettings = async (settingsData) => {
     setIsLoading(true);
     try {
+      // 1. Immediately cache in localStorage for zero-delay printing
+      localStorage.setItem("apex_lab_settings", JSON.stringify(settingsData));
+
+      // 2. Persist to Supabase database
       const saved = await saveLabSettings(settingsData);
-      setLabSettings(saved);
-      alert("✅ Custom Branding & Layout Saved to Database!");
+      setLabSettings(saved || settingsData);
+      alert("✅ Custom Template Saved to Database!");
     } catch (e) {
       alert("Error saving settings: " + e.message);
     } finally {
