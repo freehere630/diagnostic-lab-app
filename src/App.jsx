@@ -3,7 +3,7 @@ import {
   getMasterData, getAllOrders, createNewOrder, saveTestResult, 
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest, 
   deleteTest, getStaffUsers, registerStaffUser, deleteStaffUser,
-  getLabSettings, saveLabSettings
+  getLabSettings, saveLabSettings, settleOrderDue
 } from "./services/api";
 
 import { printMoneyReceiptA5, printSpecificVialBarcode, printDepartmentA4Report } from "./utils/printHelpers";
@@ -21,14 +21,30 @@ import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
 import VerificationModal from "./components/VerificationModal";
 
-const MASTER_SAMPLE_TYPES = ["Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)"];
-const MASTER_TUBE_COLORS = ["Purple / Lavender (EDTA)", "Red / Yellow (SST / Plain Clot)", "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup"];
+const MASTER_SAMPLE_TYPES = [
+  "Whole Blood", 
+  "Serum", 
+  "Plasma (Fluoride)", 
+  "Plasma (Citrate)", 
+  "Clean Catch Urine", 
+  "Fresh Stool", 
+  "Swab (Throat / Nasal)"
+];
+
+const MASTER_TUBE_COLORS = [
+  "Purple / Lavender (EDTA)", 
+  "Red / Yellow (SST / Plain Clot)", 
+  "Grey (Fluoride Oxalate)", 
+  "Light Blue (Citrate)", 
+  "Sterile Urine Cup"
+];
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState({ state: "idle", message: "" });
 
   // Core Data States
   const [departments, setDepartments] = useState([]);
@@ -46,12 +62,31 @@ export default function App() {
   const [dashboardSearch, setDashboardSearch] = useState("");
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
-  // Forms State
+  // Patient Intake & POS Form States
   const [selectedTestIds, setSelectedTestIds] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
-  const [patientForm, setPatientForm] = useState({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
+  const [paidVal, setPaidVal] = useState(undefined); // Tracks custom paid amount & due balance
+  const [patientForm, setPatientForm] = useState({ 
+    id: "", 
+    name: "", 
+    age: "", 
+    gender: "Male", 
+    phone: "", 
+    doctor: "Self" 
+  });
+
+  // Test Manager States
   const [editingTest, setEditingTest] = useState(null);
-  const [newTestForm, setNewTestForm] = useState({ name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum", tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] });
+  const [newTestForm, setNewTestForm] = useState({ 
+    name: "", 
+    code: "", 
+    deptId: "DEP-BIO", 
+    price: "", 
+    sampleType: "Serum", 
+    tubeColor: "Red / Yellow (SST / Plain Clot)", 
+    isProfile: false, 
+    parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] 
+  });
 
   const loadDatabaseData = async () => {
     setIsLoading(true);
@@ -65,23 +100,48 @@ export default function App() {
       setLabSettings(settings || null);
 
       const liveOrders = await getAllOrders();
-      if (liveOrders?.length > 0) {
-        const formatted = liveOrders.map((o, idx) => ({
-          orderId: o.id,
-          receiptNo: `RCP-2026-${String(1001 + idx)}`,
-          date: o.order_date || new Date().toISOString().slice(0, 10),
-          barcode: o.barcode,
-          patient: o.patient || { id: o.patient_id || `PID-${1000 + idx}`, name: "Patient", phone: "N/A", age: 0, gender: "Other" },
-          tests: o.order_tests?.map((ot) => ot.test) || [],
-          billing: { subTotal: parseFloat(o.subtotal) || 0, discount: parseFloat(o.discount_percent) || 0, netPayable: parseFloat(o.net_payable) || 0, paid: parseFloat(o.paid_amount) || 0, due: parseFloat(o.due_amount) || 0 },
-          results: (o.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
-          qcStatus: o.qc_status || "Pending", isLocked: o.is_locked || false, verifierRemarks: o.verifier_remarks || ""
-        }));
+      if (liveOrders && liveOrders.length > 0) {
+        const formatted = liveOrders.map((o, idx) => {
+          const matchedTests = (o.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
+          const testsToUse = matchedTests.length > 0 ? matchedTests : (o.tests || []);
+
+          return {
+            orderId: o.id || o.orderId,
+            receiptNo: o.receiptNo || `RCP-2026-${String(1001 + idx)}`,
+            date: o.order_date || o.date || new Date().toISOString().slice(0, 10),
+            barcode: o.barcode,
+            patient: o.patient || { 
+              id: o.patient_id || `PID-${1000 + idx}`, 
+              name: "Patient", 
+              phone: "N/A", 
+              age: 0, 
+              gender: "Other", 
+              doctor: "Self" 
+            },
+            tests: testsToUse,
+            billing: o.billing || { 
+              subTotal: parseFloat(o.subtotal) || 0, 
+              discount: parseFloat(o.discount_percent) || 0, 
+              netPayable: parseFloat(o.net_payable) || 0, 
+              paid: parseFloat(o.paid_amount) || 0, 
+              due: parseFloat(o.due_amount) || 0 
+            },
+            results: Array.isArray(o.results) 
+              ? o.results.reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}) 
+              : (o.results || {}),
+            qcStatus: o.qc_status || o.qcStatus || "Pending", 
+            isLocked: o.is_locked || o.isLocked || false, 
+            verifierRemarks: o.verifier_remarks || o.verifierRemarks || ""
+          };
+        });
+
         setOrders(formatted);
-        setSelectedOrderId(formatted[0].orderId);
+        if (!selectedOrderId && formatted.length > 0) {
+          setSelectedOrderId(formatted[0].orderId);
+        }
       }
     } catch (err) {
-      console.error(err);
+      console.warn("Data load warning:", err);
     } finally {
       setIsLoading(false);
     }
@@ -90,11 +150,13 @@ export default function App() {
   useEffect(() => { loadDatabaseData(); }, []);
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-  // Check URL query parameters for public verification link (e.g. ?verify=ORD-...)
+  // Verification modal trigger via URL parameters
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("verify") && orders.length > 0) {
-      const matched = orders.find(o => o.orderId === params.get("verify") || o.barcode === params.get("bc"));
+    const verifyParam = params.get("verify");
+    const bcParam = params.get("bc");
+    if ((verifyParam || bcParam) && orders.length > 0) {
+      const matched = orders.find(o => o.orderId === verifyParam || o.barcode === bcParam);
       if (matched) {
         setSelectedOrderId(matched.orderId);
         setShowVerificationModal(true);
@@ -112,7 +174,7 @@ export default function App() {
       if (!vials[key]) {
         vials[key] = {
           deptCode,
-          testBarcode: `${deptCode}-${activeOrder.date.replace(/-/g, "")}-${activeOrder.patient?.id ? activeOrder.patient.id.replace(/\D/g, "") : "001"}`,
+          testBarcode: `${deptCode}-${(activeOrder.date || "").replace(/-/g, "")}-${activeOrder.patient?.id ? String(activeOrder.patient.id).replace(/\D/g, "") : "001"}`,
           patientId: activeOrder.patient?.id || "PID-000",
           patientName: activeOrder.patient?.name || "Patient",
           tubeColor: test.tube_color || "Standard Tube",
@@ -142,11 +204,11 @@ export default function App() {
     return orders.filter((ord) => {
       const q = dashboardSearch.trim().toLowerCase();
       const matchText = !q || (
-        ord.receiptNo.toLowerCase().includes(q) ||
-        (ord.patient?.id && ord.patient.id.toLowerCase().includes(q)) ||
-        ord.barcode.toLowerCase().includes(q) ||
-        ord.patient?.name?.toLowerCase().includes(q) ||
-        ord.patient?.phone?.includes(q)
+        (ord.receiptNo && ord.receiptNo.toLowerCase().includes(q)) ||
+        (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q)) ||
+        (ord.barcode && ord.barcode.toLowerCase().includes(q)) ||
+        (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
+        (ord.patient?.phone && ord.patient.phone.includes(q))
       );
 
       const matchFrom = !dateRange.from || ord.date >= dateRange.from;
@@ -156,35 +218,127 @@ export default function App() {
     });
   }, [orders, dashboardSearch, dateRange]);
 
-  // Actions
+  // Save Order to Supabase & Live in Dashboard (with Due Balance Support)
   const handleSaveOrderToDb = async () => {
-    if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) return alert("Fill Patient Name, Phone & Tests.");
+    if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
+      return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
+    }
     setIsLoading(true);
     try {
       const chosen = testCatalog.filter((t) => selectedTestIds.includes(t.id));
       const sub = chosen.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
       const net = sub - (sub * discountVal) / 100;
-      await createNewOrder({ patientData: patientForm, testIds: selectedTestIds, discount: discountVal, netPayable: net, paidAmount: net, specimens: [] });
-      alert("✅ Order Saved!");
-      await loadDatabaseData();
-      setActiveTab("samples");
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+
+      const finalPaid = paidVal !== undefined ? parseFloat(paidVal) : net;
+      const finalDue = Math.max(0, net - finalPaid);
+
+      const createdOrder = await createNewOrder({ 
+        patientData: patientForm, 
+        testIds: selectedTestIds, 
+        discount: discountVal, 
+        netPayable: net, 
+        paidAmount: finalPaid, 
+        dueAmount: finalDue,
+        specimens: [],
+        testCatalog: testCatalog
+      });
+
+      // 1. Immediately reflect in Dashboard state
+      setOrders(prev => [createdOrder, ...prev.filter(o => o.orderId !== createdOrder.orderId)]);
+      setSelectedOrderId(createdOrder.orderId);
+
+      // 2. Reset intake form for next patient
+      setPatientForm({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
+      setSelectedTestIds([]);
+      setDiscountVal(0);
+      setPaidVal(undefined);
+
+      alert(`✅ Order Saved Successfully!\nPatient ID: ${createdOrder.patient?.id}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
+      
+      // 3. Switch to Dashboard where order is live
+      setActiveTab("dashboard");
+
+      // Background refresh
+      loadDatabaseData();
+    } catch (e) { 
+      alert("Error saving order: " + e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
+  };
+
+  // Due Balance Settlement on Report Collection
+  const handleSettleDue = async (orderId, collectedAmount) => {
+    setIsLoading(true);
+    try {
+      const { newPaid, newDue } = await settleOrderDue(orderId, collectedAmount);
+
+      // Instantly update orders state in Dashboard & Reports
+      setOrders(prev => prev.map(o => {
+        if (o.orderId === orderId) {
+          return {
+            ...o,
+            billing: {
+              ...o.billing,
+              paid: newPaid,
+              due: newDue
+            }
+          };
+        }
+        return o;
+      }));
+
+      alert(`✅ Payment Collected!\nTotal Paid: ৳${newPaid}\nRemaining Due: ৳${newDue}`);
+
+      // Auto-print updated receipt with remaining due cleared
+      const matched = orders.find(o => o.orderId === orderId);
+      if (matched) {
+        const updatedOrder = {
+          ...matched,
+          billing: { ...matched.billing, paid: newPaid, due: newDue }
+        };
+        printMoneyReceiptA5(updatedOrder, labSettings);
+      }
+
+      loadDatabaseData();
+    } catch (e) {
+      alert("Error collecting due: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleResultInput = async (paramId, val) => {
     if (!activeOrder || activeOrder.isLocked) return;
+    const previousOrders = [...orders];
+
     setOrders((prev) => prev.map((o) => (o.orderId === activeOrder.orderId ? { ...o, results: { ...o.results, [paramId]: { value: val } } } : o)));
-    try { await saveTestResult(activeOrder.orderId, paramId, val, "ENTERED"); } catch (e) {}
+    setSaveStatus({ state: "saving", message: "Saving result to cloud..." });
+
+    try {
+      await saveTestResult(activeOrder.orderId, paramId, val, "ENTERED");
+      setSaveStatus({ state: "saved", message: "Result saved" });
+      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 2000);
+    } catch (e) {
+      console.error("Failed to save result:", e);
+      setOrders(previousOrders);
+      setSaveStatus({ state: "error", message: "Failed to save: " + e.message });
+      alert("⚠️ Error saving result: " + e.message);
+    }
   };
 
   const handleVerifyInDb = async () => {
     if (!activeOrder) return;
     setIsLoading(true);
     try {
-      await verifyAndLockOrder(activeOrder.orderId, activeOrder.verifierRemarks || "Clinically verified with quality control checks.", "Dr. S. Rahman, MD");
+      await verifyAndLockOrder(activeOrder.orderId, activeOrder.verifierRemarks || "Clinically verified with quality control checks.", currentUser?.name || "Consultant Pathologist");
       alert("✅ Report Verified and Locked!");
       await loadDatabaseData();
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert("Verification failed: " + e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleSaveNewTest = async () => {
@@ -195,7 +349,11 @@ export default function App() {
       alert("✅ Test Created!");
       await loadDatabaseData();
       setActiveTab("reception");
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleSaveTestEdits = async () => {
@@ -206,61 +364,210 @@ export default function App() {
       alert("✅ Test Updated!");
       setEditingTest(null);
       await loadDatabaseData();
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleDeleteTest = async (testId, testName) => {
-    if (!window.confirm(`Delete "${testName}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete test "${testName}"?`)) return;
     setIsLoading(true);
-    try { await deleteTest(testId); await loadDatabaseData(); } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    try { 
+      await deleteTest(testId); 
+      await loadDatabaseData(); 
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleRegisterStaff = async (staffData) => {
     setIsLoading(true);
-    try { await registerStaffUser(staffData); alert("✅ Staff Registered!"); await loadDatabaseData(); } catch (e) { alert(e.message); } finally { setIsLoading(false); }
-  };
-
-  const handleDeleteStaff = async (userId, userName) => {
-    if (!window.confirm(`Delete staff "${userName}"?`)) return;
-    setIsLoading(true);
-    try { await deleteStaffUser(userId); await loadDatabaseData(); } catch (e) { alert(e.message); } finally { setIsLoading(false); }
-  };
-
-  // Save Settings and update React state immediately
- // Save Settings and update React state + localStorage immediately
-  const handleSaveSettings = async (settingsData) => {
-    setIsLoading(true);
-    try {
-      // 1. Immediately cache in localStorage for zero-delay printing
-      localStorage.setItem("apex_lab_settings", JSON.stringify(settingsData));
-
-      // 2. Persist to Supabase database
-      const saved = await saveLabSettings(settingsData);
-      setLabSettings(saved || settingsData);
-      alert("✅ Custom Template Saved to Database!");
-    } catch (e) {
-      alert("Error saving settings: " + e.message);
-    } finally {
-      setIsLoading(false);
+    try { 
+      await registerStaffUser(staffData); 
+      alert("✅ Staff Member Registered!"); 
+      await loadDatabaseData(); 
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
     }
   };
 
-  if (!currentUser) return <Login onLoginSuccess={(u) => { setCurrentUser(u); setActiveTab(u.role === "receptionist" ? "reception" : u.role === "technologist" ? "worklists" : u.role === "verifier" ? "verifier" : "dashboard"); }} />;
+  const handleDeleteStaff = async (userId, userName) => {
+    if (!window.confirm(`Delete staff member "${userName}"?`)) return;
+    setIsLoading(true);
+    try { 
+      await deleteStaffUser(userId); 
+      await loadDatabaseData(); 
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
+  };
+
+  const handleSaveSettings = async (settingsData) => {
+    setIsLoading(true);
+    try {
+      localStorage.setItem("apex_lab_settings", JSON.stringify(settingsData));
+      const saved = await saveLabSettings(settingsData);
+      setLabSettings(saved || settingsData);
+      alert("✅ Custom Template Saved to Database & Print!");
+    } catch (e) {
+      alert("Error saving settings: " + e.message);
+    } finally { 
+      setIsLoading(false); 
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <Login 
+        onLoginSuccess={(u) => { 
+          setCurrentUser(u); 
+          setActiveTab(u.role === "receptionist" ? "reception" : u.role === "technologist" ? "worklists" : u.role === "verifier" ? "verifier" : "dashboard"); 
+        }} 
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans w-full">
-      <Navbar currentUser={currentUser} onLogout={() => setCurrentUser(null)} activeTab={activeTab} setActiveTab={setActiveTab} mobileMenuOpen={mobileMenuOpen} setMobileMenuOpen={setMobileMenuOpen} loadDatabaseData={loadDatabaseData} isLoading={isLoading} labSettings={labSettings} />
+      <Navbar 
+        currentUser={currentUser} 
+        onLogout={() => setCurrentUser(null)} 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        mobileMenuOpen={mobileMenuOpen} 
+        setMobileMenuOpen={setMobileMenuOpen} 
+        loadDatabaseData={loadDatabaseData} 
+        isLoading={isLoading} 
+        labSettings={labSettings} 
+      />
       
+      {/* Live Save Status Banner */}
+      {saveStatus.state !== "idle" && (
+        <div className={`py-1.5 px-4 text-xs text-center font-bold transition ${
+          saveStatus.state === "saving" ? "bg-amber-500 text-white" : 
+          saveStatus.state === "error" ? "bg-rose-600 text-white" : "bg-emerald-600 text-white"
+        }`}>
+          {saveStatus.message}
+        </div>
+      )}
+
       <main className="w-full px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 flex-1">
-        {activeTab === "dashboard" && <Dashboard orders={dashboardFilteredOrders} departments={departments} testCatalog={testCatalog} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} dashboardSearch={dashboardSearch} setDashboardSearch={setDashboardSearch} dateRange={dateRange} setDateRange={setDateRange} />}
-        {activeTab === "reception" && <ReceptionPOS testCatalog={testCatalog} patientForm={patientForm} setPatientForm={setPatientForm} selectedTestIds={selectedTestIds} setSelectedTestIds={setSelectedTestIds} discountVal={discountVal} setDiscountVal={setDiscountVal} handleSaveOrderToDb={handleSaveOrderToDb} handlePrintMoneyReceipt={() => printMoneyReceiptA5(activeOrder, labSettings)} activeOrder={activeOrder} isLoading={isLoading} />}
-        {activeTab === "samples" && <SampleTracking activeOrder={activeOrder} departmentalVials={departmentalVials} handlePrintSpecificVialBarcode={(v) => printSpecificVialBarcode(v, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], barcodePrinted: true } })))} trackingStatus={trackingStatus} />}
-        {activeTab === "worklists" && <Worklists orders={orders} departments={departments} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} />}
-        {activeTab === "verifier" && <VerificationQC activeOrder={activeOrder} handleResultInput={handleResultInput} handleVerifyInDb={handleVerifyInDb} isLoading={isLoading} />}
-        {activeTab === "reports" && <ReportsPrint activeOrder={activeOrder} departmentGroupedReports={departmentGroupedReports} handlePrintDepartmentA4Report={(deptId) => printDepartmentA4Report(deptId, activeOrder, departmentGroupedReports, staffList, labSettings, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })))} staffList={staffList} labSettings={labSettings} onOpenVerificationModal={() => setShowVerificationModal(true)} />}
-        {activeTab === "test-manager" && <TestManager departments={departments} testCatalog={testCatalog} newTestForm={newTestForm} setNewTestForm={setNewTestForm} handleSaveNewTest={handleSaveNewTest} handleSaveTestEdits={handleSaveTestEdits} handleDeleteTest={handleDeleteTest} editingTest={editingTest} setEditingTest={setEditingTest} handleOpenEditModal={(t) => setEditingTest({ ...t, parameters: t.test_parameters || t.parameters || [] })} MASTER_SAMPLE_TYPES={MASTER_SAMPLE_TYPES} MASTER_TUBE_COLORS={MASTER_TUBE_COLORS} isLoading={isLoading} />}
-        {activeTab === "staff-manager" && <UserManagement staffList={staffList} handleRegisterStaff={handleRegisterStaff} handleDeleteStaff={handleDeleteStaff} isLoading={isLoading} />}
-        {activeTab === "lab-settings" && <LabSettings labSettings={labSettings} handleSaveSettings={handleSaveSettings} isLoading={isLoading} />}
+        {activeTab === "dashboard" && (
+          <Dashboard 
+            orders={dashboardFilteredOrders} 
+            departments={departments} 
+            testCatalog={testCatalog} 
+            setSelectedOrderId={setSelectedOrderId} 
+            setActiveTab={setActiveTab} 
+            handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} 
+            handleSettleDue={handleSettleDue}
+            dashboardSearch={dashboardSearch} 
+            setDashboardSearch={setDashboardSearch} 
+            dateRange={dateRange} 
+            setDateRange={setDateRange} 
+          />
+        )}
+
+        {activeTab === "reception" && (
+          <ReceptionPOS 
+            testCatalog={testCatalog} 
+            patientForm={patientForm} 
+            setPatientForm={setPatientForm} 
+            selectedTestIds={selectedTestIds} 
+            setSelectedTestIds={setSelectedTestIds} 
+            discountVal={discountVal} 
+            setDiscountVal={setDiscountVal} 
+            paidVal={paidVal}
+            setPaidVal={setPaidVal}
+            handleSaveOrderToDb={handleSaveOrderToDb} 
+            handlePrintMoneyReceipt={() => printMoneyReceiptA5(activeOrder, labSettings)} 
+            activeOrder={activeOrder} 
+            isLoading={isLoading} 
+          />
+        )}
+
+        {activeTab === "samples" && (
+          <SampleTracking 
+            activeOrder={activeOrder} 
+            departmentalVials={departmentalVials} 
+            handlePrintSpecificVialBarcode={(v) => printSpecificVialBarcode(v, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], barcodePrinted: true } })))} 
+            trackingStatus={trackingStatus} 
+          />
+        )}
+
+        {activeTab === "worklists" && (
+          <Worklists 
+            orders={orders} 
+            departments={departments} 
+            setSelectedOrderId={setSelectedOrderId} 
+            setActiveTab={setActiveTab} 
+          />
+        )}
+
+        {activeTab === "verifier" && (
+          <VerificationQC 
+            activeOrder={activeOrder} 
+            handleResultInput={handleResultInput} 
+            handleVerifyInDb={handleVerifyInDb} 
+            isLoading={isLoading} 
+            saveStatus={saveStatus} 
+          />
+        )}
+
+        {activeTab === "reports" && (
+          <ReportsPrint 
+            activeOrder={activeOrder} 
+            departmentGroupedReports={departmentGroupedReports} 
+            handlePrintDepartmentA4Report={(deptId) => printDepartmentA4Report(deptId, activeOrder, departmentGroupedReports, staffList, labSettings, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })))} 
+            staffList={staffList} 
+            labSettings={labSettings} 
+            onOpenVerificationModal={() => setShowVerificationModal(true)} 
+            handleSettleDue={handleSettleDue}
+          />
+        )}
+
+        {activeTab === "test-manager" && (
+          <TestManager 
+            departments={departments} 
+            testCatalog={testCatalog} 
+            newTestForm={newTestForm} 
+            setNewTestForm={setNewTestForm} 
+            handleSaveNewTest={handleSaveNewTest} 
+            handleSaveTestEdits={handleSaveTestEdits} 
+            handleDeleteTest={handleDeleteTest} 
+            editingTest={editingTest} 
+            setEditingTest={setEditingTest} 
+            handleOpenEditModal={(t) => setEditingTest({ ...t, parameters: t.test_parameters || t.parameters || [] })} 
+            MASTER_SAMPLE_TYPES={MASTER_SAMPLE_TYPES} 
+            MASTER_TUBE_COLORS={MASTER_TUBE_COLORS} 
+            isLoading={isLoading} 
+          />
+        )}
+
+        {activeTab === "staff-manager" && (
+          <UserManagement 
+            staffList={staffList} 
+            handleRegisterStaff={handleRegisterStaff} 
+            handleDeleteStaff={handleDeleteStaff} 
+            isLoading={isLoading} 
+          />
+        )}
+
+        {activeTab === "lab-settings" && (
+          <LabSettings 
+            labSettings={labSettings} 
+            handleSaveSettings={handleSaveSettings} 
+            isLoading={isLoading} 
+          />
+        )}
       </main>
 
       {/* Online Verification Certificate Modal */}

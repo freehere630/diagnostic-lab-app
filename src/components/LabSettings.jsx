@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { 
-  FileText, Receipt, Save, Code, Eye, Sparkles, Printer, 
-  HelpCircle, CheckCircle2, RotateCcw, Building2, Upload
+  FileText, Receipt, Save, Sparkles, RotateCcw, Building2, Upload
 } from "lucide-react";
-
-import { printMoneyReceiptA5 } from "../utils/printHelpers";
+import { buildUnifiedResultsTable } from "../utils/printHelpers";
 
 export default function LabSettings({ labSettings, handleSaveSettings, isLoading }) {
   const [activeTab, setActiveTab] = useState("report"); // 'report' or 'receipt'
-  const [editorMode, setEditorMode] = useState("visual"); // 'visual' or 'html'
 
-  // Master Content
   const [formData, setFormData] = useState({
     labName: "APEX DIAGNOSTIC LABORATORIES",
     tagline: "ISO 15189:2022 Certified Clinical Reference Laboratory",
@@ -23,11 +19,10 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     reportFooter: "This is a clinically verified electronic laboratory report."
   });
 
-  // Default Editable HTML Templates
   const DEFAULT_REPORT_TEMPLATE = `
-<div style="border: 2px solid #000; border-radius: 8px; padding: 14px 16px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="border: 2px solid #000; border-radius: 8px; padding: 14px 16px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
   <div>
-    <!-- HEADER -->
+    <!-- HOSPITAL HEADER -->
     <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
       <div style="display: flex; align-items: center; gap: 12px;">
         {{hospital_logo}}
@@ -39,21 +34,21 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
       </div>
       <div style="text-align: right; width: 85px;">
         {{qr_code}}
-        <span style="font-size: 6pt; font-family: monospace; display: block; text-align: center;">Scan to Verify</span>
+        <span style="font-size: 6pt; font-family: monospace; display: block; text-align: center; margin-top: 2px;">Scan to Verify</span>
       </div>
     </div>
 
     <!-- PATIENT DEMOGRAPHICS -->
-    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px 18px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 12px; font-size: 9pt;">
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>{{patient_name}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>{{age_gender}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="font-family: monospace; color: #1d4ed8;">{{patient_id}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>{{doctor}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>{{date}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">{{barcode}}</b></div>
+    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 14px; font-size: 8.5pt;">
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>{{patient_name}}</b></div>
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>{{age_gender}}</b></div>
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="font-family: monospace; color: #1d4ed8;">{{patient_id}}</b></div>
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>{{doctor}}</b></div>
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>{{date}}</b></div>
+      <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">{{barcode}}</b></div>
     </div>
 
-    <!-- TEST RESULTS TABLE -->
+    <!-- UNIFIED RESULTS TABLE (Single Header with Profile Sub-Sections) -->
     {{results_table}}
 
     <!-- REMARKS -->
@@ -83,7 +78,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
 </div>`;
 
   const DEFAULT_RECEIPT_TEMPLATE = `
-<div style="border: 1.5px solid #000; border-radius: 8px; padding: 10px 12px; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff;">
+<div style="border: 1.5px solid #000; border-radius: 8px; padding: 10px 12px; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
   <div>
     <!-- HEADER -->
     <div style="border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
@@ -151,6 +146,13 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
   const [receiptTemplate, setReceiptTemplate] = useState(DEFAULT_RECEIPT_TEMPLATE);
 
   useEffect(() => {
+    // 1. Check local storage first for immediate load
+    const localReport = localStorage.getItem("apex_report_template");
+    const localReceipt = localStorage.getItem("apex_receipt_template");
+    if (localReport) setReportTemplate(localReport);
+    if (localReceipt) setReceiptTemplate(localReceipt);
+
+    // 2. Hydrate from Supabase settings
     if (labSettings) {
       setFormData({
         labName: labSettings.lab_name || "APEX DIAGNOSTIC LABORATORIES",
@@ -164,10 +166,10 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
         reportFooter: labSettings.report_footer || "This is a clinically verified electronic report."
       });
 
-      if (labSettings.report_design?.templateHtml) {
+      if (labSettings.report_design?.templateHtml && !localReport) {
         setReportTemplate(labSettings.report_design.templateHtml);
       }
-      if (labSettings.receipt_design?.templateHtml) {
+      if (labSettings.receipt_design?.templateHtml && !localReceipt) {
         setReceiptTemplate(labSettings.receipt_design.templateHtml);
       }
     }
@@ -176,10 +178,9 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
   const currentTemplate = activeTab === "report" ? reportTemplate : receiptTemplate;
   const setCurrentTemplate = activeTab === "report" ? setReportTemplate : setReceiptTemplate;
 
-  // Insert token placeholder at cursor
   const insertToken = (tokenKey) => {
     const placeholder = `{{${tokenKey}}}`;
-    setCurrentTemplate(prev => prev + " " + placeholder);
+    setCurrentTemplate(prev => prev + "\n" + placeholder);
   };
 
   const handleLogoUpload = (e) => {
@@ -191,71 +192,104 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
   };
 
   const onSave = () => {
-    // 1. Immediately cache in localStorage for 0ms print synchronization
+    // 1. Instantly write to direct local storage keys
     localStorage.setItem("apex_report_template", reportTemplate);
     localStorage.setItem("apex_receipt_template", receiptTemplate);
-    localStorage.setItem("apex_lab_settings", JSON.stringify({
-      ...formData,
-      report_design: { templateHtml: reportTemplate },
-      receipt_design: { templateHtml: receiptTemplate }
-    }));
 
-    // 2. Persist to Supabase Database
-    handleSaveSettings({
+    const payload = {
       ...formData,
       reportDesign: { templateHtml: reportTemplate },
-      receiptDesign: { templateHtml: receiptTemplate }
-    });
+      receiptDesign: { templateHtml: receiptTemplate },
+      report_design: { templateHtml: reportTemplate },
+      receipt_design: { templateHtml: receiptTemplate }
+    };
+
+    localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
+
+    // 2. Persist to Supabase Database
+    handleSaveSettings(payload);
   };
 
-  // Compile Live Preview
+  // Compile Live Preview with Sample Multi-Profile Biochemistry Data (LFT + KFT + Lipid)
   const getCompiledPreview = () => {
+    const sampleBiochemTests = [
+      {
+        name: "Liver Function Tests (LFT)",
+        code: "LFT",
+        is_profile: true,
+        test_parameters: [
+          { id: "b1", name: "Bilirubin (Total)", unit: "mg/dL", min_range: 0.2, max_range: 1.2, param_type: "numeric" },
+          { id: "b2", name: "SGPT / ALT", unit: "U/L", min_range: 0, max_range: 45, param_type: "numeric" },
+          { id: "b3", name: "SGOT / AST", unit: "U/L", min_range: 0, max_range: 40, param_type: "numeric" },
+          { id: "b4", name: "Alkaline Phosphatase (ALP)", unit: "U/L", min_range: 30, max_range: 120, param_type: "numeric" }
+        ]
+      },
+      {
+        name: "Renal / Kidney Function Tests (KFT)",
+        code: "KFT",
+        is_profile: true,
+        test_parameters: [
+          { id: "k1", name: "Serum Creatinine", unit: "mg/dL", min_range: 0.6, max_range: 1.3, param_type: "numeric" },
+          { id: "k2", name: "Blood Urea Nitrogen (BUN)", unit: "mg/dL", min_range: 7, max_range: 20, param_type: "numeric" },
+          { id: "k3", name: "Serum Uric Acid", unit: "mg/dL", min_range: 3.5, max_range: 7.2, param_type: "numeric" }
+        ]
+      },
+      {
+        name: "Lipid Profile Panel",
+        code: "LIPID",
+        is_profile: true,
+        test_parameters: [
+          { id: "l1", name: "Total Cholesterol", unit: "mg/dL", min_range: 0, max_range: 200, param_type: "numeric" },
+          { id: "l2", name: "Triglycerides", unit: "mg/dL", min_range: 0, max_range: 150, param_type: "numeric" },
+          { id: "l3", name: "HDL Cholesterol", unit: "mg/dL", min_range: 40, max_range: 60, param_type: "numeric" },
+          { id: "l4", name: "LDL Cholesterol", unit: "mg/dL", min_range: 0, max_range: 100, param_type: "numeric" }
+        ]
+      }
+    ];
+
+    const sampleResults = {
+      b1: { value: "0.9" }, b2: { value: "68" }, b3: { value: "45" }, b4: { value: "88" },
+      k1: { value: "1.1" }, k2: { value: "14" }, k3: { value: "5.8" },
+      l1: { value: "220" }, l2: { value: "185" }, l3: { value: "44" }, l4: { value: "145" }
+    };
+
+    const multiProfileUnifiedTable = buildUnifiedResultsTable(sampleBiochemTests, sampleResults);
+
     const sampleTokens = {
       hospital_name: formData.labName.toUpperCase(),
       hospital_tagline: formData.tagline,
       hospital_address: formData.address,
       hospital_phone: formData.phone,
       hospital_logo: formData.logoData ? `<img src="${formData.logoData}" style="height: 40px; max-width: 100px; object-fit: contain;" />` : `<div style="padding: 4px 8px; background: #000; color: #fff; border-radius: 6px; font-weight: bold;">🏥 LOGO</div>`,
-      department_name: "BIOCHEMISTRY & METABOLISM",
+      department_name: "CLINICAL BIOCHEMISTRY",
       patient_name: "Rahim Ahmed",
       patient_id: "PT-10024",
-      age_gender: "35Y / Male",
+      age_gender: "48Y / Male",
       patient_phone: "01712345678",
-      doctor: "Dr. K. S. Hossain, MD",
-      date: "2026-09-06",
+      doctor: "Prof. Dr. M. Rahman, FCPS",
+      date: new Date().toISOString().slice(0, 10),
       receipt_no: "RCP-2026-1001",
       barcode: "LAB-20260906-0012",
-      qr_code: `<div style="border: 1px solid #000; padding: 4px; text-align: center; font-family: monospace; font-size: 8px;">[QR CODE]</div>`,
+      qr_code: `<div style="border: 1px solid #000; padding: 4px; text-align: center; font-family: monospace; font-size: 8px;">[VERIFY QR]</div>`,
       patient_barcode: `<div style="font-family: monospace; font-size: 14pt; letter-spacing: 2px; font-weight: bold;">||| | ||||| | ||</div>`,
-      results_table: `
-        <div style="margin-bottom: 8px;">
-          
-          <table style="width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 4px;">
-            <thead><tr style="border-bottom: 1px solid #000; font-weight: bold;"><td>Parameter</td><th>Result</th><th>Unit</th><th>Reference</th></tr></thead>
-            <tbody>
-              <tr><td style="padding: 3px 0;">Hemoglobin (Hb)</td><th style="font-weight: bold; font-family: monospace;">14.2</th><th>g/dL</th><th >12.0 - 16.0</th></tr>
-              <tr><td style="padding: 3px 0;">Total WBC Count</td><th style="font-weight: bold; font-family: monospace;">8500</th><th>/µL</th><th>4000 - 11000</th></tr>
-              <tr><td style="padding: 3px 0;">Platelet Count</td><th style="font-weight: bold; font-family: monospace;">240000</th><th>/µL</th><th>150000 - 450000</th></tr>
-            </tbody>
-          </table>
-        </div>
-      `,
+      results_table: multiProfileUnifiedTable,
       items_table: `
-        <tr><td style="padding: 3px 0;">1. Complete Blood Count (CBC)</td><td>Blood</td><td style="text-align: right; font-weight: bold;">৳ 800</td></tr>
-        <tr><td style="padding: 3px 0;">2. SGPT / ALT Liver Test</td><td>Serum</td><td style="text-align: right; font-weight: bold;">৳ 300</td></tr>
+        <tr><td style="padding: 3px 0;">1. Liver Function Tests (LFT)</td><td>Serum</td><td style="text-align: right; font-weight: bold;">৳ 1,200</td></tr>
+        <tr><td style="padding: 3px 0;">2. Kidney Function Tests (KFT)</td><td>Serum</td><td style="text-align: right; font-weight: bold;">৳ 900</td></tr>
+        <tr><td style="padding: 3px 0;">3. Lipid Profile Panel</td><td>Serum</td><td style="text-align: right; font-weight: bold;">৳ 1,000</td></tr>
       `,
-      subtotal: "1100",
+      subtotal: "3100",
       discount: "10",
-      discount_amount: "110",
-      net_payable: "990",
-      paid_amount: "990",
+      discount_amount: "310",
+      net_payable: "2790",
+      paid_amount: "2790",
       due_amount: "0",
-      remarks: `<div style="background: #fafaf9; border: 1px solid #000; padding: 4px 8px; border-radius: 4px; font-size: 8pt;"><b>Remarks:</b> Normal hematological findings.</div>`,
+      remarks: `<div style="background: #fafaf9; border: 1px solid #000; padding: 6px 10px; border-radius: 4px; font-size: 8pt; margin-top: 8px;"><b>Pathologist Interpretation:</b> Mild transaminase elevation noted with hyperlipidemia. Clinical correlation recommended.</div>`,
       tech_name: "Md. Al-Amin, BSc",
-      tech_designation: "Medical Laboratory Technologist",
+      tech_designation: "Senior Medical Laboratory Technologist",
       tech_signature: `<div style="font-family: cursive; font-size: 16pt;">Md. Al-Amin</div>`,
       doctor_name: "Dr. S. Rahman, MD",
-      doctor_designation: "Consultant Pathologist & Lab Incharge",
+      doctor_designation: "Consultant Biochemist & Head of QC",
       doctor_signature: `<div style="font-family: cursive; font-size: 16pt;">Dr. S. Rahman</div>`,
       report_footer: formData.reportFooter,
       receipt_footer: formData.receiptFooter
@@ -280,9 +314,9 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     { label: "Date", token: "date" },
     { label: "Barcode", token: "barcode" },
     { label: "Verification QR", token: "qr_code" },
-    { label: "Test Results Table", token: "results_table" },
-    { label: "Doctor Remarks", token: "remarks" },
-    { label: "Technologist Sign", token: "tech_signature" },
+    { label: "Results Table (Single Header)", token: "results_table" },
+    { label: "Pathologist Remarks", token: "remarks" },
+    { label: "Technologist Signature", token: "tech_signature" },
     { label: "Doctor Signature", token: "doctor_signature" }
   ];
 
@@ -302,16 +336,15 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
 
   return (
     <div className="space-y-4 w-full font-sans text-slate-800">
-      
-      {/* TOP ACTION BAR */}
+      {/* Top Action Bar */}
       <div className="bg-slate-950 text-white px-5 py-3 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 sticky top-16 z-40 border border-slate-800">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-600 rounded-xl">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div>
-            <h2 className="text-sm font-black tracking-tight">Enterprise Template Studio (Word & HTML Engine)</h2>
-            <p className="text-[10px] text-slate-400">Design in Word/Google Docs or use dynamic live tokens below</p>
+            <h2 className="text-sm font-black tracking-tight">Enterprise Template & Hospital Branding Authority</h2>
+            <p className="text-[10px] text-slate-400">Full HTML/CSS authority. Single unified table header for multiple profiles.</p>
           </div>
         </div>
 
@@ -324,7 +357,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
                 activeTab === "report" ? "bg-blue-600 text-white" : "text-slate-400"
               }`}
             >
-              <FileText className="w-3.5 h-3.5" /> A4 Report Template
+              <FileText className="w-3.5 h-3.5" /> A4 Clinical Report
             </button>
             <button
               onClick={() => setActiveTab("receipt")}
@@ -332,7 +365,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
                 activeTab === "receipt" ? "bg-blue-600 text-white" : "text-slate-400"
               }`}
             >
-              <Receipt className="w-3.5 h-3.5" /> A5 Receipt Template
+              <Receipt className="w-3.5 h-3.5" /> A5 Money Receipt
             </button>
           </div>
 
@@ -352,22 +385,19 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             disabled={isLoading}
             className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg transition"
           >
-            <Save className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Save Template"}
+            <Save className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Save Changes to Database & Print"}
           </button>
         </div>
       </div>
 
-      {/* TWO-COLUMN STUDIO: LEFT TOKEN INSERTER & CODE / RIGHT LIVE WYSIWYG CANVAS */}
+      {/* Two-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full">
-        
-        {/* LEFT 5 COLS: DYNAMIC TOKEN INSERTERS & CODE EDITOR */}
+        {/* Left Column: Token Inserter & Code Editor */}
         <div className="lg:col-span-5 space-y-4">
-          
-          {/* 1-Click Token Inserters */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5 text-xs">
             <div className="flex justify-between items-center border-b pb-2">
               <span className="font-bold text-slate-900 uppercase text-[11px]">1-Click Insert Placeholders (Tokens)</span>
-              <span className="text-[10px] text-blue-600">Click to insert</span>
+              <span className="text-[10px] text-blue-600">Appends to bottom</span>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
@@ -384,31 +414,38 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             </div>
           </div>
 
-          {/* HTML / Word Template Code Area */}
+          {/* HTML Code Editor */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs">
             <div className="flex justify-between items-center">
-              <span className="font-bold text-slate-900 uppercase text-[11px]">Template HTML & CSS</span>
-              <span className="text-[10px] text-slate-400">Design in Word/HTML & paste here</span>
+              <span className="font-bold text-slate-900 uppercase text-[11px]">Template Source HTML & CSS</span>
+              <span className="text-[10px] text-slate-400">Full editing authority</span>
             </div>
 
             <textarea
-              rows={16}
+              rows={18}
               value={currentTemplate}
               onChange={(e) => setCurrentTemplate(e.target.value)}
-              className="w-full p-3 font-mono text-[11px] border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-950 text-emerald-400"
+              className="w-full p-3 font-mono text-[11px] border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-950 text-emerald-400 leading-relaxed"
               spellCheck={false}
             />
           </div>
 
-          {/* Logo & Info */}
+          {/* Institution Header Controls */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-xs space-y-2">
-            <label className="font-bold text-slate-600 uppercase block">Institution Details</label>
+            <label className="font-bold text-slate-700 uppercase block">Institution Identity</label>
             <input
               type="text"
               value={formData.labName}
               onChange={(e) => setFormData({ ...formData, labName: e.target.value })}
               className="w-full p-2 border rounded-lg font-bold"
-              placeholder="Hospital Name"
+              placeholder="Hospital / Laboratory Name"
+            />
+            <input
+              type="text"
+              value={formData.tagline}
+              onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
+              className="w-full p-2 border rounded-lg"
+              placeholder="Tagline (e.g. ISO 15189 Certified)"
             />
             <div className="flex gap-2">
               <input
@@ -416,34 +453,29 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 className="w-1/2 p-2 border rounded-lg"
-                placeholder="Phone"
+                placeholder="Phone Number"
               />
-              <label className="w-1/2 border-2 border-dashed rounded-lg p-2 text-center cursor-pointer text-blue-600 font-bold hover:bg-blue-50">
-                Upload Logo
+              <label className="w-1/2 border-2 border-dashed rounded-lg p-2 text-center cursor-pointer text-blue-600 font-bold hover:bg-blue-50 flex items-center justify-center gap-1">
+                <Upload className="w-3.5 h-3.5" /> Upload Logo
                 <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
               </label>
             </div>
           </div>
-
         </div>
 
-        {/* RIGHT 7 COLS: 100% ACCURATE COMPILED LIVE CANVAS */}
+        {/* Right Column: Live WYSIWYG Preview */}
         <div className="lg:col-span-7 flex flex-col items-center justify-start">
           <div className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-widest flex items-center gap-1">
-            <span>{activeTab === "report" ? "📄 A4 Medical Report (210mm × 297mm)" : "💵 A5 Money Receipt (148mm × 210mm)"}</span>
+            <span>{activeTab === "report" ? "📄 A4 Clinical Report (Single Header Multi-Profile Output)" : "💵 A5 Money Receipt"}</span>
           </div>
 
-          {/* THE COMPILED LIVE PREVIEW CANVAS */}
           <div 
             className="bg-white shadow-2xl p-6 rounded-xl border border-slate-300 w-full overflow-x-auto"
-            style={{ maxWidth: activeTab === "report" ? "580px" : "480px" }}
+            style={{ maxWidth: activeTab === "report" ? "620px" : "480px" }}
           >
-            <div 
-              dangerouslySetInnerHTML={{ __html: getCompiledPreview() }} 
-            />
+            <div dangerouslySetInnerHTML={{ __html: getCompiledPreview() }} />
           </div>
         </div>
-
       </div>
     </div>
   );
