@@ -168,12 +168,7 @@ export default function PatientLivePortal({ order, labSettings, onClose }) {
 
       {/* FOOTER ACTIONS */}
       <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
-        <button
-          onClick={onClose}
-          className="text-xs text-slate-500 hover:text-slate-800 font-semibold"
-        >
-          ← Staff Login
-        </button>
+        
 
         {isReady ? (
           <button
