@@ -1,5 +1,5 @@
 import React from "react";
-import { Printer, ShieldCheck, DollarSign, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Printer, ShieldCheck, DollarSign, AlertCircle, CheckCircle2, MessageSquare } from "lucide-react";
 import { compileTemplate, generateQrSvgLocal, buildUnifiedResultsTable, getActiveTemplate } from "../utils/printHelpers";
 
 export default function ReportsPrint({ 
@@ -9,7 +9,8 @@ export default function ReportsPrint({
   staffList = [],
   labSettings = {},
   onOpenVerificationModal,
-  handleSettleDue
+  handleSettleDue,
+  handleRemarksChange
 }) {
   if (!activeOrder) {
     return <div className="p-8 text-center text-slate-400 font-sans">No active order selected for report printing.</div>;
@@ -34,10 +35,23 @@ export default function ReportsPrint({
     return `<div style="font-family: 'Brush Script MT', cursive; font-size: 18pt; color: #000; height: 34px; line-height: 34px;">${sigData || fallbackName}</div>`;
   };
 
-  const qrUrl = `${window.location.origin}/?verify=${encodeURIComponent(activeOrder.orderId)}&bc=${encodeURIComponent(activeOrder.barcode)}`;
+  const orderId = activeOrder.orderId || activeOrder.id || "";
+  const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
   const scannableQrSvg = generateQrSvgLocal(qrUrl, 56);
 
-  // Compile on-screen live preview using the active template and unified single header
+  // GUARANTEE REMARKS ON REPORT
+  const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
+    ? activeOrder.verifierRemarks
+    : "Clinically correlated and verified with internal quality control standards.";
+
+  const remarksHtml = `
+    <div style="margin-top: 20px; padding: 3px 10px;  font-size: 7pt; color: #1e293b;">
+      <b style="color: #0f172a; text-transform: uppercase; font-size: 6pt;">Pathologist Remarks / Interpretation:</b> 
+      <span style="font-style: italic; margin-left: 4px; ">${remarksText}</span>
+    </div>
+  `;
+
+  // Compile on-screen live preview
   const getCompiledReportPreview = (group) => {
     const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {});
 
@@ -56,7 +70,7 @@ export default function ReportsPrint({
       barcode: activeOrder.barcode || "",
       qr_code: scannableQrSvg,
       results_table: testsTableHtml,
-      remarks: activeOrder.verifierRemarks ? `<div style="background: #fafaf9; border: 1px solid #000; border-radius: 6px; padding: 6px 10px; margin-top: 8px; font-size: 8pt;"><b>Pathologist Remarks:</b> <i>${activeOrder.verifierRemarks}</i></div>` : "",
+      remarks: remarksHtml,
       tech_name: techUser.full_name,
       tech_designation: techUser.designation,
       tech_signature: renderSignatureHtml(techUser.signature_data, techUser.full_name),
@@ -75,7 +89,7 @@ export default function ReportsPrint({
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 font-sans text-slate-900">
       
-      {/* DUE MONEY WARNING BANNER ON REPORT DELIVERY */}
+      {/* Due Warning Banner */}
       {hasOutstandingDue && (
         <div className="bg-rose-50 border-2 border-rose-400 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm animate-pulse">
           <div className="flex items-center gap-3">
@@ -144,10 +158,28 @@ export default function ReportsPrint({
         </div>
       </div>
 
+      {/* Quick Remarks Editor on Reports Screen */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs">
+        <label className="font-bold text-slate-800 uppercase flex items-center gap-1.5">
+          <MessageSquare className="w-4 h-4 text-blue-600" />
+          Remarks Printed on This Report:
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            disabled={activeOrder.isLocked}
+            value={activeOrder.verifierRemarks || ""}
+            onChange={(e) => handleRemarksChange && handleRemarksChange(e.target.value)}
+            placeholder="Type custom interpretation to appear on printed report..."
+            className="flex-1 p-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-slate-50 disabled:bg-slate-100"
+          />
+        </div>
+      </div>
+
       {/* Department Cards */}
       <div className="space-y-4">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-          Departmental Report Sheets (One Master Header per Department)
+          Departmental Report Sheets
         </h3>
 
         {(departmentGroupedReports || []).map((group) => (

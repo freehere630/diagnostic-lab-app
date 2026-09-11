@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { 
-  FileText, Receipt, Save, Sparkles, RotateCcw, Building2, Upload
+  FileText, Receipt, Save, Sparkles, RotateCcw, Building2, Upload 
 } from "lucide-react";
 import { buildUnifiedResultsTable } from "../utils/printHelpers";
 
@@ -15,7 +15,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     email: "reports@apexlab.com",
     website: "www.apexlab.com",
     logoData: "",
-    receiptFooter: "Please bring this original receipt during report collection.",
+    receiptFooter: "Please scan the QR code to check real-time report status & download results.",
     reportFooter: "This is a clinically verified electronic laboratory report."
   });
 
@@ -48,7 +48,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
       <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">{{barcode}}</b></div>
     </div>
 
-    <!-- UNIFIED RESULTS TABLE (Single Header with Profile Sub-Sections) -->
+    <!-- UNIFIED RESULTS TABLE -->
     {{results_table}}
 
     <!-- REMARKS -->
@@ -126,17 +126,27 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     </div>
   </div>
 
-  <!-- FOOTER -->
+  <!-- FOOTER: COLUMN 1 = BARCODE + PID | COLUMN 2 = QR | COLUMN 3 = CASHIER -->
   <div>
-    <div style="border-top: 1px dashed #94a3b8; padding: 6px 0; display: flex; justify-content: space-between; align-items: flex-end;">
-      <div style="text-align: center; width: 160px;">
+    <div style="border-top: 1px dashed #94a3b8; padding: 6px 0; display: flex; justify-content: space-between; align-items: center;">
+      
+      <!-- COLUMN 1: Barcode with Patient ID directly underneath -->
+      <div style="text-align: center; width: 140px;">
         {{patient_barcode}}
-        <p style="margin: 2px 0 0 0; font-family: monospace; font-size: 7.5pt; font-weight: 900;">{{patient_id}}</p>
+        <p style="margin: 2px 0 0 0; font-family: monospace; font-size: 8pt; font-weight: 900; color: #000;">{{patient_id}}</p>
       </div>
-      <div style="text-align: center; width: 130px;">
+
+      <!-- COLUMN 2: Real-Time Report Tracker QR -->
+      <div style="text-align: center; width: 95px;">
+        {{report_tracking_qr}}
+      </div>
+
+      <!-- COLUMN 3: Cashier Signature -->
+      <div style="text-align: center; width: 120px;">
         <div style="border-bottom: 1px solid #000; height: 16px; margin-bottom: 2px;"></div>
         <span style="font-size: 7pt; font-weight: bold;">Authorized Cashier</span>
       </div>
+
     </div>
     <p style="text-align: center; margin: 3px 0 0 0; font-size: 6.5pt; color: #475569;">{{receipt_footer}}</p>
   </div>
@@ -146,13 +156,11 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
   const [receiptTemplate, setReceiptTemplate] = useState(DEFAULT_RECEIPT_TEMPLATE);
 
   useEffect(() => {
-    // 1. Check local storage first for immediate load
     const localReport = localStorage.getItem("apex_report_template");
     const localReceipt = localStorage.getItem("apex_receipt_template");
     if (localReport) setReportTemplate(localReport);
     if (localReceipt) setReceiptTemplate(localReceipt);
 
-    // 2. Hydrate from Supabase settings
     if (labSettings) {
       setFormData({
         labName: labSettings.lab_name || "APEX DIAGNOSTIC LABORATORIES",
@@ -162,8 +170,8 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
         email: labSettings.email || "reports@apexlab.com",
         website: labSettings.website || "www.apexlab.com",
         logoData: labSettings.logo_data || "",
-        receiptFooter: labSettings.receipt_footer || "Please bring this receipt for collection.",
-        reportFooter: labSettings.report_footer || "This is a clinically verified electronic report."
+        receiptFooter: labSettings.receipt_footer || "Please scan the QR code to check real-time report status & download results.",
+        reportFooter: labSettings.report_footer || "This is a clinically verified electronic laboratory report."
       });
 
       if (labSettings.report_design?.templateHtml && !localReport) {
@@ -180,19 +188,18 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
 
   const insertToken = (tokenKey) => {
     const placeholder = `{{${tokenKey}}}`;
-    setCurrentTemplate(prev => prev + "\n" + placeholder);
+    setCurrentTemplate((prev) => prev + "\n" + placeholder);
   };
 
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => setFormData(prev => ({ ...prev, logoData: reader.result }));
+    reader.onloadend = () => setFormData((prev) => ({ ...prev, logoData: reader.result }));
     reader.readAsDataURL(file);
   };
 
   const onSave = () => {
-    // 1. Instantly write to direct local storage keys
     localStorage.setItem("apex_report_template", reportTemplate);
     localStorage.setItem("apex_receipt_template", receiptTemplate);
 
@@ -205,12 +212,10 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     };
 
     localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
-
-    // 2. Persist to Supabase Database
     handleSaveSettings(payload);
   };
 
-  // Compile Live Preview with Sample Multi-Profile Biochemistry Data (LFT + KFT + Lipid)
+  // Compile Live Preview
   const getCompiledPreview = () => {
     const sampleBiochemTests = [
       {
@@ -260,7 +265,9 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
       hospital_tagline: formData.tagline,
       hospital_address: formData.address,
       hospital_phone: formData.phone,
-      hospital_logo: formData.logoData ? `<img src="${formData.logoData}" style="height: 40px; max-width: 100px; object-fit: contain;" />` : `<div style="padding: 4px 8px; background: #000; color: #fff; border-radius: 6px; font-weight: bold;">🏥 LOGO</div>`,
+      hospital_logo: formData.logoData 
+        ? `<img src="${formData.logoData}" style="height: 40px; max-width: 100px; object-fit: contain;" />` 
+        : `<div style="padding: 4px 8px; background: #000; color: #fff; border-radius: 6px; font-weight: bold;">🏥 LOGO</div>`,
       department_name: "CLINICAL BIOCHEMISTRY",
       patient_name: "Rahim Ahmed",
       patient_id: "PT-10024",
@@ -272,6 +279,12 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
       barcode: "LAB-20260906-0012",
       qr_code: `<div style="border: 1px solid #000; padding: 4px; text-align: center; font-family: monospace; font-size: 8px;">[VERIFY QR]</div>`,
       patient_barcode: `<div style="font-family: monospace; font-size: 14pt; letter-spacing: 2px; font-weight: bold;">||| | ||||| | ||</div>`,
+      report_tracking_qr: `
+        <div style="text-align: center;">
+          <div style="border: 1px solid #000; padding: 2px; font-family: monospace; font-size: 8px; font-weight: bold; width: 60px; margin: 0 auto;">[LIVE QR]</div>
+          <span style="font-size: 5.5pt; font-family: sans-serif; font-weight: bold; display: block; margin-top: 1px;">Scan for Live Report</span>
+        </div>
+      `,
       results_table: multiProfileUnifiedTable,
       items_table: `
         <tr><td style="padding: 3px 0;">1. Liver Function Tests (LFT)</td><td>Serum</td><td style="text-align: right; font-weight: bold;">৳ 1,200</td></tr>
@@ -331,11 +344,13 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     { label: "Net Payable", token: "net_payable" },
     { label: "Paid Amount", token: "paid_amount" },
     { label: "Due Balance", token: "due_amount" },
-    { label: "Patient ID Barcode", token: "patient_barcode" }
+    { label: "Patient ID Barcode", token: "patient_barcode" },
+    { label: "Live Report Tracking QR", token: "report_tracking_qr" }
   ];
 
   return (
     <div className="space-y-4 w-full font-sans text-slate-800">
+      
       {/* Top Action Bar */}
       <div className="bg-slate-950 text-white px-5 py-3 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 sticky top-16 z-40 border border-slate-800">
         <div className="flex items-center gap-3">
@@ -344,7 +359,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
           </div>
           <div>
             <h2 className="text-sm font-black tracking-tight">Enterprise Template & Hospital Branding Authority</h2>
-            <p className="text-[10px] text-slate-400">Full HTML/CSS authority. Single unified table header for multiple profiles.</p>
+            <p className="text-[10px] text-slate-400">Full HTML/CSS authority. PID positioned under barcode, QR code centered in footer.</p>
           </div>
         </div>
 
@@ -371,13 +386,18 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
 
           <button
             onClick={() => {
-              if (activeTab === "report") setReportTemplate(DEFAULT_REPORT_TEMPLATE);
-              else setReceiptTemplate(DEFAULT_RECEIPT_TEMPLATE);
+              if (activeTab === "report") {
+                localStorage.removeItem("apex_report_template");
+                setReportTemplate(DEFAULT_REPORT_TEMPLATE);
+              } else {
+                localStorage.removeItem("apex_receipt_template");
+                setReceiptTemplate(DEFAULT_RECEIPT_TEMPLATE);
+              }
             }}
             className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs"
-            title="Reset to Default"
+            title="Reset to Clean Default Template"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-4 h-4" /> Reset Layout
           </button>
 
           <button
@@ -385,13 +405,14 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             disabled={isLoading}
             className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg transition"
           >
-            <Save className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Save Changes to Database & Print"}
+            <Save className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Save Template to Database"}
           </button>
         </div>
       </div>
 
-      {/* Two-Column Layout */}
+      {/* Two-Column Studio Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full">
+        
         {/* Left Column: Token Inserter & Code Editor */}
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5 text-xs">
@@ -414,7 +435,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             </div>
           </div>
 
-          {/* HTML Code Editor */}
+          {/* HTML Source Code Editor */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs">
             <div className="flex justify-between items-center">
               <span className="font-bold text-slate-900 uppercase text-[11px]">Template Source HTML & CSS</span>
@@ -430,7 +451,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             />
           </div>
 
-          {/* Institution Header Controls */}
+          {/* Institution Identity Controls */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-xs space-y-2">
             <label className="font-bold text-slate-700 uppercase block">Institution Identity</label>
             <input
@@ -463,10 +484,10 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
           </div>
         </div>
 
-        {/* Right Column: Live WYSIWYG Preview */}
+        {/* Right Column: Live WYSIWYG Canvas Preview */}
         <div className="lg:col-span-7 flex flex-col items-center justify-start">
           <div className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-widest flex items-center gap-1">
-            <span>{activeTab === "report" ? "📄 A4 Clinical Report (Single Header Multi-Profile Output)" : "💵 A5 Money Receipt"}</span>
+            <span>{activeTab === "report" ? "📄 A4 Clinical Report Preview" : "💵 A5 Money Receipt Preview"}</span>
           </div>
 
           <div 
@@ -476,6 +497,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
             <div dangerouslySetInnerHTML={{ __html: getCompiledPreview() }} />
           </div>
         </div>
+
       </div>
     </div>
   );

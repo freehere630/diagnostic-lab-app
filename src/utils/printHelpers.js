@@ -61,7 +61,6 @@ export function compileTemplate(templateHtml, tokens) {
   return compiled;
 }
 
-// Retrieves user's latest saved template with zero-latency synchronization
 export function getActiveTemplate(settings, type = "report") {
   const directKey = type === "report" ? "apex_report_template" : "apex_receipt_template";
   const directVal = localStorage.getItem(directKey);
@@ -86,16 +85,33 @@ export function getActiveTemplate(settings, type = "report") {
   return "";
 }
 
-// Builds the Single-Header Consolidated Multi-Profile Table
+// Single Master Header for Reports
 export function buildUnifiedResultsTable(tests = [], results = {}) {
   let tableRows = "";
 
-  tests.forEach((test) => {
-    const isProfile = test.is_profile || (test.test_parameters && test.test_parameters.length > 1);
-    const params = test.test_parameters || test.parameters || [];
+  (tests || []).forEach((test) => {
+    const rawParams = test.test_parameters || test.parameters || [];
+    const params = rawParams.length > 0 ? rawParams : [{
+      id: test.id,
+      test_id: test.id,
+      name: test.name,
+      param_type: test.param_type || "numeric",
+      unit: test.unit || "",
+      min_range: test.min_range !== undefined ? test.min_range : null,
+      max_range: test.max_range !== undefined ? test.max_range : null
+    }];
 
-    // Profile Sub-Section Divider Banner (Only when multiple tests/profiles are in the department)
-    if (isProfile || tests.length > 1) {
+    const isProfile = Boolean(
+      test.is_profile === true || 
+      test.is_profile === "true" || 
+      test.is_profile === 1 || 
+      test.isProfile === true || 
+      test.isProfile === "true" ||
+      params.length > 1
+    );
+
+    // Profile Section Header
+    if (isProfile) {
       tableRows += `
         <tr style="background-color: #f1f5f9; border-top: 1.5px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
           <td colspan="4" style="padding: 6px 10px; font-weight: 900; font-size: 8.5pt; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">
@@ -105,18 +121,31 @@ export function buildUnifiedResultsTable(tests = [], results = {}) {
       `;
     }
 
-    // Parameters for this test/profile
     params.forEach((p) => {
-      const val = results?.[p.id]?.value !== undefined && results?.[p.id]?.value !== "" ? results[p.id].value : "—";
-      let refRange = "Normal";
+      let val = "—";
+      if (results) {
+        if (results[p.id]?.value !== undefined && results[p.id]?.value !== "") {
+          val = results[p.id].value;
+        } else if (results[test.id]?.value !== undefined && results[test.id]?.value !== "") {
+          val = results[test.id].value;
+        } else if (typeof results[p.id] === "string" || typeof results[p.id] === "number") {
+          val = results[p.id];
+        } else if (typeof results[test.id] === "string" || typeof results[test.id] === "number") {
+          val = results[test.id];
+        }
+      }
 
+      const displayName = (!isProfile && (!p.name || p.name.trim() === "" || p.name.toLowerCase() === "result"))
+        ? test.name
+        : (p.name || test.name);
+
+      let refRange = "Normal";
       if (p.param_type === "numeric" && p.min_range !== null && p.max_range !== null && p.min_range !== undefined) {
         refRange = `${p.min_range} – ${p.max_range}`;
       } else if (p.param_type === "qualitative") {
         refRange = "Negative / Non-Reactive";
       }
 
-      // Detect abnormal values for bolding
       let valStyle = "font-family: monospace; font-weight: 700; font-size: 9pt; color: #000;";
       if (p.param_type === "numeric" && val !== "—") {
         const num = parseFloat(val);
@@ -124,26 +153,25 @@ export function buildUnifiedResultsTable(tests = [], results = {}) {
           if (p.min_range !== null && num < p.min_range) valStyle += " color: #b45309; font-weight: 900;";
           if (p.max_range !== null && num > p.max_range) valStyle += " color: #b91c1c; font-weight: 900;";
         }
-      } else if (p.param_type === "qualitative" && (val.toLowerCase() === "positive" || val.toLowerCase() === "reactive")) {
+      } else if (p.param_type === "qualitative" && (String(val).toLowerCase() === "positive" || String(val).toLowerCase() === "reactive")) {
         valStyle += " color: #b91c1c; font-weight: 900;";
       }
 
       tableRows += `
         <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 5px 10px; font-size: 8.5pt; color: #1e293b; font-weight: 500;">${p.name}</td>
+          <td style="padding: 5px 10px; font-size: 8.5pt; color: #1e293b; font-weight: 500;">${displayName}</td>
           <td style="padding: 5px 10px; ${valStyle}">${val}</td>
-          <td style="padding: 5px 10px; font-size: 8pt; color: #475569; font-family: monospace;">${p.unit || "—"}</td>
+          <td style="padding: 5px 10px; font-size: 8pt; color: #475569; font-family: monospace;">${p.unit || test.unit || "—"}</td>
           <td style="padding: 5px 10px; font-size: 8pt; color: #475569; font-family: monospace;">${refRange}</td>
         </tr>
       `;
     });
   });
 
-  // Single Clean Master Header
   return `
     <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
       <thead>
-        <tr style="background-color: #0f172a; color: #ffffff; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.5px;">
+        <tr style="border: 1px solid #e2e8f0; background-color: #F8FAFC; color: black; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.5px;">
           <th style="padding: 6px 10px; text-align: left; width: 42%;">Test Parameter</th>
           <th style="padding: 6px 10px; text-align: left; width: 22%;">Observed Result</th>
           <th style="padding: 6px 10px; text-align: left; width: 16%;">Unit</th>
@@ -158,7 +186,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}) {
 }
 
 // =========================================================================
-// 1. A4 CLINICAL REPORT PRINT DRIVER (Single Header Multi-Profile Engine)
+// 1. A4 CLINICAL REPORT PRINT DRIVER (REMARKS GUARANTEED ON EVERY REPORT)
 // =========================================================================
 export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, departmentGroupedReports, staffList = [], labSettings = {}, onPrintedCallback) {
   if (!activeOrder) return;
@@ -185,7 +213,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
   let templateToUse = getActiveTemplate(labSettings, "report");
   if (!templateToUse) {
     templateToUse = `
-      <div style="border: 2px solid #000; border-radius: 8px; padding: 14px 16px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="border: 2px solid #000; border-radius: 8px; padding: 14px 16px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
         <div>
           <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 12px;">
@@ -198,7 +226,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
             </div>
             <div style="text-align: right; width: 85px;">
               {{qr_code}}
-              <span style="font-size: 6pt; font-family: monospace; display: block; text-align: center;">Scan to Verify</span>
+              <span style="font-size: 6pt; font-family: monospace; display: block; text-align: center; margin-top: 2px;">Scan to Verify</span>
             </div>
           </div>
 
@@ -242,11 +270,23 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
     ? departmentGroupedReports
     : (departmentGroupedReports || []).filter((g) => g.dept?.id === targetDeptId);
 
-  const qrUrl = `${window.location.origin}/?verify=${encodeURIComponent(activeOrder.orderId)}&bc=${encodeURIComponent(activeOrder.barcode)}`;
+  const orderId = activeOrder.orderId || activeOrder.id || "";
+  const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
   const scannableQrSvg = generateQrSvgString(qrUrl, 56);
 
+  // GUARANTEE REMARKS ON REPORT
+  const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
+    ? activeOrder.verifierRemarks
+    : "Clinically correlated and verified with internal quality control standards.";
+
+  const remarksHtml = `
+    <div style="margin-top: 20px; padding: 3px 10px;  font-size: 7pt; color: #1e293b;">
+      <b style="color: #0f172a; text-transform: uppercase; font-size: 6pt;">Pathologist Remarks / Interpretation:</b> 
+      <span style="font-style: italic; margin-left: 4px; ">${remarksText}</span>
+    </div>
+  `;
+
   const pagesHtml = (deptGroupsToPrint || []).map((group, idx) => {
-    // Generate unified single-header table for all tests in this department
     const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {});
 
     const tokens = {
@@ -264,7 +304,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
       barcode: activeOrder.barcode || "",
       qr_code: scannableQrSvg,
       results_table: testsTableHtml,
-      remarks: activeOrder.verifierRemarks ? `<div style="background: #fafaf9; border: 1px solid #000; border-radius: 6px; padding: 6px 10px; margin-top: 8px; font-size: 8pt;"><b>Pathologist Remarks:</b> <i>${activeOrder.verifierRemarks}</i></div>` : "",
+      remarks: remarksHtml, // <--- Always populated
       tech_name: techUser.full_name,
       tech_designation: techUser.designation,
       tech_signature: renderSignatureHtml(techUser.signature_data, techUser.full_name),
@@ -293,7 +333,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Report - ${activeOrder.barcode}</title>
+        <title>Report - ${activeOrder.barcode || activeOrder.orderId}</title>
         <style>
           @page { size: A4 portrait; margin: 10mm 12mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -325,6 +365,21 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   };
 
   const patientId = activeOrd.patient?.id || "PT-10024";
+  const orderId = activeOrd.orderId || activeOrd.id || "ORD-001";
+  const barcode = activeOrd.barcode || "";
+
+  const trackingUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(barcode)}`;
+  const scannableTrackingQrSvg = generateQrSvgString(trackingUrl, 56);
+
+  const qrBlockHtml = `
+    <div style="text-align: center; width: 95px; margin: 0 auto;">
+      ${scannableTrackingQrSvg}
+      <span style="font-size: 5.5pt; font-family: sans-serif; font-weight: bold; display: block; color: #0f172a; margin-top: 1px; text-align: center;">
+        Scan for Live Report
+      </span>
+    </div>
+  `;
+
   const itemsHtml = (activeOrd.tests || []).map((t, idx) => `
     <tr style="border-bottom: 1px solid #e2e8f0;">
       <td style="padding: 5px 8px; font-weight: 600;">${idx + 1}. ${t.name}</td>
@@ -334,9 +389,10 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   `).join("");
 
   let templateToUse = getActiveTemplate(labSettings, "receipt");
+
   if (!templateToUse) {
     templateToUse = `
-      <div style="border: 1.5px solid #000; border-radius: 8px; padding: 10px 12px; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff;">
+      <div style="border: 1.5px solid #000; border-radius: 8px; padding: 10px 12px; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
         <div>
           <div style="border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -381,12 +437,17 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         </div>
 
         <div>
-          <div style="border-top: 1px dashed #94a3b8; padding: 6px 0; display: flex; justify-content: space-between; align-items: flex-end;">
-            <div style="text-align: center; width: 160px;">
+          <div style="border-top: 1px dashed #94a3b8; padding: 6px 0; display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: center; width: 140px;">
               {{patient_barcode}}
-              <p style="margin: 2px 0 0 0; font-family: monospace; font-size: 7.5pt; font-weight: 900;">{{patient_id}}</p>
+              <p style="margin: 2px 0 0 0; font-family: monospace; font-size: 8pt; font-weight: 900; color: #000;">{{patient_id}}</p>
             </div>
-            <div style="text-align: center; width: 130px;">
+
+            <div style="text-align: center; width: 95px;">
+              {{report_tracking_qr}}
+            </div>
+
+            <div style="text-align: center; width: 120px;">
               <div style="border-bottom: 1px solid #000; height: 16px; margin-bottom: 2px;"></div>
               <span style="font-size: 7pt; font-weight: bold;">Authorized Cashier</span>
             </div>
@@ -395,6 +456,20 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         </div>
       </div>
     `;
+  }
+
+  if (!templateToUse.includes("{{report_tracking_qr}}") && !templateToUse.includes("report_tracking_qr")) {
+    if (templateToUse.includes("{{patient_id}}")) {
+      templateToUse = templateToUse.replace(
+        /({{patient_id}}<\/p>\s*<\/div>|{{patient_id}}<\/div>)/i,
+        `$1<div style="text-align: center; width: 95px;">{{report_tracking_qr}}</div>`
+      );
+    } else {
+      templateToUse = templateToUse.replace(
+        "{{receipt_footer}}",
+        `<div style="text-align: center; margin: 4px auto;">{{report_tracking_qr}}</div>{{receipt_footer}}`
+      );
+    }
   }
 
   const tokens = {
@@ -418,7 +493,9 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     paid_amount: activeOrd.billing?.paid || 0,
     due_amount: activeOrd.billing?.due || 0,
     patient_barcode: generateSvgBarcodeHtml(patientId),
-    receipt_footer: labSettings?.receipt_footer || "Please bring this original receipt for collection."
+    report_tracking_qr: qrBlockHtml,
+    tracking_url: trackingUrl,
+    receipt_footer: labSettings?.receipt_footer || "Scan the QR code to check real-time report status & download results."
   };
 
   const compiledHtml = compileTemplate(templateToUse, tokens);

@@ -20,7 +20,7 @@ import ReportsPrint from "./components/ReportsPrint";
 import TestManager from "./components/TestManager";
 import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
-import VerificationModal from "./components/VerificationModal";
+import PatientLivePortal from "./components/PatientLivePortal";
 
 const MASTER_SAMPLE_TYPES = [
   "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", 
@@ -60,8 +60,8 @@ export default function App() {
   const [dateRange, setDateRange] = useState({ from: todayStr, to: todayStr });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Public QR Verification States
-  const [publicVerifiedOrder, setPublicVerifiedOrder] = useState(null);
+  // Public Live Patient Tracking & Verification Portal
+  const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
 
@@ -79,13 +79,13 @@ export default function App() {
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] 
   });
 
-  // 1. Check for Public QR Scan in URL (?verify=ORD-... or ?bc=LAB-...)
+  // 1. Check for Public QR Scan in URL (?track=ORD-... or ?verify=ORD-... or ?bc=LAB-...)
   useEffect(() => {
     const checkPublicQrScan = async () => {
       const params = new URLSearchParams(window.location.search);
-      const verifyId = params.get("verify");
+      const trackId = params.get("track") || params.get("verify");
       const barcode = params.get("bc");
-      if (!verifyId && !barcode) return;
+      if (!trackId && !barcode) return;
 
       setIsVerifyingPublicUrl(true);
       try {
@@ -99,27 +99,34 @@ export default function App() {
           results(*)
         `);
 
-        if (verifyId) query = query.eq("id", verifyId);
+        if (trackId) query = query.eq("id", trackId);
         else if (barcode) query = query.eq("barcode", barcode);
 
         const { data, error } = await query.maybeSingle();
 
         if (error || !data) {
           const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-          const matched = local.find(o => o.id === verifyId || o.orderId === verifyId || o.barcode === barcode);
-          if (matched) setPublicVerifiedOrder(matched);
-          else setVerificationError("Report not found or invalid barcode certificate.");
+          const matched = local.find(o => o.id === trackId || o.orderId === trackId || o.barcode === barcode);
+          if (matched) {
+            setPatientTrackingOrder(matched);
+          } else {
+            setVerificationError("Report record not found or invalid barcode certificate.");
+          }
         } else {
           const matchedTests = (data.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
-          setPublicVerifiedOrder({
+          setPatientTrackingOrder({
             orderId: data.id,
             receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "")}-${data.id.slice(-4)}`,
             date: data.order_date,
             createdAt: data.created_at || data.order_date,
             barcode: data.barcode,
-            patient: data.patient || { id: data.patient_id, name: "Verified Patient", gender: "Other" },
+            patient: data.patient || { id: data.patient_id, name: "Patient", gender: "Other" },
             tests: matchedTests,
-            billing: { paid: data.paid_amount || 0, due: data.due_amount || 0, netPayable: data.net_payable || 0 },
+            billing: { 
+              paid: data.paid_amount || 0, 
+              due: data.due_amount || 0, 
+              netPayable: data.net_payable || 0 
+            },
             results: (data.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
             qcStatus: data.qc_status || "Pending",
             isLocked: data.is_locked || false,
@@ -127,7 +134,7 @@ export default function App() {
           });
         }
       } catch (err) {
-        setVerificationError("Failed to verify report authenticity: " + err.message);
+        setVerificationError("Failed to load patient report: " + err.message);
       } finally {
         setIsVerifyingPublicUrl(false);
       }
@@ -340,6 +347,7 @@ export default function App() {
     }
   };
 
+  // Real-time result input
   const handleResultInput = async (paramId, val) => {
     if (!activeOrder || activeOrder.isLocked) return;
     const previousOrders = [...orders];
@@ -357,12 +365,32 @@ export default function App() {
     }
   };
 
+  // Real-time pathologist remarks update
+  const handleRemarksChange = (val) => {
+    if (!activeOrder || activeOrder.isLocked) return;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.orderId === activeOrder.orderId ? { ...o, verifierRemarks: val } : o
+      )
+    );
+  };
+
+  // Verify and lock order in Supabase with remarks
   const handleVerifyInDb = async () => {
     if (!activeOrder) return;
     setIsLoading(true);
     try {
-      await verifyAndLockOrder(activeOrder.orderId, activeOrder.verifierRemarks || "Clinically verified.", currentUser?.name || "Pathologist");
-      alert("✅ Report Verified and Locked!");
+      const remarksToSave = activeOrder.verifierRemarks?.trim() || "Clinically correlated and verified with internal quality control standards.";
+      await verifyAndLockOrder(activeOrder.orderId, remarksToSave, currentUser?.name || "Consultant Pathologist");
+      
+      setOrders(prev => prev.map(o => o.orderId === activeOrder.orderId ? {
+        ...o,
+        qcStatus: "Verified",
+        isLocked: true,
+        verifierRemarks: remarksToSave
+      } : o));
+
+      alert("✅ Report Verified and Locked with Remarks!");
       fetchPaginatedOrders();
     } catch (e) { 
       alert("Verification failed: " + e.message); 
@@ -433,30 +461,47 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // Public QR Scanning Screen
+  // =========================================================================
+  // PUBLIC QR SCANNING / LIVE PATIENT TRACKING SCREEN
+  // =========================================================================
   if (isVerifyingPublicUrl) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white font-sans">
         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <h2 className="text-lg font-bold">Verifying Clinical Report...</h2>
-        <p className="text-xs text-slate-400 mt-1">Connecting to central clinical LIMS database</p>
+        <h2 className="text-lg font-bold">Connecting to Clinical LIMS...</h2>
+        <p className="text-xs text-slate-400 mt-1">Retrieving live laboratory status</p>
       </div>
     );
   }
 
-  if (publicVerifiedOrder || verificationError) {
+  // Opens directly on mobile when scanning receipt or report QR code
+  if (patientTrackingOrder || verificationError) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
-        <VerificationModal
-          order={publicVerifiedOrder}
-          labSettings={labSettings}
-          errorMessage={verificationError}
-          onClose={() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-            setPublicVerifiedOrder(null);
-            setVerificationError("");
-          }}
-        />
+        {patientTrackingOrder ? (
+          <PatientLivePortal
+            order={patientTrackingOrder}
+            labSettings={labSettings}
+            onClose={() => {
+              window.history.replaceState({}, document.title, window.location.pathname);
+              setPatientTrackingOrder(null);
+            }}
+          />
+        ) : (
+          <div className="bg-white p-6 rounded-2xl max-w-sm w-full text-center space-y-3">
+            <p className="text-rose-600 font-bold text-sm">Report Not Found</p>
+            <p className="text-xs text-slate-500">{verificationError}</p>
+            <button
+              onClick={() => {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                setVerificationError("");
+              }}
+              className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold w-full"
+            >
+              Back to Home
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -566,6 +611,7 @@ export default function App() {
           <VerificationQC 
             activeOrder={activeOrder} 
             handleResultInput={handleResultInput} 
+            handleRemarksChange={handleRemarksChange}
             handleVerifyInDb={handleVerifyInDb} 
             isLoading={isLoading} 
             saveStatus={saveStatus} 
@@ -580,8 +626,9 @@ export default function App() {
             handlePrintDepartmentA4Report={(deptId) => printDepartmentA4Report(deptId, activeOrder, departmentGroupedReports, staffList, labSettings, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })))} 
             staffList={staffList} 
             labSettings={labSettings} 
-            onOpenVerificationModal={() => setPublicVerifiedOrder(activeOrder)} 
+            onOpenVerificationModal={() => setPatientTrackingOrder(activeOrder)} 
             handleSettleDue={handleSettleDue}
+            handleRemarksChange={handleRemarksChange}
           />
         )}
 

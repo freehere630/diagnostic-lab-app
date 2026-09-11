@@ -1,9 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Users, Search, Receipt, History, UserCheck, AlertCircle, CheckCircle, Clock, ChevronRight } from "lucide-react";
+import { 
+  Users, Search, Receipt, History, UserCheck, 
+  AlertCircle, Clock, ChevronRight, Layers, CheckSquare 
+} from "lucide-react";
 import { searchPatients, getPatientHistory } from "../services/api";
 
 export default function ReceptionPOS({
-  testCatalog,
+  testCatalog = [],
   patientForm,
   setPatientForm,
   selectedTestIds,
@@ -15,7 +18,7 @@ export default function ReceptionPOS({
   handleSaveOrderToDb,
   isLoading
 }) {
-  const [posFilterType, setPosFilterType] = useState("ALL");
+  const [posFilterType, setPosFilterType] = useState("ALL"); // 'ALL' | 'SINGLE' | 'PROFILE'
   const [posSearch, setPosSearch] = useState("");
 
   // Patient Lookup States
@@ -24,6 +27,21 @@ export default function ReceptionPOS({
   const [isSearching, setIsSearching] = useState(false);
   const [patientHistoryList, setPatientHistoryList] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Helper to reliably determine if a test is a Multi-Parameter Profile / Panel
+  const checkIsProfile = (test) => {
+    if (!test) return false;
+    const isProfFlag = 
+      test.is_profile === true || 
+      test.is_profile === "true" || 
+      test.is_profile === 1 || 
+      test.isProfile === true || 
+      test.isProfile === "true";
+
+    const params = test.test_parameters || test.parameters || [];
+    // If explicitly marked as profile, OR has more than 1 parameter configured
+    return isProfFlag || params.length > 1;
+  };
 
   // Live Patient Search debouncer
   useEffect(() => {
@@ -53,7 +71,6 @@ export default function ReceptionPOS({
     setLookupQuery("");
     setSearchResults([]);
 
-    // Fetch previous clinical history
     const history = await getPatientHistory(p.id);
     setPatientHistoryList(history);
   };
@@ -73,35 +90,42 @@ export default function ReceptionPOS({
   const discountAmount = (subTotal * discountVal) / 100;
   const netPayable = Math.max(0, subTotal - discountAmount);
   
-  // Custom Paid / Due calculation
   const currentPaid = paidVal !== undefined ? paidVal : netPayable;
   const currentDue = Math.max(0, netPayable - currentPaid);
 
-  // Sync paid amount when net payable changes (if full payment default)
   useEffect(() => {
     if (paidVal === undefined || paidVal === null) {
       setPaidVal(netPayable);
     }
   }, [netPayable, paidVal, setPaidVal]);
 
+  // Accurate Filtered Catalog (Resolves both single tests and profiles cleanly)
   const filteredCatalog = useMemo(() => {
     return testCatalog.filter((test) => {
+      const isProfile = checkIsProfile(test);
+
       const matchType =
         posFilterType === "ALL" ||
-        (posFilterType === "SINGLE" && !test.is_profile) ||
-        (posFilterType === "PROFILE" && test.is_profile);
+        (posFilterType === "SINGLE" && !isProfile) ||
+        (posFilterType === "PROFILE" && isProfile);
 
+      const query = posSearch.trim().toLowerCase();
       const matchSearch =
-        posSearch === "" ||
-        test.name.toLowerCase().includes(posSearch.toLowerCase()) ||
-        test.code.toLowerCase().includes(posSearch.toLowerCase());
+        !query ||
+        (test.name && test.name.toLowerCase().includes(query)) ||
+        (test.code && test.code.toLowerCase().includes(query)) ||
+        (test.sample_type && test.sample_type.toLowerCase().includes(query));
 
       return matchType && matchSearch;
     });
   }, [testCatalog, posFilterType, posSearch]);
 
+  // Counts for tabs
+  const singleCount = useMemo(() => testCatalog.filter(t => !checkIsProfile(t)).length, [testCatalog]);
+  const profileCount = useMemo(() => testCatalog.filter(t => checkIsProfile(t)).length, [testCatalog]);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+    <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full font-sans text-slate-800">
       <div className="lg:col-span-2 xl:col-span-3 space-y-6">
         
         {/* RETURNING PATIENT QUICK SEARCH HUB */}
@@ -148,7 +172,6 @@ export default function ReceptionPOS({
               <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">Searching...</span>
             )}
 
-            {/* Dropdown Suggestions */}
             {searchResults.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white text-slate-800 rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden divide-y divide-slate-100 max-h-60 overflow-y-auto">
                 {searchResults.map((p) => (
@@ -243,29 +266,51 @@ export default function ReceptionPOS({
 
           <hr className="my-6 border-slate-100" />
 
-          {/* TEST SELECTION FILTERS */}
+          {/* DYNAMIC TEST FILTER SWITCHERS */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border text-xs">
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs">
+              
+              {/* Button: All Tests */}
               <button
+                type="button"
                 onClick={() => setPosFilterType("ALL")}
-                className={`px-3 py-1.5 rounded-lg font-bold transition ${posFilterType === "ALL" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+                className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                  posFilterType === "ALL"
+                    ? "bg-slate-900 text-white shadow-md shadow-slate-900/20"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                }`}
               >
                 All Tests ({testCatalog.length})
               </button>
+
+              {/* Button: Single Tests */}
               <button
+                type="button"
                 onClick={() => setPosFilterType("SINGLE")}
-                className={`px-3 py-1.5 rounded-lg font-bold transition ${posFilterType === "SINGLE" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500"}`}
+                className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                  posFilterType === "SINGLE"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                    : "text-slate-600 hover:text-blue-600 hover:bg-slate-200/60"
+                }`}
               >
-                Single Tests
+                Single Tests ({singleCount})
               </button>
+
+              {/* Button: Profiles & Panels */}
               <button
+                type="button"
                 onClick={() => setPosFilterType("PROFILE")}
-                className={`px-3 py-1.5 rounded-lg font-bold transition ${posFilterType === "PROFILE" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500"}`}
+                className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                  posFilterType === "PROFILE"
+                    ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
+                    : "text-slate-600 hover:text-purple-600 hover:bg-slate-200/60"
+                }`}
               >
-                Profiles & Panels (LFT, KFT, CBC)
+                Profiles & Panels ({profileCount})
               </button>
             </div>
 
+            {/* Test Search Bar */}
             <div className="relative w-full sm:w-64">
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <input
@@ -273,40 +318,62 @@ export default function ReceptionPOS({
                 placeholder="Search SGPT, Glucose, LFT..."
                 value={posSearch}
                 onChange={(e) => setPosSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-medium"
               />
             </div>
           </div>
 
           {/* TESTS GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {filteredCatalog.map((test) => {
-              const isSel = selectedTestIds.includes(test.id);
-              return (
-                <button
-                  key={test.id}
-                  type="button"
-                  onClick={() => setSelectedTestIds(isSel ? selectedTestIds.filter((id) => id !== test.id) : [...selectedTestIds, test.id])}
-                  className={`p-3 text-left rounded-xl border flex justify-between items-center transition ${
-                    isSel ? "border-blue-500 bg-blue-50 text-blue-900 ring-2 ring-blue-300/30" : "border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-xs">{test.name}</span>
-                      {test.is_profile ? (
-                        <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-black text-[9px]">PROFILE</span>
-                      ) : (
-                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-bold text-[9px]">SINGLE</span>
-                      )}
+          {filteredCatalog.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              No tests found matching the selected filter or search term.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {filteredCatalog.map((test) => {
+                const isSel = selectedTestIds.includes(test.id);
+                const isProfile = checkIsProfile(test);
+
+                return (
+                  <button
+                    key={test.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTestIds((prev) => 
+                        isSel ? prev.filter((id) => id !== test.id) : [...prev, test.id]
+                      );
+                    }}
+                    className={`p-3 text-left rounded-xl border flex justify-between items-center transition ${
+                      isSel 
+                        ? "border-blue-500 bg-blue-50 text-blue-900 ring-2 ring-blue-400/30 shadow-sm" 
+                        : "border-slate-200 hover:bg-slate-50 hover:border-slate-300"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-xs">{test.name}</span>
+                        {isProfile ? (
+                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-black text-[9px] uppercase">
+                            PROFILE
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-bold text-[9px] uppercase">
+                            SINGLE
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {test.sample_type || "Blood"} • {test.tube_color || "Standard"}
+                      </p>
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{test.sample_type} • {test.tube_color}</p>
-                  </div>
-                  <span className="font-bold text-xs font-mono text-slate-900">৳ {test.price}</span>
-                </button>
-              );
-            })}
-          </div>
+                    <span className="font-bold text-xs font-mono text-slate-900">
+                      ৳ {test.price}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -315,15 +382,19 @@ export default function ReceptionPOS({
         <div>
           <h3 className="font-bold text-slate-800 text-base border-b pb-3">Billing & Payment Summary</h3>
           <div className="mt-4 space-y-2 text-xs max-h-56 overflow-y-auto">
-            {selectedTestIds.map((tid) => {
-              const t = testCatalog.find((m) => m.id === tid);
-              return t ? (
-                <div key={tid} className="flex justify-between py-1 border-b border-slate-50">
-                  <span className="text-slate-700 truncate">{t.name}</span>
-                  <span className="font-bold font-mono">৳ {t.price}</span>
-                </div>
-              ) : null;
-            })}
+            {selectedTestIds.length === 0 ? (
+              <p className="text-slate-400 italic text-center py-4">No tests selected yet</p>
+            ) : (
+              selectedTestIds.map((tid) => {
+                const t = testCatalog.find((m) => m.id === tid);
+                return t ? (
+                  <div key={tid} className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-700 truncate">{t.name}</span>
+                    <span className="font-bold font-mono">৳ {t.price}</span>
+                  </div>
+                ) : null;
+              })
+            )}
           </div>
 
           <div className="border-t my-4 pt-4 space-y-2.5 text-xs font-semibold">
@@ -340,7 +411,7 @@ export default function ReceptionPOS({
                 max="100"
                 value={discountVal}
                 onChange={(e) => setDiscountVal(Number(e.target.value))}
-                className="w-16 p-1 border rounded text-right font-mono"
+                className="w-16 p-1 border rounded text-right font-mono outline-none"
               />
             </div>
 
@@ -357,7 +428,7 @@ export default function ReceptionPOS({
                 min="0"
                 value={paidVal !== undefined ? paidVal : netPayable}
                 onChange={(e) => setPaidVal(Math.max(0, Number(e.target.value)))}
-                className="w-24 p-1.5 border border-emerald-400 bg-emerald-50 rounded text-right font-mono font-black text-emerald-900 text-sm outline-none"
+                className="w-24 p-1.5 border border-emerald-400 bg-emerald-50 rounded text-right font-mono font-black text-emerald-900 text-sm outline-none focus:ring-2 focus:ring-emerald-400"
               />
             </div>
 
@@ -376,7 +447,7 @@ export default function ReceptionPOS({
         <div className="mt-6">
           <button
             onClick={handleSaveOrderToDb}
-            disabled={isLoading}
+            disabled={isLoading || selectedTestIds.length === 0}
             className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl shadow text-xs flex items-center justify-center gap-2 transition"
           >
             <Receipt className="w-4 h-4" /> {isLoading ? "Saving..." : "Save Order & Generate Receipt"}
