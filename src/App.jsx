@@ -5,6 +5,7 @@ import {
   deleteTest, getStaffUsers, registerStaffUser, deleteStaffUser,
   getLabSettings, saveLabSettings, settleOrderDue
 } from "./services/api";
+import { supabase } from "./supabaseClient";
 
 import { printMoneyReceiptA5, printSpecificVialBarcode, printDepartmentA4Report } from "./utils/printHelpers";
 
@@ -55,8 +56,10 @@ export default function App() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [trackingStatus, setTrackingStatus] = useState({});
 
-  // Verification Certificate Modal Trigger
-  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  // Public Verification States (For Scanned QR Codes)
+  const [publicVerifiedOrder, setPublicVerifiedOrder] = useState(null);
+  const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
+  const [verificationError, setVerificationError] = useState("");
 
   // Universal Search & Date Range
   const [dashboardSearch, setDashboardSearch] = useState("");
@@ -65,7 +68,7 @@ export default function App() {
   // Patient Intake & POS Form States
   const [selectedTestIds, setSelectedTestIds] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
-  const [paidVal, setPaidVal] = useState(undefined); // Tracks custom paid amount & due balance
+  const [paidVal, setPaidVal] = useState(undefined);
   const [patientForm, setPatientForm] = useState({ 
     id: "", 
     name: "", 
@@ -87,6 +90,77 @@ export default function App() {
     isProfile: false, 
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] 
   });
+
+  // 1. Check for Public QR Code Scan in URL (?verify=ORD-... or ?bc=LAB-...)
+  useEffect(() => {
+    const checkPublicQrScan = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const verifyId = params.get("verify");
+      const barcode = params.get("bc");
+
+      if (!verifyId && !barcode) return;
+
+      setIsVerifyingPublicUrl(true);
+      try {
+        // Fetch lab settings for branding on the certificate
+        const settings = await getLabSettings();
+        if (settings) setLabSettings(settings);
+
+        // Fetch the specific order directly from Supabase
+        let query = supabase.from("orders").select(`
+          *,
+          patient:patients(*),
+          order_tests(*, test:tests(*, test_parameters(*))),
+          results(*)
+        `);
+
+        if (verifyId) {
+          query = query.eq("id", verifyId);
+        } else if (barcode) {
+          query = query.eq("barcode", barcode);
+        }
+
+        const { data, error } = await query.maybeSingle();
+
+        if (error || !data) {
+          // Fallback to local storage if offline demo
+          const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+          const matched = local.find(o => o.id === verifyId || o.orderId === verifyId || o.barcode === barcode);
+          if (matched) {
+            setPublicVerifiedOrder(matched);
+          } else {
+            setVerificationError("Report not found or invalid barcode certificate.");
+          }
+        } else {
+          const matchedTests = (data.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
+          const formatted = {
+            orderId: data.id,
+            receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "")}-${data.id.slice(-4)}`,
+            date: data.order_date,
+            barcode: data.barcode,
+            patient: data.patient || { id: data.patient_id, name: "Verified Patient", gender: "Other" },
+            tests: matchedTests,
+            billing: {
+              paid: data.paid_amount || 0,
+              due: data.due_amount || 0,
+              netPayable: data.net_payable || 0
+            },
+            results: (data.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
+            qcStatus: data.qc_status || "Pending",
+            isLocked: data.is_locked || false,
+            verifierRemarks: data.verifier_remarks || ""
+          };
+          setPublicVerifiedOrder(formatted);
+        }
+      } catch (err) {
+        setVerificationError("Failed to verify report authenticity: " + err.message);
+      } finally {
+        setIsVerifyingPublicUrl(false);
+      }
+    };
+
+    checkPublicQrScan();
+  }, []);
 
   const loadDatabaseData = async () => {
     setIsLoading(true);
@@ -147,22 +221,13 @@ export default function App() {
     }
   };
 
-  useEffect(() => { loadDatabaseData(); }, []);
-  const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
-
-  // Verification modal trigger via URL parameters
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const verifyParam = params.get("verify");
-    const bcParam = params.get("bc");
-    if ((verifyParam || bcParam) && orders.length > 0) {
-      const matched = orders.find(o => o.orderId === verifyParam || o.barcode === bcParam);
-      if (matched) {
-        setSelectedOrderId(matched.orderId);
-        setShowVerificationModal(true);
-      }
+  useEffect(() => { 
+    if (currentUser) {
+      loadDatabaseData(); 
     }
-  }, [orders]);
+  }, [currentUser]);
+
+  const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
   // Generate department-specific vials
   const departmentalVials = useMemo(() => {
@@ -218,7 +283,6 @@ export default function App() {
     });
   }, [orders, dashboardSearch, dateRange]);
 
-  // Save Order to Supabase & Live in Dashboard (with Due Balance Support)
   const handleSaveOrderToDb = async () => {
     if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
       return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
@@ -243,22 +307,16 @@ export default function App() {
         testCatalog: testCatalog
       });
 
-      // 1. Immediately reflect in Dashboard state
       setOrders(prev => [createdOrder, ...prev.filter(o => o.orderId !== createdOrder.orderId)]);
       setSelectedOrderId(createdOrder.orderId);
 
-      // 2. Reset intake form for next patient
       setPatientForm({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
       setSelectedTestIds([]);
       setDiscountVal(0);
       setPaidVal(undefined);
 
       alert(`✅ Order Saved Successfully!\nPatient ID: ${createdOrder.patient?.id}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
-      
-      // 3. Switch to Dashboard where order is live
       setActiveTab("dashboard");
-
-      // Background refresh
       loadDatabaseData();
     } catch (e) { 
       alert("Error saving order: " + e.message); 
@@ -267,13 +325,11 @@ export default function App() {
     }
   };
 
-  // Due Balance Settlement on Report Collection
   const handleSettleDue = async (orderId, collectedAmount) => {
     setIsLoading(true);
     try {
       const { newPaid, newDue } = await settleOrderDue(orderId, collectedAmount);
 
-      // Instantly update orders state in Dashboard & Reports
       setOrders(prev => prev.map(o => {
         if (o.orderId === orderId) {
           return {
@@ -290,7 +346,6 @@ export default function App() {
 
       alert(`✅ Payment Collected!\nTotal Paid: ৳${newPaid}\nRemaining Due: ৳${newDue}`);
 
-      // Auto-print updated receipt with remaining due cleared
       const matched = orders.find(o => o.orderId === orderId);
       if (matched) {
         const updatedOrder = {
@@ -303,8 +358,8 @@ export default function App() {
       loadDatabaseData();
     } catch (e) {
       alert("Error collecting due: " + e.message);
-    } finally {
-      setIsLoading(false);
+    } finally { 
+      setIsLoading(false); 
     }
   };
 
@@ -424,6 +479,38 @@ export default function App() {
     }
   };
 
+  // =========================================================================
+  // PUBLIC VERIFICATION PORTAL (OPENS DIRECTLY WHEN MOBILE SCANS QR CODE)
+  // =========================================================================
+  if (isVerifyingPublicUrl) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white font-sans">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <h2 className="text-lg font-bold">Verifying Clinical Report...</h2>
+        <p className="text-xs text-slate-400 mt-1">Connecting to central clinical LIMS database</p>
+      </div>
+    );
+  }
+
+  if (publicVerifiedOrder || verificationError) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
+        <VerificationModal
+          order={publicVerifiedOrder}
+          labSettings={labSettings}
+          errorMessage={verificationError}
+          onClose={() => {
+            // Remove search params from URL and return to app/login
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setPublicVerifiedOrder(null);
+            setVerificationError("");
+          }}
+        />
+      </div>
+    );
+  }
+
+  // If user is not logged in and not scanning a QR code, show Login
   if (!currentUser) {
     return (
       <Login 
@@ -449,7 +536,6 @@ export default function App() {
         labSettings={labSettings} 
       />
       
-      {/* Live Save Status Banner */}
       {saveStatus.state !== "idle" && (
         <div className={`py-1.5 px-4 text-xs text-center font-bold transition ${
           saveStatus.state === "saving" ? "bg-amber-500 text-white" : 
@@ -529,7 +615,7 @@ export default function App() {
             handlePrintDepartmentA4Report={(deptId) => printDepartmentA4Report(deptId, activeOrder, departmentGroupedReports, staffList, labSettings, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })))} 
             staffList={staffList} 
             labSettings={labSettings} 
-            onOpenVerificationModal={() => setShowVerificationModal(true)} 
+            onOpenVerificationModal={() => setPublicVerifiedOrder(activeOrder)} 
             handleSettleDue={handleSettleDue}
           />
         )}
@@ -569,15 +655,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* Online Verification Certificate Modal */}
-      {showVerificationModal && (
-        <VerificationModal
-          order={activeOrder}
-          labSettings={labSettings}
-          onClose={() => setShowVerificationModal(false)}
-        />
-      )}
     </div>
   );
 }
