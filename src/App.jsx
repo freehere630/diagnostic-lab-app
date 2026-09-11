@@ -47,7 +47,7 @@ export default function App() {
   const [staffList, setStaffList] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
 
-  // Paginated Orders State (20 items/page)
+  // Paginated Orders State (20 records per page)
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [trackingStatus, setTrackingStatus] = useState({});
@@ -115,6 +115,7 @@ export default function App() {
             orderId: data.id,
             receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "")}-${data.id.slice(-4)}`,
             date: data.order_date,
+            createdAt: data.created_at || data.order_date,
             barcode: data.barcode,
             patient: data.patient || { id: data.patient_id, name: "Verified Patient", gender: "Other" },
             tests: matchedTests,
@@ -135,7 +136,7 @@ export default function App() {
     checkPublicQrScan();
   }, []);
 
-  // 2. Fetch Master Data (Only once on login)
+  // 2. Fetch Master Data Once on Login
   useEffect(() => {
     if (!currentUser) return;
     const fetchMaster = async () => {
@@ -152,7 +153,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // 3. Lazy Paginated Fetch (Runs only when Page, Date Range, or Preset changes)
+  // 3. Lazy Paginated Fetch (Strictly Newest Timestamp First)
   const fetchPaginatedOrders = async () => {
     if (!currentUser) return;
     setIsLoading(true);
@@ -171,6 +172,7 @@ export default function App() {
           orderId: o.id || o.orderId,
           receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "")}-${String(1001 + idx)}`,
           date: o.order_date || o.date || todayStr,
+          createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
           barcode: o.barcode,
           patient: o.patient || { id: o.patient_id || `PID-${1000 + idx}`, name: "Patient", phone: "N/A", age: 0, gender: "Other" },
           tests: matchedTests.length > 0 ? matchedTests : (o.tests || []),
@@ -188,6 +190,13 @@ export default function App() {
           isLocked: o.is_locked || o.isLocked || false, 
           verifierRemarks: o.verifier_remarks || o.verifierRemarks || ""
         };
+      });
+
+      // Sort with newest timestamp at top
+      formatted.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.date).getTime() || 0;
+        const timeB = new Date(b.createdAt || b.date).getTime() || 0;
+        return timeB - timeA;
       });
 
       setOrders(formatted);
@@ -211,7 +220,7 @@ export default function App() {
   // Preset switch handler
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
-    setCurrentPage(1); // Reset to page 1
+    setCurrentPage(1);
     const today = new Date();
 
     if (preset === "TODAY") {
@@ -269,6 +278,7 @@ export default function App() {
     return Object.values(grouped);
   }, [activeOrder, departments]);
 
+  // Save Order to Supabase and immediately place at index 0 (Top)
   const handleSaveOrderToDb = async () => {
     if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
       return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
@@ -292,6 +302,7 @@ export default function App() {
         testCatalog: testCatalog
       });
 
+      // Place newly created order at index 0 (Top of the list)
       setOrders(prev => [createdOrder, ...prev.filter(o => o.orderId !== createdOrder.orderId)]);
       setSelectedOrderId(createdOrder.orderId);
 
@@ -300,7 +311,7 @@ export default function App() {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      alert(`✅ Order Saved Successfully!\nPatient ID: ${createdOrder.patient?.id}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
+      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
       setActiveTab("dashboard");
       fetchPaginatedOrders();
     } catch (e) { 
@@ -450,12 +461,18 @@ export default function App() {
     );
   }
 
+  // If user is not logged in and not scanning a QR code, show Login
   if (!currentUser) {
     return (
       <Login 
         onLoginSuccess={(u) => { 
           setCurrentUser(u); 
-          setActiveTab(u.role === "receptionist" ? "reception" : u.role === "technologist" ? "worklists" : u.role === "verifier" ? "verifier" : "dashboard"); 
+          const role = (u.role || "").toLowerCase();
+          setActiveTab(
+            role === "receptionist" ? "reception" : 
+            role === "technologist" ? "worklists" : 
+            role === "verifier" || role === "biochemist" ? "verifier" : "dashboard"
+          ); 
         }} 
       />
     );
@@ -552,6 +569,7 @@ export default function App() {
             handleVerifyInDb={handleVerifyInDb} 
             isLoading={isLoading} 
             saveStatus={saveStatus} 
+            currentUser={currentUser} 
           />
         )}
 

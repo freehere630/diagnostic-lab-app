@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { 
   Search, Calendar, Receipt, DollarSign, CheckCircle2, 
-  AlertCircle, X, ChevronLeft, ChevronRight 
+  AlertCircle, X, ChevronLeft, ChevronRight, Clock 
 } from "lucide-react";
 
 export default function Dashboard({
@@ -28,10 +28,19 @@ export default function Dashboard({
   const [settleOrder, setSettleOrder] = React.useState(null);
   const [collectionAmount, setCollectionAmount] = React.useState("");
 
-  const totalRevenue = orders.reduce((acc, o) => acc + (o.billing?.paid || 0), 0);
-  const totalDue = orders.reduce((acc, o) => acc + (o.billing?.due || 0), 0);
-  const pendingQC = orders.filter((o) => o.qcStatus === "Pending").length;
-  const verifiedCount = orders.filter((o) => o.qcStatus === "Verified").length;
+  // STRICT TIME SORTING: Latest timestamp and registration at the top
+  const sortedOrders = useMemo(() => {
+    return [...orders].sort((a, b) => {
+      const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
+      const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
+      return timeB - timeA;
+    });
+  }, [orders]);
+
+  const totalRevenue = sortedOrders.reduce((acc, o) => acc + (o.billing?.paid || 0), 0);
+  const totalDue = sortedOrders.reduce((acc, o) => acc + (o.billing?.due || 0), 0);
+  const pendingQC = sortedOrders.filter((o) => o.qcStatus === "Pending").length;
+  const verifiedCount = sortedOrders.filter((o) => o.qcStatus === "Verified").length;
 
   const openSettleModal = (ord) => {
     setSettleOrder(ord);
@@ -46,8 +55,18 @@ export default function Dashboard({
     setSettleOrder(null);
   };
 
+  const formatEntryTime = (dateStr, createdAtStr) => {
+    if (createdAtStr && createdAtStr.includes("T")) {
+      try {
+        const d = new Date(createdAtStr);
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch (e) {}
+    }
+    return dateStr || "Today";
+  };
+
   const metrics = [
-    { label: "Page Orders", val: orders.length, color: "text-slate-900", border: "border-blue-500" },
+    { label: "Page Orders", val: sortedOrders.length, color: "text-slate-900", border: "border-blue-500" },
     { label: "Total in Period", val: totalCount, color: "text-indigo-600", border: "border-purple-500" },
     { label: "Pending QC", val: pendingQC, color: "text-amber-600", border: "border-amber-500" },
     { label: "Verified Ready", val: verifiedCount, color: "text-emerald-600", border: "border-emerald-500" },
@@ -73,7 +92,7 @@ export default function Dashboard({
           <div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900">Laboratory Operations Dashboard</h2>
             <p className="text-xs text-slate-500">
-              Showing <b>{activePreset === "TODAY" ? "Today's Clinical Activity" : activePreset.replace("_", " ")}</b> (Paginated 20/page)
+              Showing <b>{activePreset === "TODAY" ? "Today's Clinical Activity" : activePreset.replace("_", " ")}</b> (Newest Registration on Top)
             </p>
           </div>
 
@@ -144,13 +163,12 @@ export default function Dashboard({
       <div className="bg-white p-5 rounded-2xl border shadow-sm w-full space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2">
-            <span>Patient Queue</span>
+            <span>Patient Queue (Newest First)</span>
             <span className="text-xs text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full font-mono font-bold">
               {totalCount} Total in Period
             </span>
           </h3>
 
-          {/* Top Pagination Counter */}
           <span className="text-xs text-slate-500 font-semibold">
             Page {currentPage} of {totalPages || 1}
           </span>
@@ -161,15 +179,15 @@ export default function Dashboard({
             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
             Loading database records...
           </div>
-        ) : orders.length === 0 ? (
+        ) : sortedOrders.length === 0 ? (
           <p className="text-xs text-slate-400 italic py-12 text-center">No orders found for this period.</p>
         ) : (
           <div className="overflow-x-auto w-full">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b bg-slate-50 text-slate-500 font-bold">
+                  <th className="py-3 px-4">Time / Date</th>
                   <th className="py-3 px-4">Receipt No</th>
-                  <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4">Patient ID</th>
                   <th className="py-3 px-4">Patient Name</th>
                   <th className="py-3 px-4">Phone</th>
@@ -179,16 +197,24 @@ export default function Dashboard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {orders.map((ord) => {
+                {sortedOrders.map((ord) => {
                   const hasDue = (ord.billing?.due || 0) > 0;
 
                   return (
                     <tr key={ord.orderId} className="hover:bg-blue-50/40 transition">
+                      <td className="py-3.5 px-4 font-mono text-slate-600">
+                        <span className="flex items-center gap-1 font-bold text-slate-800">
+                          <Clock className="w-3.5 h-3.5 text-blue-600" />
+                          {formatEntryTime(ord.date, ord.createdAt || ord.created_at)}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">{ord.date}</span>
+                      </td>
+
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-800">{ord.receiptNo}</td>
-                      <td className="py-3.5 px-4 font-mono text-slate-600">{ord.date}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{ord.patient?.id}</td>
                       <td className="py-3.5 px-4 font-semibold text-slate-900">{ord.patient?.name}</td>
                       <td className="py-3.5 px-4 font-mono text-slate-600">{ord.patient?.phone}</td>
+                      
                       <td className="py-3.5 px-4 font-mono font-bold">
                         ৳{ord.billing?.paid || 0} /{" "}
                         {hasDue ? (
@@ -201,16 +227,19 @@ export default function Dashboard({
                           </span>
                         )}
                       </td>
+                      
                       <td className="py-3.5 px-4">
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${ord.qcStatus === "Verified" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
                           {ord.qcStatus}
                         </span>
                       </td>
+                      
                       <td className="py-3.5 px-4 text-right space-x-1.5">
                         {hasDue && (
                           <button
                             onClick={() => openSettleModal(ord)}
                             className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded font-bold text-[11px] transition inline-flex items-center gap-1 shadow-sm"
+                            title="Collect remaining due"
                           >
                             <DollarSign className="w-3 h-3" /> Collect Due
                           </button>
@@ -236,10 +265,10 @@ export default function Dashboard({
           </div>
         )}
 
-        {/* PAGINATION BAR (20 RECORDS PER PAGE) */}
+        {/* PAGINATION CONTROLS (20 RECORDS PER PAGE) */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-100 text-xs">
           <span className="text-slate-500">
-            Showing <b>{orders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b> to{" "}
+            Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b> to{" "}
             <b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> records
           </span>
 
@@ -334,6 +363,7 @@ export default function Dashboard({
           </div>
         </div>
       )}
+
     </div>
   );
 }

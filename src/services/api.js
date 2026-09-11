@@ -91,7 +91,7 @@ export async function getPatientHistory(patientId) {
 export async function getAllOrders() {
   let ordersList = [];
 
-  // Strategy A: Try relational PostgREST join
+  // Strategy A: Relational PostgREST join sorted by newest timestamp first
   try {
     const { data, error } = await supabase
       .from("orders")
@@ -101,6 +101,7 @@ export async function getAllOrders() {
         order_tests(*, test:tests(*, test_parameters(*))),
         results(*)
       `)
+      .order("created_at", { ascending: false, nullsFirst: false })
       .order("order_date", { ascending: false });
 
     if (!error && data && data.length > 0) {
@@ -110,11 +111,13 @@ export async function getAllOrders() {
     console.warn("Relational query fallback triggered:", e);
   }
 
-  // Strategy B: If relational query returned empty or failed due to foreign key alias naming,
-  // query tables directly and stitch in memory (100% immune to PostgREST relationship schema cache failures)
+  // Strategy B: Discrete fetch & in-memory join
   if (!ordersList || ordersList.length === 0) {
     try {
-      const { data: rawOrders } = await supabase.from("orders").select("*").order("order_date", { ascending: false });
+      const { data: rawOrders } = await supabase
+        .from("orders")
+        .select("*")
+        .order("order_date", { ascending: false });
       
       if (rawOrders && rawOrders.length > 0) {
         const [patientsRes, orderTestsRes, testsRes, paramsRes, resultsRes] = await Promise.all([
@@ -131,13 +134,11 @@ export async function getAllOrders() {
         const params = paramsRes.data || [];
         const results = resultsRes.data || [];
 
-        // Attach parameters to tests
         const testsWithParams = tests.map(t => ({
           ...t,
           test_parameters: params.filter(p => p.test_id === t.id)
         }));
 
-        // Stitch orders together
         ordersList = rawOrders.map(ord => {
           const matchedPatient = patients.find(p => p.id === ord.patient_id) || null;
           const matchedOrderTests = orderTests
@@ -171,18 +172,115 @@ export async function getAllOrders() {
     }
   } catch (e) {}
 
-  return ordersList;
+  // Sort descending by time
+  return ordersList.sort((a, b) => {
+    const timeA = new Date(a.created_at || a.createdAt || a.order_date || a.date).getTime() || 0;
+    const timeB = new Date(b.created_at || b.createdAt || b.order_date || b.date).getTime() || 0;
+    return timeB - timeA;
+  });
 }
 
 // ==========================================
-// 4. CREATE ORDER & SPECIMENS (POS)
+// 4. ON-DEMAND SERVER-SIDE PAGINATED QUERY
+// ==========================================
+export async function getOrdersPaginated({ 
+  page = 1, 
+  pageSize = 20, 
+  dateFrom = "", 
+  dateTo = "", 
+  searchQuery = "" 
+}) {
+  const fromIndex = (page - 1) * pageSize;
+  const toIndex = fromIndex + pageSize - 1;
+
+  try {
+    let query = supabase
+      .from("orders")
+      .select(`
+        *,
+        patient:patients(*),
+        order_tests(*, test:tests(*, test_parameters(*))),
+        results(*)
+      `, { count: "exact" });
+
+    // Date Filtering
+    if (dateFrom && dateTo) {
+      if (dateFrom === dateTo) {
+        query = query.eq("order_date", dateFrom);
+      } else {
+        query = query.gte("order_date", dateFrom).lte("order_date", dateTo);
+      }
+    } else if (dateFrom) {
+      query = query.gte("order_date", dateFrom);
+    } else if (dateTo) {
+      query = query.lte("order_date", dateTo);
+    }
+
+    // Search Filtering
+    if (searchQuery && searchQuery.trim()) {
+      const q = searchQuery.trim();
+      query = query.or(`barcode.ilike.%${q}%,patient_id.ilike.%${q}%,id.ilike.%${q}%`);
+    }
+
+    // STRICT SORTING: Newest timestamp and newest date first
+    query = query
+      .order("order_date", { ascending: false })
+      .order("id", { ascending: false })
+      .range(fromIndex, toIndex);
+
+    const { data, count, error } = await query;
+
+    if (!error && data) {
+      return {
+        orders: data,
+        totalCount: count || 0,
+        page,
+        pageSize,
+        totalPages: Math.ceil((count || 0) / pageSize)
+      };
+    }
+  } catch (err) {
+    console.warn("Paginated query notice:", err.message);
+  }
+
+  // Fallback if relational joins fail
+  try {
+    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
+    if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
+    if (dateTo) fallback = fallback.lte("order_date", dateTo);
+
+    const { data, count } = await fallback
+      .order("order_date", { ascending: false })
+      .order("id", { ascending: false })
+      .range(fromIndex, toIndex);
+
+    return {
+      orders: data || [],
+      totalCount: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
+  } catch (e) {
+    return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 };
+  }
+}
+
+// ==========================================
+// 5. CREATE ORDER (STORES EXACT DATE & TIME)
 // ==========================================
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, specimens, testCatalog = [] }) {
   const patientId = patientData.id || `PID-${Math.floor(10000 + Math.random() * 90000)}`;
-  const todayDate = new Date().toISOString().slice(0, 10);
+  
+  // Create exact ISO date and time timestamp
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
+  const timeCompact = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0') + String(now.getSeconds()).padStart(2, '0');
+  
   const barcode = `LAB-${todayCompact}-${Math.floor(100000 + Math.random() * 900000)}`;
-  const orderId = `ORD-${todayCompact}-${Math.floor(100 + Math.random() * 900)}`;
+  const orderId = `ORD-${todayCompact}-${timeCompact}-${Math.floor(10 + Math.random() * 90)}`;
 
   const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, netPayable - paidAmount);
 
@@ -199,7 +297,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const { error: pErr } = await supabase.from("patients").upsert(patientRow);
   if (pErr) console.warn("Notice inserting patient into Supabase:", pErr.message);
 
-  // Save to local patient directory
+  // Save to local directory
   try {
     const localP = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
     const filteredP = localP.filter(p => p.id !== patientId);
@@ -240,12 +338,14 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     if (otErr) console.warn("Notice inserting order_tests:", otErr.message);
   }
 
-  // 4. Build Complete In-Memory Return Object
+  // 4. Build Complete In-Memory Return Object with exact timestamp
   const selectedTests = testCatalog.filter(t => testIds.includes(t.id));
   const completeOrder = {
     ...orderRow,
     orderId: orderId,
     date: todayDate,
+    createdAt: nowIso,
+    created_at: nowIso,
     barcode: barcode,
     receiptNo: `RCP-${todayCompact.slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`,
     patient: {
@@ -281,12 +381,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 }
 
 // ==========================================
-// 5. SETTLE DUE AMOUNT (REPORT COLLECTION)
+// 6. SETTLE DUE AMOUNT (REPORT COLLECTION)
 // ==========================================
 export async function settleOrderDue(orderId, collectedAmount) {
   const amountToClear = parseFloat(collectedAmount) || 0;
 
-  // 1. Fetch current order billing from Supabase
   const { data: currentOrd, error: fErr } = await supabase
     .from("orders")
     .select("paid_amount, due_amount, net_payable")
@@ -303,7 +402,6 @@ export async function settleOrderDue(orderId, collectedAmount) {
     newDue = Math.max(0, prevDue - amountToClear);
   }
 
-  // 2. Update Supabase orders table (ONLY columns that exist in the schema: paid_amount and due_amount)
   const { data, error } = await supabase
     .from("orders")
     .update({
@@ -319,7 +417,6 @@ export async function settleOrderDue(orderId, collectedAmount) {
     throw error;
   }
 
-  // 3. Update local emergency cache
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const updatedLocal = local.map(o => {
@@ -344,7 +441,7 @@ export async function settleOrderDue(orderId, collectedAmount) {
 }
 
 // ==========================================
-// 6. SAVE LAB RESULTS
+// 7. SAVE LAB RESULTS
 // ==========================================
 export async function saveTestResult(orderId, parameterId, resultValue, statusFlag) {
   const { data, error } = await supabase
@@ -364,7 +461,7 @@ export async function saveTestResult(orderId, parameterId, resultValue, statusFl
 }
 
 // ==========================================
-// 7. VERIFY REPORT
+// 8. VERIFY REPORT
 // ==========================================
 export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByName) {
   const { data, error } = await supabase
@@ -383,7 +480,7 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
 }
 
 // ==========================================
-// 8. CREATE TEST
+// 9. TEST CATALOG MANAGEMENT
 // ==========================================
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.toUpperCase().replace(/\s+/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
@@ -426,9 +523,6 @@ export async function createNewTestWithParameters(testData) {
   return test;
 }
 
-// ==========================================
-// 9. UPDATE TEST
-// ==========================================
 export async function updateExistingTest(testId, testData) {
   const { error: tErr } = await supabase
     .from("tests")
@@ -466,9 +560,6 @@ export async function updateExistingTest(testId, testData) {
   }
 }
 
-// ==========================================
-// 10. DELETE TEST
-// ==========================================
 export async function deleteTest(testId) {
   await supabase.from("order_tests").delete().eq("test_id", testId);
   await supabase.from("test_parameters").delete().eq("test_id", testId);
@@ -477,7 +568,7 @@ export async function deleteTest(testId) {
 }
 
 // ==========================================
-// 11. STAFF USERS
+// 10. STAFF USER MANAGEMENT
 // ==========================================
 export async function getStaffUsers() {
   const { data, error } = await supabase.from("users").select("*").order("created_at");
@@ -513,7 +604,7 @@ export async function deleteStaffUser(userId) {
 }
 
 // ==========================================
-// 12. LAB SETTINGS
+// 11. LAB SETTINGS MANAGEMENT
 // ==========================================
 export async function getLabSettings() {
   try {
@@ -552,83 +643,4 @@ export async function saveLabSettings(settingsData) {
 
   if (error) throw error;
   return data;
-}
-
-// ==========================================
-// ON-DEMAND SERVER-SIDE PAGINATED QUERY
-// ==========================================
-export async function getOrdersPaginated({ 
-  page = 1, 
-  pageSize = 20, 
-  dateFrom = "", 
-  dateTo = "", 
-  searchQuery = "" 
-}) {
-  const fromIndex = (page - 1) * pageSize;
-  const toIndex = fromIndex + pageSize - 1;
-
-  try {
-    let query = supabase
-      .from("orders")
-      .select(`
-        *,
-        patient:patients(*),
-        order_tests(*, test:tests(*, test_parameters(*))),
-        results(*)
-      `, { count: "exact" });
-
-    // 1. Date Range Filtering directly on database
-    if (dateFrom && dateTo) {
-      if (dateFrom === dateTo) {
-        query = query.eq("order_date", dateFrom);
-      } else {
-        query = query.gte("order_date", dateFrom).lte("order_date", dateTo);
-      }
-    } else if (dateFrom) {
-      query = query.gte("order_date", dateFrom);
-    } else if (dateTo) {
-      query = query.lte("order_date", dateTo);
-    }
-
-    // 2. Universal Search Filtering on database
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.trim();
-      query = query.or(`barcode.ilike.%${q}%,patient_id.ilike.%${q}%,id.ilike.%${q}%`);
-    }
-
-    // 3. Paginated Slice & Order
-    query = query.order("order_date", { ascending: false }).range(fromIndex, toIndex);
-
-    const { data, count, error } = await query;
-
-    if (!error && data) {
-      return {
-        orders: data,
-        totalCount: count || 0,
-        page,
-        pageSize,
-        totalPages: Math.ceil((count || 0) / pageSize)
-      };
-    }
-  } catch (err) {
-    console.warn("Paginated query notice:", err.message);
-  }
-
-  // Fallback if relational joins fail: simple range query
-  try {
-    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
-    if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
-    if (dateTo) fallback = fallback.lte("order_date", dateTo);
-
-    const { data, count } = await fallback.order("order_date", { ascending: false }).range(fromIndex, toIndex);
-    return {
-      orders: data || [],
-      totalCount: count || 0,
-      page,
-      pageSize,
-      totalPages: Math.ceil((count || 0) / pageSize)
-    };
-  } catch (e) {
-    return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 };
-  }
 }

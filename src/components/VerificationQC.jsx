@@ -1,10 +1,21 @@
 import React from "react";
-import { ShieldCheck, AlertTriangle, CheckCircle2, CloudUpload } from "lucide-react";
+import { ShieldCheck, CloudUpload, Lock } from "lucide-react";
 
-export default function VerificationQC({ activeOrder, handleResultInput, handleVerifyInDb, isLoading, saveStatus }) {
+export default function VerificationQC({ 
+  activeOrder, 
+  handleResultInput, 
+  handleVerifyInDb, 
+  isLoading, 
+  saveStatus,
+  currentUser 
+}) {
   if (!activeOrder) {
     return <div className="p-8 text-center text-slate-400">No active order selected for verification.</div>;
   }
+
+  // Permission: Technologists cannot verify; only Developer, Manager, and Biochemist/Verifier can
+  const userRole = (currentUser?.role || "").toLowerCase();
+  const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
 
   const evaluateParam = (param, val) => {
     if (!val || String(val).trim() === "") return { status: "PENDING", color: "bg-slate-100 text-slate-600" };
@@ -46,14 +57,23 @@ export default function VerificationQC({ activeOrder, handleResultInput, handleV
               <CloudUpload className="w-3.5 h-3.5 animate-bounce" /> Syncing...
             </span>
           )}
-          <button
-            onClick={handleVerifyInDb}
-            disabled={activeOrder.isLocked || isLoading}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            {activeOrder.isLocked ? "Verified & Locked" : "Verify & Lock in Supabase"}
-          </button>
+
+          {/* Verification Authority Check */}
+          {canVerifyReport ? (
+            <button
+              onClick={handleVerifyInDb}
+              disabled={activeOrder.isLocked || isLoading}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {activeOrder.isLocked ? "Verified & Locked" : "Verify & Lock in Supabase"}
+            </button>
+          ) : (
+            <div className="px-3 py-1.5 bg-slate-100 border border-slate-300 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              Result Entry Only (Verifier Auth Required)
+            </div>
+          )}
         </div>
       </div>
 

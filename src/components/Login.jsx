@@ -1,126 +1,92 @@
 import React, { useState } from "react";
-import { FlaskConical, Lock, Mail, ShieldCheck, ArrowRight } from "lucide-react";
+import { FlaskConical, Lock, Mail, ShieldCheck } from "lucide-react";
+import { getStaffUsers } from "../services/api";
 
-export const PRESET_USERS = [
-  {
-    role: "admin",
-    roleName: "Lab Manager / Admin",
-    email: "admin@apexlab.com",
-    password: "admin123",
-    name: "Dr. Arthur Pendelton",
-    title: "Chief Laboratory Director",
-    avatarBg: "bg-purple-600"
-  },
-  {
-    role: "receptionist",
-    roleName: "Receptionist / Front Desk",
-    email: "reception@apexlab.com",
-    password: "rec123",
-    name: "Sadia Sultana",
-    title: "Front Desk Executive",
-    avatarBg: "bg-blue-600"
-  },
-  {
-    role: "technologist",
-    roleName: "Medical Lab Technologist",
-    email: "tech@apexlab.com",
-    password: "tech123",
-    name: "Md. Al-Amin",
-    title: "Senior Medical Technologist",
-    avatarBg: "bg-emerald-600"
-  },
-  {
-    role: "verifier",
-    roleName: "Biochemist / Verifier",
-    email: "biochemist@apexlab.com",
-    password: "bio123",
-    name: "Dr. S. Rahman",
-    title: "Consultant Biochemist & QC Incharge",
-    avatarBg: "bg-amber-600"
-  }
-];
+// Master Developer Account (Permanent Fail-Safe Credentials)
+export const MASTER_DEVELOPER = {
+  id: "DEV-001",
+  role: "developer",
+  roleName: "Chief System Developer",
+  email: "rtraju630@gmail.com",
+  password: "raju1234",
+  name: "Md. Raju Sheikh",
+  title: "Chief System Architect & Developer",
+  avatarBg: "bg-indigo-600"
+};
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = (e) => {
-    e?.preventDefault();
+  const handleLogin = async (e) => {
+    e.preventDefault();
     setErrorMsg("");
+    setIsSubmitting(true);
 
-    const user = PRESET_USERS.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
-    );
+    const inputEmail = email.trim().toLowerCase();
+    const inputPass = password;
 
-    if (user) {
-      onLoginSuccess(user);
-    } else {
-      setErrorMsg("Invalid credentials. Enter matching email and password, or use 1-click login.");
+    // 1. Check Developer Account
+    if (inputEmail === MASTER_DEVELOPER.email && inputPass === MASTER_DEVELOPER.password) {
+      setIsSubmitting(false);
+      onLoginSuccess(MASTER_DEVELOPER);
+      return;
     }
-  };
 
-  const handleQuickLogin = (user) => {
-    setEmail(user.email);
-    setPassword(user.password);
-    onLoginSuccess(user);
+    // 2. Check Database Registered Staff
+    try {
+      const staffList = await getStaffUsers();
+      const matched = staffList.find(
+        (u) => u.email?.trim().toLowerCase() === inputEmail && u.password === inputPass
+      );
+
+      if (matched) {
+        onLoginSuccess({
+          id: matched.id,
+          role: matched.role, // 'manager', 'verifier', 'technologist', 'receptionist'
+          name: matched.full_name,
+          designation: matched.designation,
+          email: matched.email,
+          signature_data: matched.signature_data,
+          avatarBg: 
+            matched.role === "manager" ? "bg-purple-600" :
+            matched.role === "verifier" ? "bg-amber-600" :
+            matched.role === "technologist" ? "bg-emerald-600" : "bg-blue-600"
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn("DB login check notice:", err);
+    }
+
+    setIsSubmitting(false);
+    setErrorMsg("Invalid email or password. Please verify your credentials.");
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans text-slate-800 w-full">
-      <div className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-700">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans text-slate-800 w-full">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-800">
         
-        {/* Left Side: 1-Click Quick Demo Sign-In */}
-        <div className="bg-slate-950 p-8 sm:p-10 text-white flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-800">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-600 rounded-2xl shadow-lg">
-                <FlaskConical className="w-8 h-8 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-black tracking-tight">Apex Clinical LIMS</h1>
-                <p className="text-xs text-slate-400">Enterprise Laboratory OS</p>
-              </div>
-            </div>
-
-            <div className="mt-8">
-              <h3 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-3">
-                1-Click Demo Sign-In
-              </h3>
-              <div className="space-y-2">
-                {PRESET_USERS.map((user) => (
-                  <button
-                    key={user.role}
-                    type="button"
-                    onClick={() => handleQuickLogin(user)}
-                    className="w-full p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-blue-500 rounded-xl flex items-center justify-between text-left transition group"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-white group-hover:text-blue-400 transition">{user.roleName}</p>
-                      <p className="text-[10px] text-slate-400 font-mono">{user.email} • Pass: {user.password}</p>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-blue-400 group-hover:translate-x-0.5 transition" />
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Brand Banner */}
+        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-950 p-8 text-white text-center">
+          <div className="p-3 bg-white/10 rounded-2xl w-14 h-14 flex items-center justify-center mx-auto mb-3 border border-white/20 shadow-inner">
+            <FlaskConical className="w-7 h-7 text-blue-400" />
           </div>
-
-          <div className="mt-8 pt-4 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between">
-            <span>ISO 15189 Certified</span>
-            <span>Role-Based Access</span>
-          </div>
+          <h1 className="text-xl font-black tracking-tight">Apex Clinical LIMS</h1>
+          <p className="text-xs text-blue-200 mt-1">Enterprise Laboratory Operating System</p>
         </div>
 
-        {/* Right Side: Manual Credentials Form */}
-        <div className="p-8 sm:p-10 flex flex-col justify-center bg-white">
-          <div className="mb-6">
-            <h2 className="text-xl font-bold text-slate-900">Sign in to your workstation</h2>
-            <p className="text-xs text-slate-500 mt-1">Select your designated laboratory access role</p>
+        {/* Credentials Form */}
+        <div className="p-8">
+          <div className="mb-6 text-center">
+            <h2 className="text-base font-bold text-slate-900">Workstation Authentication</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Enter your designated laboratory email and password</p>
           </div>
 
           {errorMsg && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-semibold">
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-semibold text-center">
               {errorMsg}
             </div>
           )}
@@ -133,10 +99,10 @@ export default function Login({ onLoginSuccess }) {
                 <input
                   type="email"
                   required
-                  placeholder="e.g. admin@apexlab.com"
+                  placeholder="e.g. rtraju630@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 />
               </div>
             </div>
@@ -148,21 +114,27 @@ export default function Login({ onLoginSuccess }) {
                 <input
                   type="password"
                   required
-                  placeholder="Enter role password"
+                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono"
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center gap-2 mt-2"
+              disabled={isSubmitting}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
             >
-              <ShieldCheck className="w-4 h-4" /> Authenticate & Open Workspace
+              <ShieldCheck className="w-4 h-4" /> 
+              {isSubmitting ? "Authenticating..." : "Authorize & Enter Workstation"}
             </button>
           </form>
+
+          <div className="mt-8 pt-4 border-t border-slate-100 text-center text-[10px] text-slate-400">
+            Protected Medical System • ISO 15189:2022 Compliant
+          </div>
         </div>
 
       </div>

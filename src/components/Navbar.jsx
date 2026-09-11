@@ -1,20 +1,8 @@
 import React from "react";
 import {
-  FlaskConical,
-  Database,
-  RefreshCw,
-  Menu,
-  X,
-  Activity,
-  Receipt,
-  QrCode,
-  Layers,
-  ShieldCheck,
-  FileText,
-  Settings,
-  UserCheck,
-  Building2,
-  LogOut
+  FlaskConical, Database, RefreshCw, Menu, X, Activity, 
+  Receipt, QrCode, Layers, ShieldCheck, FileText, Settings, 
+  UserCheck, Building2, LogOut
 } from "lucide-react";
 
 export default function Navbar({
@@ -28,19 +16,66 @@ export default function Navbar({
   isLoading,
   labSettings
 }) {
+  // Navigation Tabs with Permission Mapping
   const allTabs = [
-    { id: "dashboard", label: "Dashboard", icon: Activity, roles: ["admin", "receptionist", "technologist", "verifier"] },
-    { id: "reception", label: "1. Reception & POS", icon: Receipt, roles: ["admin", "receptionist"] },
-    { id: "samples", label: "2. Sample Tracking", icon: QrCode, roles: ["admin", "receptionist", "technologist"] },
-    { id: "worklists", label: "3. Worklists", icon: Layers, roles: ["admin", "technologist", "verifier"] },
-    { id: "verifier", label: "4. QC & Verification", icon: ShieldCheck, roles: ["admin", "verifier"] },
-    { id: "reports", label: "5. Reports & Print", icon: FileText, roles: ["admin", "receptionist", "technologist", "verifier"] },
-    { id: "test-manager", label: "6. Test Management", icon: Settings, roles: ["admin"] },
-    { id: "staff-manager", label: "7. Staff & Signatures", icon: UserCheck, roles: ["admin"] },
-    { id: "lab-settings", label: "8. Hospital Branding", icon: Building2, roles: ["admin"] },
+    { 
+      id: "dashboard", 
+      label: "Dashboard", 
+      icon: Activity, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
+    },
+    { 
+      id: "reception", 
+      label: "1. Reception & POS", 
+      icon: Receipt, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
+    },
+    { 
+      id: "samples", 
+      label: "2. Sample Tracking", 
+      icon: QrCode, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
+    },
+    { 
+      id: "worklists", 
+      label: "3. Worklists", 
+      icon: Layers, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] 
+    },
+    { 
+      id: "verifier", 
+      label: "4. QC & Verification", 
+      icon: ShieldCheck, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] 
+    },
+    { 
+      id: "reports", 
+      label: "5. Reports & Print", 
+      icon: FileText, 
+      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
+    },
+    { 
+      id: "test-manager", 
+      label: "6. Test Management", 
+      icon: Settings, 
+      roles: ["developer", "manager", "admin"] 
+    },
+    { 
+      id: "staff-manager", 
+      label: "7. Staff & Signatures", 
+      icon: UserCheck, 
+      roles: ["developer", "manager", "admin"] 
+    },
+    { 
+      id: "lab-settings", 
+      label: "8. Hospital Branding", 
+      icon: Building2, 
+      roles: ["developer"] // Developer Only
+    },
   ];
 
-  const visibleTabs = allTabs.filter((tab) => tab.roles.includes(currentUser?.role));
+  const userRole = (currentUser?.role || "").toLowerCase();
+  const visibleTabs = allTabs.filter((tab) => tab.roles.includes(userRole));
   const labName = labSettings?.lab_name || "Apex Clinical LIMS";
   const logoData = labSettings?.logo_data || "";
 
@@ -85,11 +120,13 @@ export default function Navbar({
 
             <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl">
               <div className={`w-7 h-7 rounded-lg ${currentUser?.avatarBg || 'bg-blue-600'} flex items-center justify-center font-bold text-xs text-white`}>
-                {currentUser?.name ? currentUser.name[0] : (currentUser?.full_name ? currentUser.full_name[0] : "U")}
+                {currentUser?.name ? currentUser.name[0] : "U"}
               </div>
               <div className="text-left hidden sm:block">
-                <p className="text-xs font-bold text-slate-200 leading-none">{currentUser?.name || currentUser?.full_name}</p>
-                <p className="text-[10px] font-semibold text-amber-400 capitalize mt-0.5">{currentUser?.designation || currentUser?.role}</p>
+                <p className="text-xs font-bold text-slate-200 leading-none">{currentUser?.name}</p>
+                <p className="text-[10px] font-semibold text-amber-400 capitalize mt-0.5">
+                  {currentUser?.role === "developer" ? "Chief Developer" : currentUser?.role}
+                </p>
               </div>
             </div>
 
