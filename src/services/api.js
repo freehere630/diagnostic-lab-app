@@ -553,3 +553,82 @@ export async function saveLabSettings(settingsData) {
   if (error) throw error;
   return data;
 }
+
+// ==========================================
+// ON-DEMAND SERVER-SIDE PAGINATED QUERY
+// ==========================================
+export async function getOrdersPaginated({ 
+  page = 1, 
+  pageSize = 20, 
+  dateFrom = "", 
+  dateTo = "", 
+  searchQuery = "" 
+}) {
+  const fromIndex = (page - 1) * pageSize;
+  const toIndex = fromIndex + pageSize - 1;
+
+  try {
+    let query = supabase
+      .from("orders")
+      .select(`
+        *,
+        patient:patients(*),
+        order_tests(*, test:tests(*, test_parameters(*))),
+        results(*)
+      `, { count: "exact" });
+
+    // 1. Date Range Filtering directly on database
+    if (dateFrom && dateTo) {
+      if (dateFrom === dateTo) {
+        query = query.eq("order_date", dateFrom);
+      } else {
+        query = query.gte("order_date", dateFrom).lte("order_date", dateTo);
+      }
+    } else if (dateFrom) {
+      query = query.gte("order_date", dateFrom);
+    } else if (dateTo) {
+      query = query.lte("order_date", dateTo);
+    }
+
+    // 2. Universal Search Filtering on database
+    if (searchQuery && searchQuery.trim()) {
+      const q = searchQuery.trim();
+      query = query.or(`barcode.ilike.%${q}%,patient_id.ilike.%${q}%,id.ilike.%${q}%`);
+    }
+
+    // 3. Paginated Slice & Order
+    query = query.order("order_date", { ascending: false }).range(fromIndex, toIndex);
+
+    const { data, count, error } = await query;
+
+    if (!error && data) {
+      return {
+        orders: data,
+        totalCount: count || 0,
+        page,
+        pageSize,
+        totalPages: Math.ceil((count || 0) / pageSize)
+      };
+    }
+  } catch (err) {
+    console.warn("Paginated query notice:", err.message);
+  }
+
+  // Fallback if relational joins fail: simple range query
+  try {
+    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
+    if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
+    if (dateTo) fallback = fallback.lte("order_date", dateTo);
+
+    const { data, count } = await fallback.order("order_date", { ascending: false }).range(fromIndex, toIndex);
+    return {
+      orders: data || [],
+      totalCount: count || 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize)
+    };
+  } catch (e) {
+    return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 };
+  }
+}
