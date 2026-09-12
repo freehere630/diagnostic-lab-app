@@ -9,14 +9,15 @@ export default function ReceptionPOS({
   testCatalog = [],
   patientForm,
   setPatientForm,
-  selectedTestIds,
+  selectedTestIds = [],
   setSelectedTestIds,
-  discountVal,
+  discountVal = 0,
   setDiscountVal,
   paidVal,
   setPaidVal,
   handleSaveOrderToDb,
-  isLoading
+  isLoading,
+  doctorsList = [] // <--- Passed safely with default empty array
 }) {
   const [posFilterType, setPosFilterType] = useState("ALL"); // 'ALL' | 'SINGLE' | 'PROFILE'
   const [posSearch, setPosSearch] = useState("");
@@ -39,7 +40,6 @@ export default function ReceptionPOS({
       test.isProfile === "true";
 
     const params = test.test_parameters || test.parameters || [];
-    // If explicitly marked as profile, OR has more than 1 parameter configured
     return isProfFlag || params.length > 1;
   };
 
@@ -99,7 +99,7 @@ export default function ReceptionPOS({
     }
   }, [netPayable, paidVal, setPaidVal]);
 
-  // Accurate Filtered Catalog (Resolves both single tests and profiles cleanly)
+  // Filtered Catalog
   const filteredCatalog = useMemo(() => {
     return testCatalog.filter((test) => {
       const isProfile = checkIsProfile(test);
@@ -120,9 +120,10 @@ export default function ReceptionPOS({
     });
   }, [testCatalog, posFilterType, posSearch]);
 
-  // Counts for tabs
   const singleCount = useMemo(() => testCatalog.filter(t => !checkIsProfile(t)).length, [testCatalog]);
   const profileCount = useMemo(() => testCatalog.filter(t => checkIsProfile(t)).length, [testCatalog]);
+
+  const safeDoctorsList = Array.isArray(doctorsList) ? doctorsList : [];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full font-sans text-slate-800">
@@ -252,15 +253,42 @@ export default function ReceptionPOS({
                 </select>
               </div>
             </div>
-            <div>
-              <label className="font-bold text-slate-600 uppercase">Referring Doctor</label>
+
+            {/* SEARCHABLE REFERRING DOCTOR WITH AUTO-SUGGEST */}
+            <div className="relative">
+              <label className="font-bold text-slate-600 uppercase flex items-center justify-between">
+                <span>Referring Doctor</span>
+                <span className="text-[10px] text-blue-600 font-normal">Type or select</span>
+              </label>
               <input
                 type="text"
                 value={patientForm.doctor}
                 onChange={(e) => setPatientForm({ ...patientForm, doctor: e.target.value })}
                 placeholder="Self / Dr. Name"
-                className="w-full mt-1 p-2.5 border border-slate-300 rounded-xl outline-none font-medium"
+                className="w-full mt-1 p-2.5 border border-slate-300 rounded-xl outline-none font-medium focus:ring-2 focus:ring-blue-500"
               />
+
+              {/* Suggestions Dropdown */}
+              {safeDoctorsList.length > 0 && patientForm.doctor && patientForm.doctor.length >= 2 && !safeDoctorsList.some(d => d.name?.toLowerCase() === patientForm.doctor.toLowerCase()) && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-200 z-50 max-h-44 overflow-y-auto divide-y divide-slate-100">
+                  {safeDoctorsList
+                    .filter(d => (d.name && d.name.toLowerCase().includes(patientForm.doctor.toLowerCase())) || (d.chamber && d.chamber.toLowerCase().includes(patientForm.doctor.toLowerCase())))
+                    .map(doc => (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => setPatientForm({ ...patientForm, doctor: `${doc.name} (${doc.degrees || doc.chamber || ''})`.trim() })}
+                        className="w-full p-2.5 text-left text-xs hover:bg-blue-50 transition flex justify-between items-center"
+                      >
+                        <div>
+                          <p className="font-bold text-slate-800">{doc.name}</p>
+                          <p className="text-[10px] text-slate-500">{doc.degrees} • {doc.chamber}</p>
+                        </div>
+                        <span className="text-[10px] text-blue-600 font-bold">Pick ➔</span>
+                      </button>
+                    ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -269,8 +297,6 @@ export default function ReceptionPOS({
           {/* DYNAMIC TEST FILTER SWITCHERS */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
             <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs">
-              
-              {/* Button: All Tests */}
               <button
                 type="button"
                 onClick={() => setPosFilterType("ALL")}
@@ -283,7 +309,6 @@ export default function ReceptionPOS({
                 All Tests ({testCatalog.length})
               </button>
 
-              {/* Button: Single Tests */}
               <button
                 type="button"
                 onClick={() => setPosFilterType("SINGLE")}
@@ -296,7 +321,6 @@ export default function ReceptionPOS({
                 Single Tests ({singleCount})
               </button>
 
-              {/* Button: Profiles & Panels */}
               <button
                 type="button"
                 onClick={() => setPosFilterType("PROFILE")}
@@ -310,7 +334,6 @@ export default function ReceptionPOS({
               </button>
             </div>
 
-            {/* Test Search Bar */}
             <div className="relative w-full sm:w-64">
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <input

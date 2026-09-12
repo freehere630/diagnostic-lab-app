@@ -3,7 +3,8 @@ import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult, 
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest, 
   deleteTest, getStaffUsers, registerStaffUser, deleteStaffUser,
-  getLabSettings, saveLabSettings, settleOrderDue
+  getLabSettings, saveLabSettings, settleOrderDue,
+  getDoctorsList, createOrUpdateDoctor, deleteDoctor, seedRadiologyCatalog
 } from "./services/api";
 import { supabase } from "./supabaseClient";
 
@@ -21,15 +22,17 @@ import TestManager from "./components/TestManager";
 import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
 import PatientLivePortal from "./components/PatientLivePortal";
+import DoctorManagement from "./components/DoctorManagement";
 
 const MASTER_SAMPLE_TYPES = [
   "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", 
-  "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)"
+  "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)", 
+  "Radiological Study", "Ultrasound Protocol", "Non-Contrast CT Head", "12-Lead Tracing"
 ];
 
 const MASTER_TUBE_COLORS = [
   "Purple / Lavender (EDTA)", "Red / Yellow (SST / Plain Clot)", 
-  "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup"
+  "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup", "No Specimen (Imaging)"
 ];
 
 export default function App() {
@@ -45,9 +48,10 @@ export default function App() {
   const [departments, setDepartments] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
   const [staffList, setStaffList] = useState([]);
+  const [doctorsList, setDoctorsList] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
 
-  // Paginated Orders State (20 records per page)
+  // Orders & Pagination
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [trackingStatus, setTrackingStatus] = useState({});
@@ -55,17 +59,17 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Default to TODAY
+  // Date Filter Defaults
   const [activePreset, setActivePreset] = useState("TODAY");
   const [dateRange, setDateRange] = useState({ from: todayStr, to: todayStr });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Public Live Patient Tracking & Verification Portal
+  // Patient Tracking Portal
   const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
 
-  // POS Form States
+  // POS Form
   const [selectedTestIds, setSelectedTestIds] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
   const [paidVal, setPaidVal] = useState(undefined);
@@ -79,7 +83,7 @@ export default function App() {
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] 
   });
 
-  // 1. Check for Public QR Scan in URL (?track=ORD-... or ?verify=ORD-... or ?bc=LAB-...)
+  // 1. Check Public QR Scan Link
   useEffect(() => {
     const checkPublicQrScan = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -91,6 +95,9 @@ export default function App() {
       try {
         const settings = await getLabSettings();
         if (settings) setLabSettings(settings);
+
+        const staff = await getStaffUsers();
+        if (staff && staff.length > 0) setStaffList(staff);
 
         let query = supabase.from("orders").select(`
           *,
@@ -107,26 +114,29 @@ export default function App() {
         if (error || !data) {
           const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
           const matched = local.find(o => o.id === trackId || o.orderId === trackId || o.barcode === barcode);
-          if (matched) {
-            setPatientTrackingOrder(matched);
-          } else {
-            setVerificationError("Report record not found or invalid barcode certificate.");
-          }
+          if (matched) setPatientTrackingOrder(matched);
+          else setVerificationError("Report record not found or invalid certificate.");
         } else {
           const matchedTests = (data.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
+          const resolvedDoc = data.patient?.address?.startsWith("Ref: ") 
+            ? data.patient.address.replace("Ref: ", "") 
+            : (data.patient?.doctor || "Self");
+
           setPatientTrackingOrder({
             orderId: data.id,
             receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "")}-${data.id.slice(-4)}`,
             date: data.order_date,
             createdAt: data.created_at || data.order_date,
             barcode: data.barcode,
-            patient: data.patient || { id: data.patient_id, name: "Patient", gender: "Other" },
-            tests: matchedTests,
-            billing: { 
-              paid: data.paid_amount || 0, 
-              due: data.due_amount || 0, 
-              netPayable: data.net_payable || 0 
+            doctor: resolvedDoc,
+            patient: { 
+              ...(data.patient || {}), 
+              id: data.patient_id, 
+              name: data.patient?.name || "Patient", 
+              doctor: resolvedDoc 
             },
+            tests: matchedTests,
+            billing: { paid: data.paid_amount || 0, due: data.due_amount || 0, netPayable: data.net_payable || 0 },
             results: (data.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
             qcStatus: data.qc_status || "Pending",
             isLocked: data.is_locked || false,
@@ -143,7 +153,7 @@ export default function App() {
     checkPublicQrScan();
   }, []);
 
-  // 2. Fetch Master Data Once on Login
+  // 2. Fetch Master Data
   useEffect(() => {
     if (!currentUser) return;
     const fetchMaster = async () => {
@@ -152,6 +162,7 @@ export default function App() {
         setDepartments(depts || []);
         setTestCatalog(tests || []);
         setStaffList((await getStaffUsers()) || []);
+        setDoctorsList((await getDoctorsList()) || []);
         setLabSettings(await getLabSettings());
       } catch (e) {
         console.warn("Master fetch warning:", e);
@@ -160,7 +171,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // 3. Lazy Paginated Fetch (Strictly Newest Timestamp First)
+  // 3. Paginated Orders Fetch (Accurate Doctor Resolution)
   const fetchPaginatedOrders = async () => {
     if (!currentUser) return;
     setIsLoading(true);
@@ -175,13 +186,29 @@ export default function App() {
 
       const formatted = (res.orders || []).map((o, idx) => {
         const matchedTests = (o.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
+        
+        // Accurate Doctor Resolution from address / patient / doctor
+        const resolvedDoctor = 
+          (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
+            ? o.patient.address.replace("Ref: ", "") 
+            : (o.patient?.doctor || o.doctor || "Self");
+
         return {
           orderId: o.id || o.orderId,
           receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "")}-${String(1001 + idx)}`,
           date: o.order_date || o.date || todayStr,
           createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
           barcode: o.barcode,
-          patient: o.patient || { id: o.patient_id || `PID-${1000 + idx}`, name: "Patient", phone: "N/A", age: 0, gender: "Other" },
+          doctor: resolvedDoctor,
+          patient: {
+            ...(o.patient || {}),
+            id: o.patient_id || `PID-${1000 + idx}`,
+            name: o.patient?.name || "Patient",
+            phone: o.patient?.phone || "N/A",
+            age: o.patient?.age || 0,
+            gender: o.patient?.gender || "Other",
+            doctor: resolvedDoctor
+          },
           tests: matchedTests.length > 0 ? matchedTests : (o.tests || []),
           billing: o.billing || { 
             subTotal: parseFloat(o.subtotal) || 0, 
@@ -199,7 +226,6 @@ export default function App() {
         };
       });
 
-      // Sort with newest timestamp at top
       formatted.sort((a, b) => {
         const timeA = new Date(a.createdAt || a.date).getTime() || 0;
         const timeB = new Date(b.createdAt || b.date).getTime() || 0;
@@ -224,7 +250,6 @@ export default function App() {
     fetchPaginatedOrders();
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
 
-  // Preset switch handler
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
     setCurrentPage(1);
@@ -251,11 +276,15 @@ export default function App() {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-  // Department vials & grouped reports
+  // Exclude Imaging/Radiology from phlebotomy vial barcodes
   const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
     const vials = {};
     activeOrder.tests.forEach((test) => {
+      const dept = (test.dept_id || test.deptId || "").toUpperCase();
+      const isImaging = dept.includes("RAD") || dept.includes("IMG") || dept.includes("XRAY") || dept.includes("USG");
+      if (isImaging) return;
+
       const deptCode = (test.dept_id || "GEN").replace("DEP-", "");
       const key = `${deptCode}-${test.tube_color || "Vial"}`;
       if (!vials[key]) {
@@ -273,19 +302,43 @@ export default function App() {
     return Object.values(vials);
   }, [activeOrder]);
 
+  // Strict isolation for CBC
   const departmentGroupedReports = useMemo(() => {
     if (!activeOrder?.tests) return [];
     const grouped = {};
+
     activeOrder.tests.forEach((test) => {
-      const deptId = test.dept_id || "DEP-GEN";
-      const deptObj = departments.find((d) => d.id === deptId) || { id: deptId, name: "General Pathology", icon: "🔬" };
-      if (!grouped[deptId]) grouped[deptId] = { dept: deptObj, tests: [] };
-      grouped[deptId].tests.push(test);
+      const code = (test.code || "").toUpperCase();
+      const name = (test.name || "").toUpperCase();
+      const baseDeptId = test.dept_id || test.deptId || "DEP-GEN";
+
+      let groupKey = baseDeptId;
+      let groupName = null;
+      let groupIcon = null;
+
+      if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
+        groupKey = "DEP-HEM-CBC";
+        groupName = "Hematology (Complete Blood Count Automation)";
+        groupIcon = "🩸";
+      }
+
+      if (!grouped[groupKey]) {
+        const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
+        grouped[groupKey] = {
+          dept: {
+            id: groupKey,
+            name: groupName || baseDept.name,
+            icon: groupIcon || baseDept.icon || "🔬"
+          },
+          tests: []
+        };
+      }
+      grouped[groupKey].tests.push(test);
     });
+
     return Object.values(grouped);
   }, [activeOrder, departments]);
 
-  // Save Order to Supabase and immediately place at index 0 (Top)
   const handleSaveOrderToDb = async () => {
     if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
       return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
@@ -305,11 +358,9 @@ export default function App() {
         netPayable: net, 
         paidAmount: finalPaid, 
         dueAmount: finalDue,
-        specimens: [],
         testCatalog: testCatalog
       });
 
-      // Place newly created order at index 0 (Top of the list)
       setOrders(prev => [createdOrder, ...prev.filter(o => o.orderId !== createdOrder.orderId)]);
       setSelectedOrderId(createdOrder.orderId);
 
@@ -318,7 +369,7 @@ export default function App() {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
+      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nRef. Doctor: ${createdOrder.patient?.doctor}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
       setActiveTab("dashboard");
       fetchPaginatedOrders();
     } catch (e) { 
@@ -340,14 +391,13 @@ export default function App() {
         printMoneyReceiptA5({ ...matched, billing: { ...matched.billing, paid: newPaid, due: newDue } }, labSettings);
       }
       fetchPaginatedOrders();
-    } catch (e) {
-      alert("Error collecting due: " + e.message);
+    } catch (e) { 
+      alert("Error collecting due: " + e.message); 
     } finally { 
       setIsLoading(false); 
     }
   };
 
-  // Real-time result input
   const handleResultInput = async (paramId, val) => {
     if (!activeOrder || activeOrder.isLocked) return;
     const previousOrders = [...orders];
@@ -365,7 +415,6 @@ export default function App() {
     }
   };
 
-  // Real-time pathologist remarks update
   const handleRemarksChange = (val) => {
     if (!activeOrder || activeOrder.isLocked) return;
     setOrders((prev) =>
@@ -375,7 +424,6 @@ export default function App() {
     );
   };
 
-  // Verify and lock order in Supabase with remarks
   const handleVerifyInDb = async () => {
     if (!activeOrder) return;
     setIsLoading(true);
@@ -411,12 +459,41 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
+  // Restored full-featured Edit Opening Handler
+  const handleOpenEditModal = (t) => {
+    const rawParams = t.test_parameters || t.parameters || [];
+    const normalizedParams = rawParams.length > 0
+      ? rawParams.map((p, i) => ({
+          id: p.id || `p-${i + 1}`,
+          name: p.name || "",
+          param_type: p.param_type || "numeric",
+          unit: p.unit || "",
+          min: p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : ""),
+          max: p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : "")
+        }))
+      : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "" }];
+
+    setEditingTest({
+      ...t,
+      id: t.id,
+      name: t.name || "",
+      code: t.code || "",
+      deptId: t.dept_id || t.deptId || (departments[0]?.id || "DEP-BIO"),
+      dept_id: t.dept_id || t.deptId || (departments[0]?.id || "DEP-BIO"),
+      price: t.price || "",
+      sampleType: t.sample_type || t.sampleType || "Serum",
+      tubeColor: t.tube_color || t.tubeColor || "Red / Yellow (SST / Plain Clot)",
+      isProfile: t.is_profile !== undefined ? Boolean(t.is_profile) : Boolean(t.isProfile),
+      parameters: normalizedParams
+    });
+  };
+
   const handleSaveTestEdits = async () => {
     if (!editingTest) return;
     setIsLoading(true);
     try {
       await updateExistingTest(editingTest.id, editingTest);
-      alert("✅ Test Updated!");
+      alert("✅ Test Updated Successfully!");
       setEditingTest(null);
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
@@ -431,6 +508,22 @@ export default function App() {
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+  };
+
+  // Seeding Radiology & Imaging with live update (NO RELOAD)
+  const handleSeedRadiology = async () => {
+    setIsLoading(true);
+    try {
+      await seedRadiologyCatalog();
+      const { departments: depts, tests } = await getMasterData();
+      setDepartments(depts || []);
+      setTestCatalog(tests || []);
+      alert("✅ Standard Radiology & Imaging Catalog (X-Ray, USG, CT, MRI, ECG) added successfully!");
+    } catch (e) {
+      alert("Notice loading radiology tests: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleRegisterStaff = async (staffData) => {
@@ -451,6 +544,31 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
+  const handleSaveDoctor = async (docData) => {
+    setIsLoading(true);
+    try {
+      await createOrUpdateDoctor(docData);
+      setDoctorsList((await getDoctorsList()) || []);
+      alert("✅ Doctor Saved Successfully!");
+    } catch (e) {
+      alert("Error saving doctor: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteDoctor = async (docId) => {
+    setIsLoading(true);
+    try {
+      await deleteDoctor(docId);
+      setDoctorsList((await getDoctorsList()) || []);
+    } catch (e) {
+      alert("Error deleting doctor: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSaveSettings = async (settingsData) => {
     setIsLoading(true);
     try {
@@ -461,9 +579,6 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // =========================================================================
-  // PUBLIC QR SCANNING / LIVE PATIENT TRACKING SCREEN
-  // =========================================================================
   if (isVerifyingPublicUrl) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white font-sans">
@@ -474,7 +589,6 @@ export default function App() {
     );
   }
 
-  // Opens directly on mobile when scanning receipt or report QR code
   if (patientTrackingOrder || verificationError) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
@@ -482,10 +596,7 @@ export default function App() {
           <PatientLivePortal
             order={patientTrackingOrder}
             labSettings={labSettings}
-            onClose={() => {
-              window.history.replaceState({}, document.title, window.location.pathname);
-              setPatientTrackingOrder(null);
-            }}
+            staffList={staffList}
           />
         ) : (
           <div className="bg-white p-6 rounded-2xl max-w-sm w-full text-center space-y-3">
@@ -506,7 +617,6 @@ export default function App() {
     );
   }
 
-  // If user is not logged in and not scanning a QR code, show Login
   if (!currentUser) {
     return (
       <Login 
@@ -586,6 +696,7 @@ export default function App() {
             handlePrintMoneyReceipt={() => printMoneyReceiptA5(activeOrder, labSettings)} 
             activeOrder={activeOrder} 
             isLoading={isLoading} 
+            doctorsList={doctorsList}
           />
         )}
 
@@ -643,7 +754,8 @@ export default function App() {
             handleDeleteTest={handleDeleteTest} 
             editingTest={editingTest} 
             setEditingTest={setEditingTest} 
-            handleOpenEditModal={(t) => setEditingTest({ ...t, parameters: t.test_parameters || t.parameters || [] })} 
+            handleOpenEditModal={handleOpenEditModal}
+            handleSeedRadiology={handleSeedRadiology}
             MASTER_SAMPLE_TYPES={MASTER_SAMPLE_TYPES} 
             MASTER_TUBE_COLORS={MASTER_TUBE_COLORS} 
             isLoading={isLoading} 
@@ -663,6 +775,15 @@ export default function App() {
           <LabSettings 
             labSettings={labSettings} 
             handleSaveSettings={handleSaveSettings} 
+            isLoading={isLoading} 
+          />
+        )}
+
+        {activeTab === "doctor-manager" && (
+          <DoctorManagement 
+            doctorsList={doctorsList} 
+            handleSaveDoctor={handleSaveDoctor} 
+            handleDeleteDoctor={handleDeleteDoctor} 
             isLoading={isLoading} 
           />
         )}

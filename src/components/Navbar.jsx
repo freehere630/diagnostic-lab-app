@@ -1,8 +1,21 @@
 import React from "react";
 import {
-  FlaskConical, Database, RefreshCw, Menu, X, Activity, 
-  Receipt, QrCode, Layers, ShieldCheck, FileText, Settings, 
-  UserCheck, Building2, LogOut
+  FlaskConical,
+  Database,
+  RefreshCw,
+  Menu,
+  X,
+  Activity,
+  Receipt,
+  QrCode,
+  Layers,
+  ShieldCheck,
+  FileText,
+  Settings,
+  UserCheck,
+  Building2,
+  Stethoscope, // <--- Imported here
+  LogOut
 } from "lucide-react";
 
 export default function Navbar({
@@ -16,7 +29,6 @@ export default function Navbar({
   isLoading,
   labSettings
 }) {
-  // Navigation Tabs with Permission Mapping
   const allTabs = [
     { 
       id: "dashboard", 
@@ -71,6 +83,12 @@ export default function Navbar({
       label: "8. Hospital Branding", 
       icon: Building2, 
       roles: ["developer"] // Developer Only
+    },
+    { 
+      id: "doctor-manager", 
+      label: "9. Doctor Directory", 
+      icon: Stethoscope, 
+      roles: ["developer", "manager", "admin", "receptionist"] 
     },
   ];
 

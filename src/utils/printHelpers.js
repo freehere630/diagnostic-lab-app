@@ -64,32 +64,119 @@ export function compileTemplate(templateHtml, tokens) {
 export function getActiveTemplate(settings, type = "report") {
   const directKey = type === "report" ? "apex_report_template" : "apex_receipt_template";
   const directVal = localStorage.getItem(directKey);
-  if (directVal && directVal.trim()) return directVal;
+  if (directVal && directVal.trim() && !directVal.includes("border: 2px solid #000") && !directVal.includes("border: 1.5px solid #000")) {
+    return directVal;
+  }
 
   const designObj = type === "report" 
     ? (settings?.report_design || settings?.reportDesign)
     : (settings?.receipt_design || settings?.receiptDesign);
 
-  if (typeof designObj === "object" && designObj?.templateHtml) {
+  if (typeof designObj === "object" && designObj?.templateHtml && !designObj.templateHtml.includes("border: 2px solid #000")) {
     return designObj.templateHtml;
   }
-
-  try {
-    const cached = JSON.parse(localStorage.getItem("apex_lab_settings") || "{}");
-    const cachedTemplate = type === "report" 
-      ? cached.report_design?.templateHtml || cached.reportDesign?.templateHtml
-      : cached.receipt_design?.templateHtml || cached.receiptDesign?.templateHtml;
-    if (cachedTemplate && cachedTemplate.trim()) return cachedTemplate;
-  } catch (e) {}
 
   return "";
 }
 
-// Single Master Header for Reports
-export function buildUnifiedResultsTable(tests = [], results = {}) {
+export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = "") {
+  const d = (deptId || test?.dept_id || test?.deptId || "").toUpperCase();
+  const dn = (deptName || "").toUpperCase();
+  const s = (test?.sample_type || "").toLowerCase();
+  const c = (test?.code || "").toUpperCase();
+  const n = (test?.name || "").toUpperCase();
+
+  return (
+    d.includes("RAD") || d.includes("USG") || d.includes("CT") || d.includes("MRI") || 
+    d.includes("CARD") || d.includes("XRAY") || d.includes("IMG") ||
+    dn.includes("RADIOLOGY") || dn.includes("IMAGING") || dn.includes("CARDIOLOGY") || 
+    dn.includes("ULTRASONO") || dn.includes("X-RAY") || dn.includes("ECG") || dn.includes("ECHO") ||
+    s.includes("imaging") || s.includes("radiolog") || s.includes("tracing") || s.includes("no specimen") ||
+    c.includes("XRAY") || c.includes("USG") || c.includes("CT") || c.includes("MRI") || c.includes("ECG") || c.includes("ECHO") ||
+    n.includes("X-RAY") || n.includes("ULTRASO") || n.includes("CT SCAN") || n.includes("MRI") || n.includes("ELECTROCARDIOGRAM")
+  );
+}
+
+// Clean Medical Radiology Sheet (No outer border, standard clinical typography)
+function renderRadiologyInvestigationSheet(test, results, deptName) {
+  const rawParams = test.test_parameters || test.parameters || [];
+  const paramId = rawParams[0]?.id || test.id;
+  const rawText = results?.[paramId]?.value || results?.[test.id]?.value || "Normal study. No significant acute abnormality detected.";
+
+  let indication = "";
+  let findings = rawText;
+  let impression = "";
+
+  if (rawText.includes("CLINICAL INDICATION:") || rawText.includes("INDICATION:")) {
+    const indMatch = rawText.match(/(?:CLINICAL INDICATION|INDICATION):\s*([\s\S]*?)(?=(?:FINDINGS|OBSERVATIONS|IMPRESSION):|$)/i);
+    if (indMatch) indication = indMatch[1].trim();
+  }
+
+  if (rawText.includes("IMPRESSION:") || rawText.includes("CONCLUSION:")) {
+    const impMatch = rawText.match(/(?:IMPRESSION|CONCLUSION):\s*([\s\S]*?)$/i);
+    if (impMatch) impression = impMatch[1].trim();
+  }
+
+  if (rawText.includes("FINDINGS:") || rawText.includes("OBSERVATIONS:")) {
+    const findMatch = rawText.match(/(?:FINDINGS|OBSERVATIONS):\s*([\s\S]*?)(?=(?:IMPRESSION|CONCLUSION):|$)/i);
+    if (findMatch) findings = findMatch[1].trim();
+  } else if (indication || impression) {
+    findings = rawText.replace(/(?:CLINICAL INDICATION|INDICATION):[\s\S]*?(?=(?:FINDINGS|OBSERVATIONS):|$)/i, "")
+                      .replace(/(?:IMPRESSION|CONCLUSION):[\s\S]*$/i, "").trim();
+  }
+
+  return `
+    <div style="margin-top: 14px; margin-bottom: 16px; font-family: Arial, Helvetica, sans-serif;">
+      
+      <!-- Clean Medical Header Bar (Dual Rule) -->
+      <div style="border-top: 1.5px solid #0f172a; border-bottom: 1.5px solid #0f172a; padding: 6px 4px; font-weight: 700; font-size: 8.5pt; text-transform: uppercase; color: #0f172a; display: flex; justify-content: space-between; align-items: center; background: transparent;">
+        <span>Investigation: ${test.name.toUpperCase()} ${test.code ? `(${test.code})` : ""}</span>
+        <span style="font-size: 7.5pt; color: #475569; font-weight: 600;">${deptName || "Imaging"}</span>
+      </div>
+
+      <!-- Content Area -->
+      <div style="padding: 10px 4px 4px 4px; font-size: 8.5pt; line-height: 1.6; color: #1e293b;">
+        ${indication ? `
+          <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #e2e8f0;">
+            <b style="color: #0f172a; text-transform: uppercase; font-size: 8pt; display: block; margin-bottom: 2px;">Clinical Indication & Protocol:</b>
+            <span style="color: #334155;">${indication}</span>
+          </div>
+        ` : `
+          <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #e2e8f0;">
+            <b style="color: #0f172a; text-transform: uppercase; font-size: 8pt; display: block; margin-bottom: 2px;">Technique:</b>
+            <span style="color: #334155;">${test.sample_type || "Standard Clinical Protocol"}</span>
+          </div>
+        `}
+
+        <div style="margin-bottom: 12px;">
+          <b style="color: #0f172a; text-transform: uppercase; font-size: 8pt; display: block; margin-bottom: 4px;">Observations & Findings:</b>
+          <div style="white-space: pre-wrap; font-size: 8.5pt; line-height: 1.65; color: #1e293b; font-weight: 400;">${findings}</div>
+        </div>
+
+        ${impression ? `
+          <div style="margin-top: 14px; padding: 6px 0 0 0; border-top: 1px solid #cbd5e1;">
+            <b style="color: #0f172a; text-transform: uppercase; font-size: 8pt; display: block; margin-bottom: 2px;">Radiological Impression:</b>
+            <div style="font-size: 9pt; color: #0f172a; line-height: 1.5; font-weight: 700;">${impression}</div>
+          </div>
+        ` : ""}
+      </div>
+    </div>
+  `;
+}
+
+// Master Results Table: Borderless container, subtle dual-line header, regular font
+export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", deptName = "") {
   let tableRows = "";
+  let imagingSheets = "";
 
   (tests || []).forEach((test) => {
+    const isImaging = isImagingOrRadiologyInvestigation(test, deptId, deptName);
+
+    if (isImaging) {
+      imagingSheets += renderRadiologyInvestigationSheet(test, results, deptName);
+      return;
+    }
+
     const rawParams = test.test_parameters || test.parameters || [];
     const params = rawParams.length > 0 ? rawParams : [{
       id: test.id,
@@ -106,16 +193,14 @@ export function buildUnifiedResultsTable(tests = [], results = {}) {
       test.is_profile === "true" || 
       test.is_profile === 1 || 
       test.isProfile === true || 
-      test.isProfile === "true" ||
       params.length > 1
     );
 
-    // Profile Section Header
     if (isProfile) {
       tableRows += `
-        <tr style="background-color: #f1f5f9; border-top: 1.5px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
-          <td colspan="4" style="padding: 6px 10px; font-weight: 900; font-size: 8.5pt; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">
-            ✦ ${test.name} ${test.code ? `(${test.code})` : ""}
+        <tr style="background-color: #f8fafc; border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
+          <td colspan="4" style="padding: 5px 8px; font-weight: 700; font-size: 8.5pt; color: #0f172a; text-transform: uppercase;">
+            ${test.name} ${test.code ? `(${test.code})` : ""}
           </td>
         </tr>
       `;
@@ -143,128 +228,53 @@ export function buildUnifiedResultsTable(tests = [], results = {}) {
       if (p.param_type === "numeric" && p.min_range !== null && p.max_range !== null && p.min_range !== undefined) {
         refRange = `${p.min_range} – ${p.max_range}`;
       } else if (p.param_type === "qualitative") {
-        refRange = "Negative / Non-Reactive";
+        refRange = "Negative";
       }
 
-      let valStyle = "font-family: monospace; font-weight: 700; font-size: 9pt; color: #000;";
-      if (p.param_type === "numeric" && val !== "—") {
-        const num = parseFloat(val);
-        if (!isNaN(num)) {
-          if (p.min_range !== null && num < p.min_range) valStyle += " color: #b45309; font-weight: 900;";
-          if (p.max_range !== null && num > p.max_range) valStyle += " color: #b91c1c; font-weight: 900;";
-        }
-      } else if (p.param_type === "qualitative" && (String(val).toLowerCase() === "positive" || String(val).toLowerCase() === "reactive")) {
-        valStyle += " color: #b91c1c; font-weight: 900;";
-      }
+      // STANDARD MEDICAL FONT FOR VALUES (Legible, regular weight, solid black)
+      const valStyle = "font-family: Arial, Helvetica, sans-serif; font-weight: 600; font-size: 8.5pt; color: #000000;";
 
       tableRows += `
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 5px 10px; font-size: 8.5pt; color: #1e293b; font-weight: 500;">${displayName}</td>
-          <td style="padding: 5px 10px; ${valStyle}">${val}</td>
-          <td style="padding: 5px 10px; font-size: 8pt; color: #475569; font-family: monospace;">${p.unit || test.unit || "—"}</td>
-          <td style="padding: 5px 10px; font-size: 8pt; color: #475569; font-family: monospace;">${refRange}</td>
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 5px 8px; font-size: 8.5pt; color: #334155;">${displayName}</td>
+          <td style="padding: 5px 8px; ${valStyle}">${val}</td>
+          <td style="padding: 5px 8px; font-size: 8pt; color: #64748b;">${p.unit || test.unit || "—"}</td>
+          <td style="padding: 5px 8px; font-size: 8pt; color: #64748b;">${refRange}</td>
         </tr>
       `;
     });
   });
 
-  return `
-    <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  if (!tableRows && imagingSheets) {
+    return imagingSheets;
+  }
+
+  // BORDERLESS REPORT TABLE WITH CLEAN SUBTLE RULES
+  const pathologyTable = tableRows ? `
+    <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-family: Arial, Helvetica, sans-serif;">
       <thead>
-        <tr style="border: 1px solid #e2e8f0; background-color: #F8FAFC; color: black; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.5px;">
-          <th style="padding: 6px 10px; text-align: left; width: 42%;">Test Parameter</th>
-          <th style="padding: 6px 10px; text-align: left; width: 22%;">Observed Result</th>
-          <th style="padding: 6px 10px; text-align: left; width: 16%;">Unit</th>
-          <th style="padding: 6px 10px; text-align: left; width: 20%;">Reference Range</th>
+        <tr style="border-top: 1.5px solid #0f172a; border-bottom: 1.5px solid #0f172a; color: #0f172a; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.5px; background: transparent;">
+          <th style="padding: 6px 8px; text-align: left; width: 44%; font-weight: 700;">Test Parameter</th>
+          <th style="padding: 6px 8px; text-align: left; width: 22%; font-weight: 700;">Observed Result</th>
+          <th style="padding: 6px 8px; text-align: left; width: 14%; font-weight: 700;">Unit</th>
+          <th style="padding: 6px 8px; text-align: left; width: 20%; font-weight: 700;">Reference Range</th>
         </tr>
       </thead>
       <tbody>
         ${tableRows}
       </tbody>
     </table>
-  `;
+  ` : "";
+
+  return pathologyTable + imagingSheets;
 }
 
 // =========================================================================
-// 1. A4 CLINICAL REPORT PRINT DRIVER (REMARKS GUARANTEED ON EVERY REPORT)
+// 1. A4 CLINICAL REPORT (BORDERLESS WITH HIGH-LEGIBILITY STAFF TYPOGRAPHY)
 // =========================================================================
 export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, departmentGroupedReports, staffList = [], labSettings = {}, onPrintedCallback) {
   if (!activeOrder) return;
   if (onPrintedCallback) onPrintedCallback();
-
-  const techUser = staffList.find((u) => u.role === "technologist") || { 
-    full_name: "Md. Al-Amin", 
-    designation: "BSc in Medical Technology - Senior Technologist", 
-    signature_data: "" 
-  };
-  const verifierUser = staffList.find((u) => u.role === "verifier" || u.role === "admin") || { 
-    full_name: "Dr. S. Rahman", 
-    designation: "MBBS, MD (Pathology) - Consultant Biochemist & Lab Incharge", 
-    signature_data: "" 
-  };
-
-  const renderSignatureHtml = (sigData, fallbackName) => {
-    if (sigData && sigData.startsWith("data:image")) {
-      return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 2px auto; display: block;" />`;
-    }
-    return `<div style="font-family: 'Brush Script MT', cursive; font-size: 18pt; color: #000; height: 34px; line-height: 34px;">${sigData || fallbackName}</div>`;
-  };
-
-  let templateToUse = getActiveTemplate(labSettings, "report");
-  if (!templateToUse) {
-    templateToUse = `
-      <div style="border: 2px solid #000; border-radius: 8px; padding: 14px 16px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <div>
-          <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              {{hospital_logo}}
-              <div>
-                <h1 style="font-size: 16pt; font-weight: 900; margin: 0; color: #0f172a;">{{hospital_name}}</h1>
-                <p style="font-size: 8.5pt; font-weight: 700; color: #334155; margin: 2px 0;">DEPARTMENT OF {{department_name}} ({{hospital_tagline}})</p>
-                <p style="font-size: 7.5pt; color: #475569; margin: 0;">{{hospital_address}} • Phone: {{hospital_phone}}</p>
-              </div>
-            </div>
-            <div style="text-align: right; width: 85px;">
-              {{qr_code}}
-              <span style="font-size: 6pt; font-family: monospace; display: block; text-align: center; margin-top: 2px;">Scan to Verify</span>
-            </div>
-          </div>
-
-          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 8.5pt;">
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>{{patient_name}}</b></div>
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>{{age_gender}}</b></div>
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="font-family: monospace; color: #1d4ed8;">{{patient_id}}</b></div>
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>{{doctor}}</b></div>
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>{{date}}</b></div>
-            <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">{{barcode}}</b></div>
-          </div>
-
-          {{results_table}}
-          {{remarks}}
-        </div>
-
-        <div>
-          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-            <div style="text-align: center; width: 220px;">
-              {{tech_signature}}
-              <div style="border-top: 1.5px solid #000; padding-top: 4px;">
-                <div style="font-weight: 800; font-size: 8.5pt;">{{tech_name}}</div>
-                <div style="font-size: 7pt; color: #334155;">{{tech_designation}}</div>
-              </div>
-            </div>
-            <div style="text-align: center; width: 220px;">
-              {{doctor_signature}}
-              <div style="border-top: 1.5px solid #000; padding-top: 4px;">
-                <div style="font-weight: 800; font-size: 8.5pt;">{{doctor_name}}</div>
-                <div style="font-size: 7pt; color: #334155;">{{doctor_designation}}</div>
-              </div>
-            </div>
-          </div>
-          <p style="text-align: center; font-size: 6.5pt; color: #64748b; margin: 10px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">{{report_footer}}</p>
-        </div>
-      </div>
-    `;
-  }
 
   const deptGroupsToPrint = targetDeptId === "ALL"
     ? departmentGroupedReports
@@ -274,48 +284,116 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
   const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
   const scannableQrSvg = generateQrSvgString(qrUrl, 56);
 
-  // GUARANTEE REMARKS ON REPORT
-  const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
-    ? activeOrder.verifierRemarks
-    : "Clinically correlated and verified with internal quality control standards.";
-
-  const remarksHtml = `
-    <div style="margin-top: 20px; padding: 3px 10px;  font-size: 7pt; color: #1e293b;">
-      <b style="color: #0f172a; text-transform: uppercase; font-size: 6pt;">Pathologist Remarks / Interpretation:</b> 
-      <span style="font-style: italic; margin-left: 4px; ">${remarksText}</span>
-    </div>
-  `;
+  const doctorName = 
+    activeOrder.doctor || 
+    activeOrder.patient?.doctor || 
+    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) || 
+    "Self";
 
   const pagesHtml = (deptGroupsToPrint || []).map((group, idx) => {
-    const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {});
+    const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
 
-    const tokens = {
-      hospital_name: (labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase(),
-      hospital_tagline: labSettings?.tagline || "ISO 15189 Certified Reference Lab",
-      hospital_address: labSettings?.address || "Dhanmondi, Dhaka",
-      hospital_phone: labSettings?.phone || "+880 9612-345678",
-      hospital_logo: labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 44px; max-width: 120px; object-fit: contain;" />` : "",
-      department_name: (group.dept?.name || "General Diagnostics").toUpperCase(),
-      patient_name: activeOrder.patient?.name || "Patient",
-      age_gender: `${activeOrder.patient?.age || ""}Y / ${activeOrder.patient?.gender || ""}`,
-      patient_id: activeOrder.patient?.id || "N/A",
-      doctor: activeOrder.patient?.doctor || "Self",
-      date: activeOrder.date || new Date().toISOString().slice(0, 10),
-      barcode: activeOrder.barcode || "",
-      qr_code: scannableQrSvg,
-      results_table: testsTableHtml,
-      remarks: remarksHtml, // <--- Always populated
-      tech_name: techUser.full_name,
-      tech_designation: techUser.designation,
-      tech_signature: renderSignatureHtml(techUser.signature_data, techUser.full_name),
-      doctor_name: verifierUser.full_name,
-      doctor_designation: verifierUser.designation,
-      doctor_signature: renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name),
-      report_footer: labSettings?.report_footer || "This is a clinically verified electronic laboratory report."
+    const techUser = staffList.find((u) => u.role === "technologist") || { 
+      full_name: "Md. Al-Amin", 
+      designation: isImaging ? "Senior Medical Radiographer / Imaging Technologist" : "BSc in Medical Technology - Senior Technologist", 
+      signature_data: "" 
     };
 
+    const verifierUser = staffList.find((u) => 
+      u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
+    ) || { 
+      full_name: "Dr. S. Rahman", 
+      designation: isImaging ? "MBBS, MD / FCPS - Consultant Radiologist & Physician" : "MBBS, MD (Pathology) - Consultant Biochemist & Lab Incharge", 
+      signature_data: "" 
+    };
+
+    // HIGH-LEGIBILITY STAFF SIGNATURE (No difficult-to-read cursive)
+    const renderSignatureHtml = (sigData, fallbackName) => {
+      if (sigData && sigData.startsWith("data:image")) {
+        return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
+      }
+      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">${sigData || fallbackName}</div>`;
+    };
+
+    const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
+
+    const investigationNames = (group.tests || []).map(t => t.name).join(", ");
+    const sixthSlotDemographics = isImaging
+      ? `<div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Investigation:</span> <b style="color: #0f172a;">${investigationNames}</b></div>`
+      : `<div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">${activeOrder.barcode || ""}</b></div>`;
+
+    const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
+      ? activeOrder.verifierRemarks
+      : "Clinically correlated and verified with quality control standards.";
+
+    // REMARKS: Clean inline note (NO box, NO background, NO border)
+    const remarksHtml = isImaging ? "" : `
+      <div style="margin-top: 14px; font-size: 8.5pt; color: #1e293b; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
+        <span style="font-weight: 700; text-transform: uppercase; color: #0f172a;">Pathologist Remarks:</span> 
+        <span style="margin-left: 6px; color: #334155;">${remarksText}</span>
+      </div>
+    `;
+
+    // BORDERLESS A4 REPORT TEMPLATE (No outer border, clean professional layout)
+    const pageTemplate = `
+      <div style="border: none; padding: 0; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, Helvetica, sans-serif; background: #ffffff;">
+        <div>
+          <!-- HEADER -->
+          <div style="border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 44px; max-width: 120px; object-fit: contain;" />` : ""}
+              <div>
+                <h1 style="font-size: 16pt; font-weight: 900; margin: 0; color: #0f172a; letter-spacing: 0.2px;">${(labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase()}</h1>
+                <p style="font-size: 8.5pt; font-weight: 700; color: #334155; margin: 2px 0;">DEPARTMENT OF ${(group.dept?.name || "Diagnostics").toUpperCase()} (${labSettings?.tagline || "ISO Certified"})</p>
+                <p style="font-size: 7.5pt; color: #475569; margin: 0;">${labSettings?.address || "Dhanmondi, Dhaka"} • Phone: ${labSettings?.phone || "+880 9612-345678"}</p>
+              </div>
+            </div>
+            <div style="text-align: right; width: 85px;">
+              ${scannableQrSvg}
+              <span style="font-size: 6pt; font-family: Arial, sans-serif; font-weight: bold; display: block; text-align: center; margin-top: 2px;">Scan to Verify</span>
+            </div>
+          </div>
+
+          <!-- PATIENT DEMOGRAPHICS -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 8.5pt;">
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>${activeOrder.patient?.name || "Patient"}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>${activeOrder.patient?.age || ""}Y / ${activeOrder.patient?.gender || ""}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="color: #1d4ed8;">${activeOrder.patient?.id || "N/A"}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>${doctorName}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></div>
+            ${sixthSlotDemographics}
+          </div>
+
+          <!-- RESULTS CONTENT -->
+          ${testsTableHtml}
+          ${remarksHtml}
+        </div>
+
+        <!-- HIGH-LEGIBILITY STAFF TYPOGRAPHY (NO CURSIVE) -->
+        <div>
+          <div style="margin-top: 24px; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+            <div style="text-align: center; width: 230px;">
+              ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
+              <div style="border-top: 1.5px solid #0f172a; padding-top: 4px;">
+                <div style="font-family: Arial, Helvetica, sans-serif; font-weight: 800; font-size: 9pt; color: #0f172a;">${techUser.full_name}</div>
+                <div style="font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; font-weight: 500; color: #475569; margin-top: 2px;">${techUser.designation}</div>
+              </div>
+            </div>
+            <div style="text-align: center; width: 230px;">
+              ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
+              <div style="border-top: 1.5px solid #0f172a; padding-top: 4px;">
+                <div style="font-family: Arial, Helvetica, sans-serif; font-weight: 800; font-size: 9pt; color: #0f172a;">${verifierUser.full_name}</div>
+                <div style="font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; font-weight: 500; color: #475569; margin-top: 2px;">${verifierUser.designation}</div>
+              </div>
+            </div>
+          </div>
+          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinically verified electronic laboratory report."}</p>
+        </div>
+      </div>
+    `;
+
     const isLastPage = idx === deptGroupsToPrint.length - 1;
-    return `<div style="${isLastPage ? "" : "page-break-after: always;"}">${compileTemplate(templateToUse, tokens)}</div>`;
+    return `<div style="${isLastPage ? "" : "page-break-after: always;"}">${pageTemplate}</div>`;
   }).join("");
 
   const iframe = document.createElement("iframe");
@@ -335,9 +413,9 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
       <head>
         <title>Report - ${activeOrder.barcode || activeOrder.orderId}</title>
         <style>
-          @page { size: A4 portrait; margin: 10mm 12mm; }
+          @page { size: A4 portrait; margin: 12mm 14mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #000; background: #fff; }
+          body { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; }
         </style>
       </head>
       <body>${pagesHtml}</body>
@@ -353,7 +431,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
 }
 
 // =========================================================================
-// 2. A5 RECEIPT PRINT DRIVER
+// 2. A5 RECEIPT PRINT DRIVER (BORDERLESS RECEIPT WITH THERMAL MONOSPACE)
 // =========================================================================
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
@@ -368,137 +446,118 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const orderId = activeOrd.orderId || activeOrd.id || "ORD-001";
   const barcode = activeOrd.barcode || "";
 
+  const doctorName = 
+    activeOrd.doctor || 
+    activeOrd.patient?.doctor || 
+    (activeOrd.patient?.address && activeOrd.patient.address.startsWith("Ref: ") ? activeOrd.patient.address.replace("Ref: ", "") : null) || 
+    "Self";
+
   const trackingUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(barcode)}`;
   const scannableTrackingQrSvg = generateQrSvgString(trackingUrl, 56);
 
   const qrBlockHtml = `
     <div style="text-align: center; width: 95px; margin: 0 auto;">
       ${scannableTrackingQrSvg}
-      <span style="font-size: 5.5pt; font-family: sans-serif; font-weight: bold; display: block; color: #0f172a; margin-top: 1px; text-align: center;">
+      <span style="font-size: 5.5pt; font-family: 'Consolas', 'Courier New', monospace; font-weight: bold; display: block; color: #000; margin-top: 1px; text-align: center;">
         Scan for Live Report
       </span>
     </div>
   `;
 
   const itemsHtml = (activeOrd.tests || []).map((t, idx) => `
-    <tr style="border-bottom: 1px solid #e2e8f0;">
-      <td style="padding: 5px 8px; font-weight: 600;">${idx + 1}. ${t.name}</td>
-      <td style="padding: 5px 8px; color: #475569;">${t.sample_type || "Blood"}</td>
-      <td style="padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold;">৳ ${t.price}</td>
+    <tr style="border-bottom: 1px dashed #cbd5e1;">
+      <td style="padding: 4px 6px;">${idx + 1}. ${t.name}</td>
+      <td style="padding: 4px 6px; color: #475569;">${t.sample_type || "Standard"}</td>
+      <td style="padding: 4px 6px; text-align: right; font-weight: bold;">৳ ${t.price}</td>
     </tr>
   `).join("");
 
-  let templateToUse = getActiveTemplate(labSettings, "receipt");
-
-  if (!templateToUse) {
-    templateToUse = `
-      <div style="border: 1.5px solid #000; border-radius: 8px; padding: 10px 12px; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <div>
-          <div style="border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              {{hospital_logo}}
-              <div>
-                <h1 style="margin: 0; font-size: 13pt; font-weight: 900;">{{hospital_name}}</h1>
-                <p style="margin: 1px 0; font-size: 7.5pt; color: #334155;">{{hospital_tagline}}</p>
-                <p style="margin: 0; font-size: 7pt; color: #475569;">{{hospital_address}} • Phone: {{hospital_phone}}</p>
-              </div>
+  // BORDERLESS A5 RECEIPT TEMPLATE (Clean dashed dividers, authentic POS mono)
+  const receiptHtml = `
+    <div style="border: none; padding: 0; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: 'Consolas', 'Courier New', Courier, monospace; color: #000; font-size: 8.5pt;">
+      <div>
+        <!-- HEADER -->
+        <div style="border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 38px; max-width: 110px; object-fit: contain;" />` : ""}
+            <div>
+              <h1 style="margin: 0; font-size: 12pt; font-weight: 900; letter-spacing: 0.5px;">${(labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase()}</h1>
+              <p style="margin: 1px 0; font-size: 7.5pt; color: #334155;">${labSettings?.tagline || "Clinical Diagnostic Reference Laboratory"}</p>
+              <p style="margin: 0; font-size: 7pt; color: #475569;">${labSettings?.address || "Dhanmondi, Dhaka"} • Tel: ${labSettings?.phone || "+880 9612-345678"}</p>
             </div>
-            <div style="background: #000; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 900; font-size: 8pt;">MONEY RECEIPT</div>
           </div>
-
-          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; font-size: 8pt;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td><b>Receipt No:</b> {{receipt_no}}</td><td><b>Date:</b> {{date}}</td><td><b>Patient ID:</b> <b style="color: #1d4ed8;">{{patient_id}}</b></td></tr>
-              <tr><td colspan="2"><b>Name:</b> {{patient_name}} ({{age_gender}})</td><td><b>Phone:</b> {{patient_phone}}</td></tr>
-              <tr><td colspan="3"><b>Ref. Doctor:</b> {{doctor}}</td></tr>
-            </table>
-          </div>
-
-          <table style="width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 8px;">
-            <thead>
-              <tr style="background: #f1f5f9; border-bottom: 1px solid #000; font-weight: 900;">
-                <th style="padding: 4px 8px; text-align: left;">Test Description</th>
-                <th style="padding: 4px 8px; text-align: left;">Specimen</th>
-                <th style="padding: 4px 8px; text-align: right;">Amount</th>
-              </tr>
-            </thead>
-            <tbody>{{items_table}}</tbody>
-          </table>
-
-          <div style="display: flex; justify-content: flex-end;">
-            <table style="width: 220px; font-size: 8.5pt;">
-              <tr><td>Subtotal:</td><td style="text-align: right; font-family: monospace;">৳ {{subtotal}}</td></tr>
-              <tr><td>Discount ({{discount}}%):</td><td style="text-align: right; font-family: monospace;">- ৳ {{discount_amount}}</td></tr>
-              <tr style="font-weight: 900; font-size: 10pt; border-top: 1px solid #000; border-bottom: 1px solid #000;"><td>Net Payable:</td><td style="text-align: right; font-family: monospace;">৳ {{net_payable}}</td></tr>
-              <tr style="font-weight: bold;"><td>Paid (Cash):</td><td style="text-align: right; font-family: monospace;">৳ {{paid_amount}}</td></tr>
-              <tr style="font-weight: bold;"><td>Due Balance:</td><td style="text-align: right; font-family: monospace;">৳ {{due_amount}}</td></tr>
-            </table>
-          </div>
+          <div style="border: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 7.5pt; text-transform: uppercase;">MONEY RECEIPT</div>
         </div>
 
-        <div>
-          <div style="border-top: 1px dashed #94a3b8; padding: 6px 0; display: flex; justify-content: space-between; align-items: center;">
-            <div style="text-align: center; width: 140px;">
-              {{patient_barcode}}
-              <p style="margin: 2px 0 0 0; font-family: monospace; font-size: 8pt; font-weight: 900; color: #000;">{{patient_id}}</p>
-            </div>
+        <!-- PATIENT INFO -->
+        <div style="border: 1px dashed #000; padding: 6px 8px; margin-bottom: 10px; font-size: 8pt; background: #fafafa;">
+          <table style="width: 100%; border-collapse: collapse; font-family: inherit;">
+            <tr>
+              <td style="padding: 1px 0;"><b>RECEIPT NO:</b> ${activeOrd.receiptNo || "RCP-2026-001"}</td>
+              <td style="padding: 1px 0; text-align: right;"><b>DATE:</b> ${activeOrd.date || new Date().toISOString().slice(0, 10)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;"><b>PATIENT ID:</b> <span style="font-weight: bold;">${patientId}</span></td>
+              <td style="padding: 1px 0; text-align: right;"><b>PHONE:</b> ${activeOrd.patient?.phone || "N/A"}</td>
+            </tr>
+            <tr>
+              <td colspan="2" style="padding: 1px 0;"><b>PATIENT:</b> ${activeOrd.patient?.name || "Patient"} (${activeOrd.patient?.age || ""}Y / ${activeOrd.patient?.gender || ""})</td>
+            </tr>
+            <tr>
+              <td colspan="2" style="padding: 1px 0; border-top: 1px dashed #ccc; margin-top: 2px;"><b>REF. BY:</b> ${doctorName}</td>
+            </tr>
+          </table>
+        </div>
 
-            <div style="text-align: center; width: 95px;">
-              {{report_tracking_qr}}
-            </div>
+        <!-- ITEMS BILL TABLE -->
+        <table style="width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 10px; font-family: inherit;">
+          <thead>
+            <tr style="border-top: 1.5px dashed #000; border-bottom: 1.5px dashed #000; font-weight: 900;">
+              <th style="padding: 4px 6px; text-align: left;">INVESTIGATION DESCRIPTION</th>
+              <th style="padding: 4px 6px; text-align: left;">SPECIMEN</th>
+              <th style="padding: 4px 6px; text-align: right;">AMOUNT</th>
+            </tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
 
-            <div style="text-align: center; width: 120px;">
-              <div style="border-bottom: 1px solid #000; height: 16px; margin-bottom: 2px;"></div>
-              <span style="font-size: 7pt; font-weight: bold;">Authorized Cashier</span>
-            </div>
-          </div>
-          <p style="text-align: center; margin: 3px 0 0 0; font-size: 6.5pt; color: #475569;">{{receipt_footer}}</p>
+        <!-- TOTALS TABLE -->
+        <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+          <table style="width: 220px; font-size: 8.5pt; border-collapse: collapse; font-family: inherit;">
+            <tr><td>SUBTOTAL:</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.subTotal || 0}</td></tr>
+            <tr><td>DISCOUNT (${activeOrd.billing?.discount || 0}%):</td><td style="text-align: right;">- ৳ ${(((activeOrd.billing?.subTotal || 0) * (activeOrd.billing?.discount || 0)) / 100).toFixed(0)}</td></tr>
+            <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 9.5pt;">
+              <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${activeOrd.billing?.netPayable || 0}</td>
+            </tr>
+            <tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.paid || 0}</td></tr>
+            <tr style="font-weight: bold; color: ${activeOrd.billing?.due > 0 ? '#b91c1c' : '#000'};">
+              <td>DUE BALANCE:</td><td style="text-align: right;">৳ ${activeOrd.billing?.due || 0}</td>
+            </tr>
+          </table>
         </div>
       </div>
-    `;
-  }
 
-  if (!templateToUse.includes("{{report_tracking_qr}}") && !templateToUse.includes("report_tracking_qr")) {
-    if (templateToUse.includes("{{patient_id}}")) {
-      templateToUse = templateToUse.replace(
-        /({{patient_id}}<\/p>\s*<\/div>|{{patient_id}}<\/div>)/i,
-        `$1<div style="text-align: center; width: 95px;">{{report_tracking_qr}}</div>`
-      );
-    } else {
-      templateToUse = templateToUse.replace(
-        "{{receipt_footer}}",
-        `<div style="text-align: center; margin: 4px auto;">{{report_tracking_qr}}</div>{{receipt_footer}}`
-      );
-    }
-  }
+      <!-- FOOTER -->
+      <div style="margin-top: 12px;">
+        <div style="border-top: 1.5px dashed #000; padding: 8px 0 4px 0; display: flex; justify-content: space-between; align-items: center;">
+          <div style="text-align: center; width: 140px;">
+            ${generateSvgBarcodeHtml(patientId)}
+            <p style="margin: 2px 0 0 0; font-size: 8pt; font-weight: 900;">${patientId}</p>
+          </div>
 
-  const tokens = {
-    hospital_name: (labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase(),
-    hospital_tagline: labSettings?.tagline || "ISO 15189 Certified Reference Lab",
-    hospital_address: labSettings?.address || "Dhanmondi, Dhaka",
-    hospital_phone: labSettings?.phone || "+880 9612-345678",
-    hospital_logo: labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 38px; max-width: 120px; object-fit: contain;" />` : "",
-    receipt_no: activeOrd.receiptNo || "RCP-2026-001",
-    patient_id: patientId,
-    patient_name: activeOrd.patient?.name || "Patient",
-    age_gender: `${activeOrd.patient?.age || ""}Y / ${activeOrd.patient?.gender || ""}`,
-    patient_phone: activeOrd.patient?.phone || "N/A",
-    doctor: activeOrd.patient?.doctor || "Self",
-    date: activeOrd.date || new Date().toISOString().slice(0, 10),
-    items_table: itemsHtml,
-    subtotal: activeOrd.billing?.subTotal || 0,
-    discount: activeOrd.billing?.discount || 0,
-    discount_amount: (((activeOrd.billing?.subTotal || 0) * (activeOrd.billing?.discount || 0)) / 100).toFixed(0),
-    net_payable: activeOrd.billing?.netPayable || 0,
-    paid_amount: activeOrd.billing?.paid || 0,
-    due_amount: activeOrd.billing?.due || 0,
-    patient_barcode: generateSvgBarcodeHtml(patientId),
-    report_tracking_qr: qrBlockHtml,
-    tracking_url: trackingUrl,
-    receipt_footer: labSettings?.receipt_footer || "Scan the QR code to check real-time report status & download results."
-  };
+          <div style="text-align: center; width: 95px;">
+            ${qrBlockHtml}
+          </div>
 
-  const compiledHtml = compileTemplate(templateToUse, tokens);
+          <div style="text-align: center; width: 120px;">
+            <div style="border-bottom: 1px solid #000; height: 18px; margin-bottom: 2px;"></div>
+            <span style="font-size: 7pt; font-weight: bold;">AUTHORIZED CASHIER</span>
+          </div>
+        </div>
+        <p style="text-align: center; margin: 4px 0 0 0; font-size: 6.5pt; color: #475569;">${labSettings?.receipt_footer || "Scan QR to check live report status & download results."}</p>
+      </div>
+    </div>
+  `;
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -517,12 +576,12 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
       <head>
         <title>Receipt - ${activeOrd.receiptNo}</title>
         <style>
-          @page { size: 148mm 210mm; margin: 0mm; }
+          @page { size: 148mm 210mm; margin: 8mm 10mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          body { margin: 0; padding: 6mm 8mm; width: 148mm; height: 210mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fff; color: #000; font-size: 8pt; }
+          body { margin: 0; padding: 0; font-family: 'Consolas', 'Courier New', Courier, monospace; background: #fff; color: #000; font-size: 8pt; }
         </style>
       </head>
-      <body>${compiledHtml}</body>
+      <body>${receiptHtml}</body>
     </html>
   `);
   doc.close();
