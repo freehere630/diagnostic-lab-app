@@ -39,7 +39,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
     </div>
 
     <!-- PATIENT DEMOGRAPHICS -->
-    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 14px; font-size: 8.5pt;">
+    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 14px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 14px; font-size: 8.5pt;">
       <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>{{patient_name}}</b></div>
       <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>{{age_gender}}</b></div>
       <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="font-family: monospace; color: #1d4ed8;">{{patient_id}}</b></div>
