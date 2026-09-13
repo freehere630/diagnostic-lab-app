@@ -53,7 +53,7 @@ export default function ReportsPrint({
       if (sigData && sigData.startsWith("data:image")) {
         return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
       }
-      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">${sigData || fallbackName}</div>`;
+      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">—</div>`;
     };
 
     const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
@@ -128,7 +128,7 @@ export default function ReportsPrint({
               </div>
             </div>
           </div>
-          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinically verified electronic laboratory report."}</p>
+          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinical report based on samples analyzed by APEX DIAGNOSTIC LABORATORIES and valid for proof purposes.  Not valid for employment purposes unless accompanied by authorized verification and digital certificate."}</p>
         </div>
       </div>
     `;
@@ -233,7 +233,7 @@ export default function ReportsPrint({
         </h3>
 
         {(departmentGroupedReports || []).map((group) => (
-          <div key={group.dept.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-300 transition">
+          <div key={group.dept.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-200 transition">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-xl">{group.dept.icon || "🔬"}</span>
