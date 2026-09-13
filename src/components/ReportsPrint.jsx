@@ -53,7 +53,7 @@ export default function ReportsPrint({
       if (sigData && sigData.startsWith("data:image")) {
         return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
       }
-      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">${sigData || fallbackName}</div>`;
+      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">—</div>`;
     };
 
     const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
@@ -96,14 +96,14 @@ export default function ReportsPrint({
           </div>
 
           <!-- PATIENT DEMOGRAPHICS -->
-    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px 18px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 12px; font-size: 9pt;">
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>{{patient_name}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>{{age_gender}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b style="font-family: monospace; color: #1d4ed8;">{{patient_id}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>{{doctor}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>{{date}}</b></div>
-      <div><span style="color: #475569; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">{{barcode}}</b></div>
-    </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 14px 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 8.5pt;">
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>${activeOrder.patient?.name || "Patient"}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>${activeOrder.patient?.age || ""}Y / ${activeOrder.patient?.gender || ""}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b>${activeOrder.patient?.id || "N/A"}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>${doctorName}</b></div>
+            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></div>
+            ${sixthSlotDemographics}
+          </div>
 
           <!-- REPORT CONTENT -->
           ${testsTableHtml}
@@ -128,7 +128,7 @@ export default function ReportsPrint({
               </div>
             </div>
           </div>
-          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinically verified electronic laboratory report."}</p>
+          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinical report based on samples analyzed by APEX DIAGNOSTIC LABORATORIES and valid for proof purposes.  Not valid for employment purposes unless accompanied by authorized verification and digital certificate."}</p>
         </div>
       </div>
     `;
@@ -233,7 +233,7 @@ export default function ReportsPrint({
         </h3>
 
         {(departmentGroupedReports || []).map((group) => (
-          <div key={group.dept.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-300 transition">
+          <div key={group.dept.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-200 transition">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-xl">{group.dept.icon || "🔬"}</span>
