@@ -1,7 +1,6 @@
 import React from "react";
 import { 
-  CheckCircle2, Clock, Printer, Download, 
-  FileText, Building2 
+  CheckCircle2, Clock, Printer, Download, Building2 
 } from "lucide-react";
 import { 
   printDepartmentA4Report, 
@@ -13,7 +12,7 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
   if (!order) return null;
 
   const isReady = order.qcStatus === "Verified" || order.isLocked === true;
-  const labName = labSettings?.lab_name || "AL-FATTAH DIAGNOSTIC";
+  const labName = labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES";
   const tagline = labSettings?.tagline || "ISO 15189:2022 Certified Clinical Reference Laboratory";
   const address = labSettings?.address || "House 42, Road 11, Dhanmondi, Dhaka";
   const phone = labSettings?.phone || "+880 9612-345678";
@@ -99,47 +98,30 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
           </div>
         )}
 
-        {/* Demographics Box (No Barcode for Imaging) */}
-        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-          <div className="flex justify-between border-b pb-1.5">
-            <span className="text-slate-500">Patient Name:</span>
-            <span className="font-bold text-slate-900">{order.patient?.name}</span>
-          </div>
-          <div className="flex justify-between border-b pb-1.5">
-            <span className="text-slate-500">Patient ID (UHID):</span>
-            <span className="font-mono font-bold text-blue-700">{order.patient?.id}</span>
-          </div>
-          
-          {!isImagingOnly && (
-            <div className="flex justify-between border-b pb-1.5">
-              <span className="text-slate-500">Sample Barcode:</span>
-              <span className="font-mono font-bold text-slate-800">{order.barcode}</span>
-            </div>
-          )}
-
-          <div className="flex justify-between border-b pb-1.5">
-            <span className="text-slate-500">Ref. Doctor:</span>
-            <span className="font-bold text-slate-800">{doctorName}</span>
-          </div>
-
-          <div className="flex justify-between border-b pb-1.5">
-            <span className="text-slate-500">Date:</span>
-            <span className="font-bold text-slate-800 font-mono">{order.date}</span>
-          </div>
-          <div className="flex justify-between pt-0.5">
-            <span className="text-slate-500">Billing Status:</span>
-            <span className="font-bold font-mono">
-              {(order.billing?.due || 0) > 0 ? (
-                <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded font-black">
-                  Due Balance: ৳{order.billing?.due}
-                </span>
-              ) : (
-                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold">
-                  Fully Paid
-                </span>
-              )}
-            </span>
-          </div>
+        {/* Inline Demographics Box (Pure Black, Key-Value pairs) */}
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-black">
+          <table className="w-full text-left border-collapse text-xs text-black">
+            <tbody>
+              <tr className="border-b border-slate-200">
+                <td className="py-1.5"><span className="font-semibold text-black">Patient Name:</span> <b className="text-black font-extrabold">{order.patient?.name}</b></td>
+                <td className="py-1.5"><span className="font-semibold text-black">Patient ID:</span> <b className="font-mono text-black">{order.patient?.id}</b></td>
+              </tr>
+              <tr className="border-b border-slate-200">
+                <td className="py-1.5"><span className="font-semibold text-black">Age / Gender:</span> <b className="text-black">{order.patient?.age || "—"} Y / {order.patient?.gender || "—"}</b></td>
+                <td className="py-1.5"><span className="font-semibold text-black">Ref. Doctor:</span> <b className="text-black">{doctorName}</b></td>
+              </tr>
+              <tr>
+                <td className="py-1.5">
+                  <span className="font-semibold text-black">{isImagingOnly ? "Investigation:" : "Barcode:"}</span>{" "}
+                  <b className="font-mono text-black">{isImagingOnly ? (order.tests || []).map(t => t.name).join(", ") : order.barcode}</b>
+                </td>
+                <td className="py-1.5">
+                  <span className="font-semibold text-black">Status:</span>{" "}
+                  <b className="font-mono text-black">{(order.billing?.due || 0) > 0 ? `Due: ৳${order.billing?.due}` : "PAID"}</b>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         {/* Clinical Findings */}
@@ -152,10 +134,10 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
               }} 
             />
 
-            {/* Pathologist Remarks (Clean, no background, no box) */}
-            <div className="pt-2 text-[11px] text-slate-700">
-              <b className="text-slate-900 uppercase">Pathologist Remarks:</b> 
-              <span className="italic ml-1">{order.verifierRemarks || "Clinically correlated and verified with quality control standards."}</span>
+            {/* Pathologist Remarks */}
+            <div className="pt-2 text-[11px] text-black">
+              <b className="text-black uppercase">Pathologist Remarks:</b> 
+              <span className="italic ml-1 text-black">{order.verifierRemarks || "Clinically correlated and verified with quality control standards."}</span>
             </div>
           </div>
         )}

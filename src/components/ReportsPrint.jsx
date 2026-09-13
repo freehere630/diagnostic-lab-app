@@ -17,12 +17,20 @@ export default function ReportsPrint({
   handleRemarksChange
 }) {
   if (!activeOrder) {
-    return <div className="p-8 text-center text-slate-400 font-sans">No active order selected for report printing.</div>;
+    return (
+      <div className="p-12 text-center text-slate-400 font-sans bg-white rounded-2xl border border-dashed border-slate-200">
+        <p className="font-semibold text-sm">No active order selected for report printing.</p>
+        <p className="text-xs text-slate-400 mt-1">Please select an order from the Dashboard to view and print reports.</p>
+      </div>
+    );
   }
 
   const orderId = activeOrder.orderId || activeOrder.id || "";
   const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
   const scannableQrSvg = generateQrSvgLocal(qrUrl, 56);
+
+  // CHECK IF REPORT IS OFFICIALLY VERIFIED
+  const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
 
   const doctorName = 
     activeOrder.doctor || 
@@ -30,7 +38,7 @@ export default function ReportsPrint({
     (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) || 
     "Self";
 
-  // Compile on-screen live preview
+  // Compile on-screen live preview matching the exact printed sheet
   const getCompiledReportPreview = (group) => {
     const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
 
@@ -48,87 +56,117 @@ export default function ReportsPrint({
       signature_data: ""
     };
 
-    // Clean, readable typography
+    // CONDITIONAL SIGNATURES:
+    // Before verification: completely blank space (no signature images or names)
+    // After verification: both official signatures appear
     const renderSignatureHtml = (sigData, fallbackName) => {
+      if (!isVerified) {
+        return `<div style="height: 38px;"></div>`;
+      }
+
       if (sigData && sigData.startsWith("data:image")) {
         return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
       }
-      return `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">—</div>`;
+      return `<div style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 10.5pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">${sigData || fallbackName}</div>`;
     };
 
     const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
 
-    const investigationNames = (group.tests || []).map(t => t.name).join(", ");
+    // No barcode on imaging / radiology
     const sixthSlotDemographics = isImaging
-      ? `<div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Investigation:</span> <b style="color: #0f172a;">${investigationNames}</b></div>`
-      : `<div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Barcode:</span> <b style="font-family: monospace;">${activeOrder.barcode || ""}</b></div>`;
+      ? `<span style="font-weight: 600; color: #000000;">Modality:</span> <b style="color: #000000;">${group.dept?.name || "Radiology"}</b>`
+      : `<span style="font-weight: 600; color: #000000;">Barcode:</span> <b style="font-family: 'Consolas', monospace; color: #000000;">${activeOrder.barcode || ""}</b>`;
 
     const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
       ? activeOrder.verifierRemarks
       : "Clinically correlated and verified with quality control standards.";
 
-    // REMARKS: Clean inline text with NO box and NO background
     const remarksHtml = isImaging ? "" : `
-      <div style="margin-top: 14px; font-size: 8.5pt; color: #1e293b; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
-        <span style="font-weight: 700; text-transform: uppercase; color: #0f172a;">Pathologist Remarks:</span> 
-        <span style="margin-left: 6px; color: #334155;">${remarksText}</span>
+      <div style="margin-top: 14px; font-size: 8.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt; letter-spacing: 0.5px;">Pathologist Remarks:</span> 
+        <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
       </div>
     `;
 
-    // BORDERLESS SCREEN PREVIEW
+    const departmentBannerTitle = (group.dept?.name || "Clinical Pathology").toUpperCase();
+
     return `
-      <div style="border: none; padding: 4px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, Helvetica, sans-serif; background: #ffffff;">
+      <div style="border: none; padding: 4px; min-height: 270mm; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #000000;">
         <div>
-          <!-- HEADER -->
-          <div style="border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <!-- 1. HOSPITAL / LAB MAIN HEADER -->
+          <div style="border-bottom: 2px solid #000000; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 12px;">
-              ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 44px; max-width: 120px; object-fit: contain;" />` : ""}
+              ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 46px; max-width: 125px; object-fit: contain;" />` : ""}
               <div>
-                <h1 style="font-size: 16pt; font-weight: 900; margin: 0; color: #0f172a; letter-spacing: 0.2px;">${(labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase()}</h1>
-                <p style="font-size: 8.5pt; font-weight: 700; color: #334155; margin: 2px 0;">DEPARTMENT OF ${(group.dept?.name || "Diagnostics").toUpperCase()} (${labSettings?.tagline || "ISO Certified"})</p>
-                <p style="font-size: 7.5pt; color: #475569; margin: 0;">${labSettings?.address || "Dhanmondi, Dhaka"} • Phone: ${labSettings?.phone || "+880 9612-345678"}</p>
+                <h1 style="font-size: 16pt; font-weight: 900; margin: 0; color: #000000; letter-spacing: 0.2px; line-height: 1.1;">${(labSettings?.lab_name || "APEX DIAGNOSTIC LABORATORIES").toUpperCase()}</h1>
+                <p style="font-size: 8pt; font-weight: 600; color: #000000; margin: 3px 0 1px 0;">${labSettings?.tagline || "ISO 15189:2022 Certified Clinical Reference Laboratory"}</p>
+                <p style="font-size: 7.5pt; color: #000000; margin: 0;">${labSettings?.address || "Dhanmondi, Dhaka"} • Phone: ${labSettings?.phone || "+880 9612-345678"}</p>
               </div>
             </div>
-            <div style="text-align: right; width: 85px;">
+            <div style="text-align: center; width: 85px;">
               ${scannableQrSvg}
-              <span style="font-size: 6pt; font-family: Arial, sans-serif; font-weight: bold; display: block; text-align: center; margin-top: 2px;">Scan to Verify</span>
+              <span style="font-size: 6pt; font-weight: 700; color: #000000; display: block; text-align: center; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Scan to Verify</span>
             </div>
           </div>
 
-          <!-- PATIENT DEMOGRAPHICS -->
-          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 14px 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 8.5pt;">
-            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient:</span> <b>${activeOrder.patient?.name || "Patient"}</b></div>
-            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Age/Sex:</span> <b>${activeOrder.patient?.age || ""}Y / ${activeOrder.patient?.gender || ""}</b></div>
-            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Patient ID:</span> <b>${activeOrder.patient?.id || "N/A"}</b></div>
-            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Ref. By:</span> <b>${doctorName}</b></div>
-            <div><span style="color: #64748b; font-size: 7.5pt; text-transform: uppercase;">Date:</span> <b>${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></div>
-            ${sixthSlotDemographics}
+          <!-- 2. INLINE PATIENT DEMOGRAPHICS (PURE BLACK) -->
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; font-size: 8.5pt; color: #000000;">
+            <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 8.5pt;">
+              <tr>
+                <td style="padding: 3px 6px; width: 40%;"><span style="font-weight: 600; color: #000000;">Patient Name:</span> <b style="color: #000000; font-weight: 800;">${activeOrder.patient?.name || "Patient"}</b></td>
+                <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 600; color: #000000;">Age / Gender:</span> <b style="color: #000000;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
+                <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 600; color: #000000;">Patient ID:</span> <b style="color: #000000; font-family: 'Consolas', monospace;">${activeOrder.patient?.id || "N/A"}</b></td>
+              </tr>
+              <tr>
+                <td style="padding: 3px 6px;"><span style="font-weight: 600; color: #000000;">Ref. Doctor:</span> <b style="color: #000000;">${doctorName}</b></td>
+                <td style="padding: 3px 6px;"><span style="font-weight: 600; color: #000000;">Date:</span> <b style="color: #000000;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
+                <td style="padding: 3px 6px;">${sixthSlotDemographics}</td>
+              </tr>
+            </table>
           </div>
 
-          <!-- REPORT CONTENT -->
+          <!-- 3. DEPARTMENT BANNER OVER TEST RESULTS (NO HORIZONTAL BORDERS) -->
+          <div style="text-align: center; margin: 10px 0 6px 0;">
+            <span style="font-size: 9.5pt; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: #000000;">
+              DEPARTMENT OF ${departmentBannerTitle}
+            </span>
+          </div>
+
+          <!-- 4. RESULTS TABLE / CONTENT -->
           ${testsTableHtml}
           ${remarksHtml}
         </div>
 
-        <!-- READABLE STAFF NAMES (NO CURSIVE) -->
+        <!-- 5. SIGNATURES & FOOTER -->
+        <!-- 5. SIGNATURES & FOOTER -->
         <div>
-          <div style="margin-top: 24px; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-            <div style="text-align: center; width: 230px;">
-              ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
-              <div style="border-top: 1.5px solid #0f172a; padding-top: 4px;">
-                <div style="font-family: Arial, Helvetica, sans-serif; font-weight: 800; font-size: 9pt; color: #0f172a;">${techUser.full_name}</div>
-                <div style="font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; font-weight: 500; color: #475569; margin-top: 2px;">${techUser.designation}</div>
+          ${isVerified ? `
+            <div style="margin-top: 24px; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+              
+              <!-- LEFT: TECHNOLOGIST -->
+              <div style="text-align: center; width: 230px;">
+                ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
+                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
+                  <div style="font-weight: 800; font-size: 8.5pt; color: #000000;">${techUser.full_name}</div>
+                  <div style="font-size: 7.5pt; font-weight: 500; color: #000000; margin-top: 1px;">${techUser.designation}</div>
+                </div>
               </div>
-            </div>
-            <div style="text-align: center; width: 230px;">
-              ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
-              <div style="border-top: 1.5px solid #0f172a; padding-top: 4px;">
-                <div style="font-family: Arial, Helvetica, sans-serif; font-weight: 800; font-size: 9pt; color: #0f172a;">${verifierUser.full_name}</div>
-                <div style="font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; font-weight: 500; color: #475569; margin-top: 2px;">${verifierUser.designation}</div>
+
+              <!-- RIGHT: DOCTOR / VERIFIER -->
+              <div style="text-align: center; width: 230px;">
+                ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
+                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
+                  <div style="font-weight: 800; font-size: 8.5pt; color: #000000;">${verifierUser.full_name}</div>
+                  <div style="font-size: 7.5pt; font-weight: 500; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
+                </div>
               </div>
+
             </div>
-          </div>
-          <p style="text-align: center; font-size: 6.5pt; color: #94a3b8; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinical report based on samples analyzed by APEX DIAGNOSTIC LABORATORIES and valid for proof purposes.  Not valid for employment purposes unless accompanied by authorized verification and digital certificate."}</p>
+          ` : `
+            <!-- HIDDEN BEFORE VERIFICATION: Zero names, lines, or designations -->
+            <div style="height: 55px;"></div>
+          `}
+          <p style="text-align: center; font-size: 6.5pt; color: #475569; margin: 12px 0 0 0; border-top: 0.5px dashed #cbd5e1; padding-top: 4px;">${labSettings?.report_footer || "This is a clinically verified electronic laboratory report."}</p>
         </div>
       </div>
     `;
@@ -139,7 +177,7 @@ export default function ReportsPrint({
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 font-sans text-slate-900">
       
-      {/* Due Banner */}
+      {/* Due Balance Warning Banner */}
       {hasOutstandingDue && (
         <div className="bg-rose-50 border-2 border-rose-400 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm animate-pulse">
           <div className="flex items-center gap-3">
@@ -175,13 +213,13 @@ export default function ReportsPrint({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-slate-900">Diagnostic Reports Hub</h2>
-            {hasOutstandingDue ? (
-              <span className="px-2.5 py-0.5 bg-rose-100 text-rose-800 text-[11px] font-bold rounded-full">
-                Due ৳{activeOrder.billing?.due}
+            {isVerified ? (
+              <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-full flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Verified (Dual Signatures Active)
               </span>
             ) : (
-              <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-full flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Fully Paid
+              <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[11px] font-bold rounded-full">
+                Pending Verification (Signatures Hidden)
               </span>
             )}
           </div>
@@ -208,7 +246,7 @@ export default function ReportsPrint({
         </div>
       </div>
 
-      {/* Remarks Editor */}
+      {/* Pathologist Remarks Editor */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs">
         <label className="font-bold text-slate-800 uppercase flex items-center gap-1.5">
           <MessageSquare className="w-4 h-4 text-blue-600" />
@@ -226,7 +264,7 @@ export default function ReportsPrint({
         </div>
       </div>
 
-      {/* Department Cards */}
+      {/* Department Report Cards */}
       <div className="space-y-4">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
           Departmental Report Sheets
@@ -257,7 +295,7 @@ export default function ReportsPrint({
         ))}
       </div>
 
-      {/* Borderless Screen Preview */}
+      {/* Live On-Screen Previews */}
       <div className="space-y-6">
         {(departmentGroupedReports || []).map((group) => (
           <div 

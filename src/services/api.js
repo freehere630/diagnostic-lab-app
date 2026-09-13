@@ -4,8 +4,8 @@ import { supabase } from "../supabaseClient";
 // 1. MASTER DEPARTMENTS & DATA
 // ==========================================
 export const DEFAULT_DEPARTMENTS = [
-  { id: "DEP-BIO", name: "Clinical Biochemistry", icon: "🧪" },
   { id: "DEP-HEM", name: "Hematology & Coagulation", icon: "🩸" },
+  { id: "DEP-BIO", name: "Clinical Biochemistry", icon: "🧪" },
   { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
   { id: "DEP-USG", name: "Ultrasonography (USG)", icon: "📡" },
   { id: "DEP-CTMRI", name: "CT Scan & MRI Imaging", icon: "🧠" },
@@ -14,23 +14,150 @@ export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-PAT", name: "Clinical Pathology & Urine", icon: "🧫" }
 ];
 
+// ==========================================
+// 24-PARAMETER 5-PART CBC PROFILE DEFINITION
+// ==========================================
+const MASTER_CBC_PARAMETERS = [
+  // --- PRIMARY COUNTS ---
+  { name: "Total Leucocyte Count (WBC)", unit: "10^9/L", min: 4.0, max: 11.0, type: "numeric" },
+  { name: "Total Red Blood Cell Count (RBC)", unit: "10^12/L", min: 3.8, max: 5.8, type: "numeric" },
+  { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric" },
+  { name: "Packed Cell Volume (PCV / Hematocrit)", unit: "%", min: 36.0, max: 50.0, type: "numeric" },
+
+  // --- 5-PART DIFFERENTIAL LEUCOCYTE COUNT (%) ---
+  { name: "Neutrophils", unit: "%", min: 40.0, max: 75.0, type: "numeric" },
+  { name: "Lymphocytes", unit: "%", min: 20.0, max: 45.0, type: "numeric" },
+  { name: "Monocytes", unit: "%", min: 2.0, max: 8.0, type: "numeric" },
+  { name: "Eosinophils", unit: "%", min: 1.0, max: 6.0, type: "numeric" },
+  { name: "Basophils", unit: "%", min: 0.0, max: 1.0, type: "numeric" },
+
+  // --- ABSOLUTE LEUCOCYTE COUNTS (#) ---
+  { name: "Absolute Neutrophil Count (ANC)", unit: "10^9/L", min: 2.0, max: 7.5, type: "numeric" },
+  { name: "Absolute Lymphocyte Count (ALC)", unit: "10^9/L", min: 1.0, max: 4.0, type: "numeric" },
+  { name: "Absolute Monocyte Count (AMC)", unit: "10^9/L", min: 0.2, max: 0.8, type: "numeric" },
+  { name: "Absolute Eosinophil Count (AEC)", unit: "10^9/L", min: 0.04, max: 0.4, type: "numeric" },
+  { name: "Absolute Basophil Count (ABC)", unit: "10^9/L", min: 0.01, max: 0.1, type: "numeric" },
+
+  // --- RBC INDICES ---
+  { name: "Mean Corpuscular Volume (MCV)", unit: "fL", min: 78.0, max: 98.0, type: "numeric" },
+  { name: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", min: 27.0, max: 32.0, type: "numeric" },
+  { name: "Mean Corpuscular Hb Concentration (MCHC)", unit: "g/dL", min: 31.0, max: 36.0, type: "numeric" },
+  { name: "RDW-CV", unit: "%", min: 11.5, max: 15.0, type: "numeric" },
+  { name: "RDW-SD", unit: "fL", min: 35.0, max: 56.0, type: "numeric" },
+
+  // --- PLATELET INDICES ---
+  { name: "Total Platelet Count", unit: "10^9/L", min: 150.0, max: 450.0, type: "numeric" },
+  { name: "Mean Platelet Volume (MPV)", unit: "fL", min: 7.4, max: 11.5, type: "numeric" },
+  { name: "Platelet Distribution Width (PDW)", unit: "fL", min: 9.0, max: 17.0, type: "numeric" },
+  { name: "Plateletcrit (PCT)", unit: "%", min: 0.15, max: 0.50, type: "numeric" },
+  { name: "Platelet Large Cell Ratio (P-LCR)", unit: "%", min: 13.0, max: 43.0, type: "numeric" }
+];
+
+// SILENT AUTO-SEEDER (Runs automatically without buttons)
+async function ensureSilent5PartCBC(existingTests = []) {
+  const cbcTestId = "T-CBC-5PART";
+  const existingCbc = existingTests.find(
+    (t) =>
+      t.id === cbcTestId ||
+      (t.code || "").toUpperCase() === "CBC" ||
+      (t.name || "").toLowerCase().includes("blood count")
+  );
+
+  const existingParams = existingCbc ? (existingCbc.test_parameters || existingCbc.parameters || []) : [];
+
+  // If already full 24 parameters, return immediately
+  if (existingCbc && existingParams.length >= 20) {
+    return existingTests;
+  }
+
+  try {
+    await supabase.from("departments").upsert({
+      id: "DEP-HEM",
+      name: "Hematology & Coagulation",
+      icon: "🩸"
+    });
+
+    const targetId = existingCbc?.id || cbcTestId;
+
+    await supabase.from("tests").upsert({
+      id: targetId,
+      code: "CBC",
+      name: "Complete Blood Count (CBC) with 5-Part Differential",
+      dept_id: "DEP-HEM",
+      price: 400,
+      sample_type: "Whole Blood",
+      tube_color: "Purple / Lavender (EDTA)",
+      is_profile: true
+    });
+
+    if (existingParams.length < 20) {
+      await supabase.from("test_parameters").delete().eq("test_id", targetId);
+    }
+
+    const paramRows = MASTER_CBC_PARAMETERS.map((p, idx) => ({
+      id: `P-CBC-${String(idx + 1).padStart(2, "0")}`,
+      test_id: targetId,
+      name: p.name,
+      param_type: p.type,
+      unit: p.unit,
+      min_range: p.min,
+      max_range: p.max
+    }));
+
+    await supabase.from("test_parameters").insert(paramRows);
+
+    const { data: updatedCbc } = await supabase
+      .from("tests")
+      .select("*, test_parameters(*)")
+      .eq("id", targetId)
+      .single();
+
+    if (updatedCbc) {
+      return [updatedCbc, ...existingTests.filter((t) => t.id !== targetId)];
+    }
+  } catch (err) {
+    console.warn("Silent CBC verification notice:", err.message);
+  }
+
+  // Guaranteed in-memory fallback
+  const inMemoryCbc = {
+    id: cbcTestId,
+    code: "CBC",
+    name: "Complete Blood Count (CBC) with 5-Part Differential",
+    dept_id: "DEP-HEM",
+    price: 400,
+    sample_type: "Whole Blood",
+    tube_color: "Purple / Lavender (EDTA)",
+    is_profile: true,
+    test_parameters: MASTER_CBC_PARAMETERS.map((p, idx) => ({
+      id: `P-CBC-${String(idx + 1).padStart(2, "0")}`,
+      test_id: cbcTestId,
+      name: p.name,
+      param_type: p.type,
+      unit: p.unit,
+      min_range: p.min,
+      max_range: p.max
+    }))
+  };
+
+  return [inMemoryCbc, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== "CBC")];
+}
+
 export async function getMasterData() {
   try {
-    const { data: departments, error: dErr } = await supabase.from("departments").select("*");
-    const { data: tests, error: tErr } = await supabase.from("tests").select("*, test_parameters(*)").order("name");
+    const { data: departments } = await supabase.from("departments").select("*");
+    const { data: tests } = await supabase.from("tests").select("*, test_parameters(*)").order("name");
 
     let finalDepts = departments && departments.length > 0 ? departments : [...DEFAULT_DEPARTMENTS];
-    
-    // Ensure all medical & imaging departments are always present
     DEFAULT_DEPARTMENTS.forEach((defDept) => {
-      if (!finalDepts.some((d) => d.id === defDept.id)) {
-        finalDepts.push(defDept);
-      }
+      if (!finalDepts.some((d) => d.id === defDept.id)) finalDepts.push(defDept);
     });
+
+    const updatedTests = await ensureSilent5PartCBC(tests || []);
 
     return { 
       departments: finalDepts, 
-      tests: tests || [] 
+      tests: updatedTests || [] 
     };
   } catch (err) {
     console.error("Master data fetch error:", err);
@@ -38,7 +165,7 @@ export async function getMasterData() {
   }
 }
 
-// 1-Click Seed Standard Radiology & Imaging Catalog (X-Ray, USG, CT, MRI, ECG)
+// 1-Click Seed Standard Radiology & Imaging Catalog
 export async function seedRadiologyCatalog() {
   const radiologyDepts = [
     { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
@@ -47,7 +174,6 @@ export async function seedRadiologyCatalog() {
     { id: "DEP-CARD", name: "Cardiology (ECG & Echo)", icon: "💓" }
   ];
 
-  // Upsert departments first to satisfy foreign key constraints
   for (const dept of radiologyDepts) {
     try {
       await supabase.from("departments").upsert(dept);
@@ -112,9 +238,7 @@ export async function seedRadiologyCatalog() {
     try {
       const created = await createNewTestWithParameters(t);
       if (created) addedTests.push(created);
-    } catch (e) {
-      console.warn("Could not seed test:", t.name, e.message);
-    }
+    } catch (e) {}
   }
 
   return addedTests;
@@ -161,7 +285,7 @@ export async function createOrUpdateDoctor(docData) {
   try { await supabase.from("doctors").upsert(row); } catch (e) {}
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_doctors") || "[]");
-    const updated = [row, ...local.filter(d => d.id !== docId)];
+    const updated = [row, ...local.filter((d) => d.id !== docId)];
     localStorage.setItem("apex_local_doctors", JSON.stringify(updated));
   } catch (e) {}
 
@@ -172,7 +296,7 @@ export async function deleteDoctor(docId) {
   try { await supabase.from("doctors").delete().eq("id", docId); } catch (e) {}
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_doctors") || "[]");
-    localStorage.setItem("apex_local_doctors", JSON.stringify(local.filter(d => d.id !== docId)));
+    localStorage.setItem("apex_local_doctors", JSON.stringify(local.filter((d) => d.id !== docId)));
   } catch (e) {}
 }
 
@@ -194,7 +318,7 @@ export async function searchPatients(query) {
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    return local.filter(p => 
+    return local.filter((p) => 
       (p.id && p.id.toLowerCase().includes(cleanQ)) ||
       (p.phone && p.phone.includes(cleanQ)) ||
       (p.name && p.name.toLowerCase().includes(cleanQ))
@@ -217,7 +341,7 @@ export async function getPatientHistory(patientId) {
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    return local.filter(o => o.patient_id === patientId || o.patient?.id === patientId);
+    return local.filter((o) => o.patient_id === patientId || o.patient?.id === patientId);
   } catch (e) {
     return [];
   }
@@ -263,7 +387,7 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     console.warn("Paginated orders fetch notice:", err.message);
   }
 
-  // Fallback if relational join fails
+  // Fallback
   try {
     let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
     if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
@@ -287,7 +411,7 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
 }
 
 // ==========================================
-// 5. FETCH ALL ORDERS (FAIL-SAFE DUAL STRATEGY)
+// 5. FETCH ALL ORDERS
 // ==========================================
 export async function getAllOrders() {
   let ordersList = [];
@@ -307,65 +431,13 @@ export async function getAllOrders() {
     if (!error && data && data.length > 0) {
       ordersList = data;
     }
-  } catch (e) {
-    console.warn("Relational query fallback triggered:", e);
-  }
-
-  if (!ordersList || ordersList.length === 0) {
-    try {
-      const { data: rawOrders } = await supabase
-        .from("orders")
-        .select("*")
-        .order("order_date", { ascending: false });
-      
-      if (rawOrders && rawOrders.length > 0) {
-        const [patientsRes, orderTestsRes, testsRes, paramsRes, resultsRes] = await Promise.all([
-          supabase.from("patients").select("*"),
-          supabase.from("order_tests").select("*"),
-          supabase.from("tests").select("*"),
-          supabase.from("test_parameters").select("*"),
-          supabase.from("results").select("*")
-        ]);
-
-        const patients = patientsRes.data || [];
-        const orderTests = orderTestsRes.data || [];
-        const tests = testsRes.data || [];
-        const params = paramsRes.data || [];
-        const results = resultsRes.data || [];
-
-        const testsWithParams = tests.map(t => ({
-          ...t,
-          test_parameters: params.filter(p => p.test_id === t.id)
-        }));
-
-        ordersList = rawOrders.map(ord => {
-          const matchedPatient = patients.find(p => p.id === ord.patient_id) || null;
-          const matchedOrderTests = orderTests
-            .filter(ot => ot.order_id === ord.id)
-            .map(ot => ({
-              ...ot,
-              test: testsWithParams.find(t => t.id === ot.test_id) || null
-            }));
-          const matchedResults = results.filter(r => r.order_id === ord.id);
-
-          return {
-            ...ord,
-            patient: matchedPatient,
-            order_tests: matchedOrderTests,
-            results: matchedResults
-          };
-        });
-      }
-    } catch (fallbackErr) {
-      console.error("Discrete fetch error:", fallbackErr);
-    }
-  }
+  } catch (e) {}
 
   try {
     const localCached = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     if (localCached.length > 0) {
-      const existingIds = new Set(ordersList.map(o => o.id || o.orderId));
-      const unmerged = localCached.filter(lo => !existingIds.has(lo.id || lo.orderId));
+      const existingIds = new Set(ordersList.map((o) => o.id || o.orderId));
+      const unmerged = localCached.filter((lo) => !existingIds.has(lo.id || lo.orderId));
       ordersList = [...unmerged, ...ordersList];
     }
   } catch (e) {}
@@ -377,23 +449,30 @@ export async function getAllOrders() {
   });
 }
 
-// ==========================================
-// 6. CREATE ORDER (REFERRING DOCTOR GUARANTEED)
-// ==========================================
+// Inside createNewOrder in src/services/api.js:
+
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
-  const patientId = patientData.id || `PID-${Math.floor(10000 + Math.random() * 90000)}`;
+  // 1. SHORT PATIENT ID (e.g. P-1024)
+  const patientId = patientData.id && patientData.id.trim() 
+    ? patientData.id.trim() 
+    : `P-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // 2. STRICTLY PURE 9-DIGIT NUMERIC SAMPLE BARCODE (e.g. 482910385)
+  // Zero letters, zero hyphens, zero symbols - perfect for Maglumi & KT-44 scanners
+  const barcode = String(Math.floor(100000000 + Math.random() * 900000000));
+
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
   const timeCompact = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0') + String(now.getSeconds()).padStart(2, '0');
   
-  const barcode = `LAB-${todayCompact}-${Math.floor(100000 + Math.random() * 900000)}`;
-  const orderId = `ORD-${todayCompact}-${timeCompact}-${Math.floor(10 + Math.random() * 90)}`;
-  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, netPayable - paidAmount);
+  // Clean short Order ID & Receipt No
+  const orderId = `ORD-${todayCompact.slice(2)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const receiptNo = `RCP-${todayCompact.slice(4)}-${Math.floor(1000 + Math.random() * 9000)}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // 1. Save Patient with Doctor in Address Prefix
+  // Save Patient
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -402,11 +481,17 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     phone: patientData.phone || "N/A",
     address: `Ref: ${referringDoctor}`
   };
-
   try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
 
-  // 2. Save Order
-  const subTotal = netPayable + (netPayable * (discount / 100));
+  // Calculate Billing
+  const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
+  const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+  const finalDiscountPercent = discount || 0;
+  const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
+  const finalNet = netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
+  const finalPaid = paidAmount !== undefined ? parseFloat(paidAmount) : finalNet;
+  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
+
   const orderRow = {
     id: orderId,
     patient_id: patientId,
@@ -414,25 +499,22 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     order_date: todayDate,
     created_at: nowIso,
     subtotal: subTotal,
-    discount_percent: discount || 0,
-    net_payable: netPayable,
-    paid_amount: paidAmount,
+    discount_percent: finalDiscountPercent,
+    net_payable: finalNet,
+    paid_amount: finalPaid,
     due_amount: finalDue,
     sample_status: "Order Created",
     qc_status: "Pending",
     is_locked: false
   };
-
   try { await supabase.from("orders").insert(orderRow); } catch (e) {}
 
-  // 3. Link Selected Tests
+  // Link Tests
   if (testIds && testIds.length > 0) {
     const orderTestRows = testIds.map((tid) => ({ order_id: orderId, test_id: tid }));
     try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
   }
 
-  // 4. In-Memory Complete Return Object
-  const selectedTests = testCatalog.filter(t => testIds.includes(t.id));
   const completeOrder = {
     ...orderRow,
     orderId: orderId,
@@ -441,7 +523,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     created_at: nowIso,
     barcode: barcode,
     doctor: referringDoctor,
-    receiptNo: `RCP-${todayCompact.slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`,
+    receiptNo: receiptNo,
     patient: {
       id: patientId,
       name: patientData.name,
@@ -452,8 +534,8 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       address: `Ref: ${referringDoctor}`
     },
     tests: selectedTests,
-    order_tests: selectedTests.map(t => ({ test_id: t.id, test: t })),
-    billing: { subTotal, discount: discount || 0, netPayable, paid: paidAmount, due: finalDue },
+    order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
+    billing: { subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaid, due: finalDue },
     results: {},
     qcStatus: "Pending",
     isLocked: false,
@@ -467,7 +549,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   return completeOrder;
 }
-
 // ==========================================
 // 7. SETTLE DUE AMOUNT
 // ==========================================
@@ -491,13 +572,13 @@ export async function settleOrderDue(orderId, collectedAmount) {
 // ==========================================
 // 8. TEST RESULT ENTRY & VERIFICATION
 // ==========================================
-export async function saveTestResult(orderId, parameterId, resultValue, statusFlag) {
+export async function saveTestResult(orderId, parameterId, resultValue, statusFlag = "ENTERED") {
   const { data, error } = await supabase
     .from("results")
     .upsert({ 
       order_id: orderId, 
       parameter_id: parameterId, 
-      result_value: resultValue, 
+      result_value: String(resultValue).trim(), 
       status_flag: statusFlag 
     }, { onConflict: "order_id,parameter_id" });
   if (error) throw error;
@@ -539,7 +620,7 @@ export async function createNewTestWithParameters(testData) {
   if (tErr) throw tErr;
 
   if (testData.parameters && testData.parameters.length > 0) {
-    const paramRows = testData.parameters.filter(p => p.name?.trim()).map((p, idx) => ({
+    const paramRows = testData.parameters.filter((p) => p.name?.trim()).map((p, idx) => ({
       id: `P-${testId}-${idx + 1}`,
       test_id: testId,
       name: p.name,
@@ -566,7 +647,7 @@ export async function updateExistingTest(testId, testData) {
 
   await supabase.from("test_parameters").delete().eq("test_id", testId);
   if (testData.parameters && testData.parameters.length > 0) {
-    const paramRows = testData.parameters.filter(p => p.name?.trim()).map((p, idx) => ({
+    const paramRows = testData.parameters.filter((p) => p.name?.trim()).map((p, idx) => ({
       id: `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`,
       test_id: testId,
       name: p.name,
@@ -586,7 +667,7 @@ export async function deleteTest(testId) {
 }
 
 // ==========================================
-// 10. STAFF USERS (WITH PERSISTENT CACHE)
+// 10. STAFF USERS
 // ==========================================
 export async function getStaffUsers() {
   try {

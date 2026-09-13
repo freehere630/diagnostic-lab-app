@@ -276,7 +276,7 @@ export default function App() {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-  // Exclude Imaging/Radiology from phlebotomy vial barcodes
+// Inside src/App.jsx:
   const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
     const vials = {};
@@ -290,8 +290,9 @@ export default function App() {
       if (!vials[key]) {
         vials[key] = {
           deptCode,
-          testBarcode: `${deptCode}-${(activeOrder.date || "").replace(/-/g, "")}-${activeOrder.patient?.id ? String(activeOrder.patient.id).replace(/\D/g, "") : "001"}`,
-          patientId: activeOrder.patient?.id || "PID-000",
+          // PURE 9-DIGIT NUMBER MATCHING THE ORDER BARCODE
+          testBarcode: activeOrder.barcode || String(Math.floor(100000000 + Math.random() * 900000000)),
+          patientId: activeOrder.patient?.id || "P-1001",
           patientName: activeOrder.patient?.name || "Patient",
           tubeColor: test.tube_color || "Standard Tube",
           testNames: []
@@ -301,7 +302,6 @@ export default function App() {
     });
     return Object.values(vials);
   }, [activeOrder]);
-
   // Strict isolation for CBC
   const departmentGroupedReports = useMemo(() => {
     if (!activeOrder?.tests) return [];
