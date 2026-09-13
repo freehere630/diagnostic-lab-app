@@ -326,6 +326,7 @@ export function printDepartmentA4Report(targetDeptId = "ALL", activeOrder, depar
       ? activeOrder.verifierRemarks
       : "Clinically correlated and verified with quality control standards.";
 
+      
     // REMARKS: Clean inline note (NO box, NO background, NO border)
     const remarksHtml = isImaging ? "" : `
       <div style="margin-top: 14px; font-size: 8.5pt; color: #1e293b; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
