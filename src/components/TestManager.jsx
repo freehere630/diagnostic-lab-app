@@ -1,5 +1,5 @@
-import React from "react";
-import { Settings, Plus, Edit, Trash2, X, Sparkles, CheckCircle2 } from "lucide-react";
+import React, { useState } from "react";
+import { Settings, Plus, Edit, Trash2, X, Sparkles, Search } from "lucide-react";
 
 export default function TestManager({
   departments = [],
@@ -17,13 +17,25 @@ export default function TestManager({
   MASTER_TUBE_COLORS = [],
   isLoading
 }) {
-  // CREATE FORM PARAMETER CONTROLS
+  const [searchCatalog, setSearchCatalog] = useState("");
+
+  // =========================================================================
+  // PARAMETER ROW MANAGEMENT (CREATE FORM)
+  // =========================================================================
   const addCreateParameterRow = () => {
     setNewTestForm({
       ...newTestForm,
       parameters: [
         ...newTestForm.parameters,
-        { id: String(Date.now()), name: "", param_type: "numeric", unit: "mg/dL", min: "", max: "" }
+        { 
+          id: String(Date.now()), 
+          name: "", 
+          param_type: "numeric", 
+          unit: "mg/dL", 
+          min: "", 
+          max: "",
+          reference_text: ""
+        }
       ]
     });
   };
@@ -36,14 +48,24 @@ export default function TestManager({
     });
   };
 
-  // EDIT MODAL PARAMETER CONTROLS
+  // =========================================================================
+  // PARAMETER ROW MANAGEMENT (EDIT MODAL)
+  // =========================================================================
   const addEditParameterRow = () => {
     if (!editingTest) return;
     setEditingTest({
       ...editingTest,
       parameters: [
         ...(editingTest.parameters || []),
-        { id: `p-${Date.now()}`, name: "", param_type: "numeric", unit: "mg/dL", min: "", max: "" }
+        { 
+          id: `p-${Date.now()}`, 
+          name: "", 
+          param_type: "numeric", 
+          unit: "mg/dL", 
+          min: "", 
+          max: "",
+          reference_text: ""
+        }
       ]
     });
   };
@@ -59,17 +81,28 @@ export default function TestManager({
     });
   };
 
+  // Filter Catalog
+  const filteredCatalog = testCatalog.filter((t) => {
+    const q = searchCatalog.trim().toLowerCase();
+    return (
+      !q ||
+      (t.name && t.name.toLowerCase().includes(q)) ||
+      (t.code && t.code.toLowerCase().includes(q)) ||
+      (t.dept_id && t.dept_id.toLowerCase().includes(q))
+    );
+  });
+
   return (
     <div className="space-y-6 w-full font-sans text-slate-800">
       
-      {/* 1-Click Radiology Quick Loader Banner */}
+      {/* 1. RADIOLOGY CATALOG QUICK SEED BANNER */}
       <div className="bg-gradient-to-r from-blue-900 to-indigo-950 p-4 rounded-2xl text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-md">
         <div>
           <h3 className="font-bold text-sm flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-300" /> Need Imaging & Radiology Investigations?
+            <Sparkles className="w-4 h-4 text-blue-300" /> Need Standard Radiology & Imaging Templates?
           </h3>
           <p className="text-xs text-blue-200 mt-0.5">
-            1-Click import X-Ray, Ultrasonogram (USG), CT Scan, MRI, and ECG into your catalog.
+            1-Click import standard X-Ray, USG, CT Scan, MRI, and ECG templates into your catalog.
           </p>
         </div>
         <button
@@ -78,36 +111,36 @@ export default function TestManager({
           onClick={handleSeedRadiology}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition whitespace-nowrap"
         >
-          <Plus className="w-3.5 h-3.5" /> {isLoading ? "Adding..." : "Load Radiology & Imaging Tests"}
+          <Plus className="w-3.5 h-3.5" /> {isLoading ? "Adding..." : "Load Radiology Catalog"}
         </button>
       </div>
 
-      {/* CREATE SINGLE TEST OR PROFILE FORM */}
+      {/* 2. CREATE NEW TEST OR PROFILE CARD */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
         <h2 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-blue-600" /> Create Single Test or Multi-Test Profile
+          <Settings className="w-5 h-5 text-blue-600" /> Create Test or Profile Panel
         </h2>
         <p className="text-xs text-slate-500 mb-6">
-          Supports Biochemistry, Hematology, and Radiology / Imaging investigations.
+          Supports single tests, multi-test profiles, and multiple reference ranges (Gender / Age / Clinical cutoffs).
         </p>
 
-        {/* 6 MASTER INPUTS */}
+        {/* 6 MASTER DETAILS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-xs">
           <div>
             <label className="font-bold text-slate-600 uppercase">Test Name *</label>
             <input
               type="text"
-              placeholder="e.g. SGPT or X-Ray Chest"
+              placeholder="e.g. Serum Uric Acid"
               value={newTestForm.name}
               onChange={(e) => setNewTestForm({ ...newTestForm, name: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+              className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
             />
           </div>
           <div>
             <label className="font-bold text-slate-600 uppercase">Short Code *</label>
             <input
               type="text"
-              placeholder="e.g. SGPT"
+              placeholder="e.g. UA or TSH"
               value={newTestForm.code}
               onChange={(e) => setNewTestForm({ ...newTestForm, code: e.target.value })}
               className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold"
@@ -129,14 +162,14 @@ export default function TestManager({
             <label className="font-bold text-slate-600 uppercase">Price (BDT) *</label>
             <input
               type="number"
-              placeholder="e.g. 500"
+              placeholder="e.g. 400"
               value={newTestForm.price}
               onChange={(e) => setNewTestForm({ ...newTestForm, price: e.target.value })}
               className="w-full mt-1 p-2.5 border rounded-xl outline-none font-mono font-bold text-emerald-700"
             />
           </div>
           <div>
-            <label className="font-bold text-slate-600 uppercase">Sample / Study Type</label>
+            <label className="font-bold text-slate-600 uppercase">Sample Type</label>
             <select
               value={newTestForm.sampleType}
               onChange={(e) => setNewTestForm({ ...newTestForm, sampleType: e.target.value })}
@@ -148,7 +181,7 @@ export default function TestManager({
             </select>
           </div>
           <div>
-            <label className="font-bold text-slate-600 uppercase">Tube / Specimen</label>
+            <label className="font-bold text-slate-600 uppercase">Tube Color</label>
             <select
               value={newTestForm.tubeColor}
               onChange={(e) => setNewTestForm({ ...newTestForm, tubeColor: e.target.value })}
@@ -161,7 +194,7 @@ export default function TestManager({
           </div>
         </div>
 
-        {/* PROFILE TOGGLE */}
+        {/* MULTI-TEST PROFILE CHECKBOX */}
         <div className="mt-4 flex items-center gap-2">
           <input
             type="checkbox"
@@ -171,7 +204,7 @@ export default function TestManager({
             className="w-4 h-4 text-blue-600 rounded cursor-pointer"
           />
           <label htmlFor="createIsProfileCheck" className="text-xs font-bold text-slate-700 cursor-pointer">
-            Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, CBC)
+            Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, KFT)
           </label>
         </div>
 
@@ -179,8 +212,8 @@ export default function TestManager({
         <div className="mt-8 border-t pt-6">
           <div className="flex justify-between items-center mb-3">
             <div>
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Parameters & Reference Limits</h3>
-              <p className="text-[11px] text-slate-400">Configure parameters or choose 'Descriptive Text' for imaging/X-Ray/USG</p>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Parameters & Clinical Reference Limits</h3>
+              <p className="text-[11px] text-slate-400">Choose 'Multi-Range' to specify different ranges for Male, Female, or Age groups</p>
             </div>
             <button
               type="button"
@@ -191,27 +224,32 @@ export default function TestManager({
             </button>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {newTestForm.parameters.map((param, index) => {
+              const isMultiRange = param.param_type === "multirange";
+              const isNumeric = param.param_type === "numeric";
               const isQual = param.param_type === "qualitative";
               const isText = param.param_type === "text";
 
               return (
-                <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs items-center">
+                <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs items-center">
+                  
+                  {/* Parameter Name */}
                   <div className="sm:col-span-4">
                     <input
                       type="text"
-                      placeholder="Parameter Name"
+                      placeholder="Parameter Name (e.g. Uric Acid)"
                       value={param.name}
                       onChange={(e) => {
                         const updated = [...newTestForm.parameters];
                         updated[index].name = e.target.value;
                         setNewTestForm({ ...newTestForm, parameters: updated });
                       }}
-                      className="w-full p-2 border rounded-lg bg-white font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full p-2 border rounded-lg bg-white font-semibold outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   
+                  {/* Reference Range Type */}
                   <div className="sm:col-span-3">
                     <select
                       value={param.param_type}
@@ -223,16 +261,18 @@ export default function TestManager({
                       }}
                       className="w-full p-2 border rounded-lg bg-white font-bold text-blue-700 outline-none"
                     >
-                      <option value="numeric">Numeric (Min – Max)</option>
+                      <option value="numeric">Simple Numeric (Min – Max)</option>
+                      <option value="multirange">Multi-Range (Gender / Age / Text)</option>
                       <option value="qualitative">Qualitative (+ / - Reactive)</option>
                       <option value="text">Descriptive Text (Imaging)</option>
                     </select>
                   </div>
 
+                  {/* Unit */}
                   <div className="sm:col-span-2">
                     <input
                       type="text"
-                      placeholder="Unit"
+                      placeholder="Unit (mg/dL)"
                       value={param.unit}
                       onChange={(e) => {
                         const updated = [...newTestForm.parameters];
@@ -243,21 +283,26 @@ export default function TestManager({
                     />
                   </div>
 
+                  {/* Range Value Inputs */}
                   <div className="sm:col-span-2">
-                    {isQual ? (
-                      <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-[11px] text-center truncate">
-                        Normal: Negative
-                      </div>
-                    ) : isText ? (
-                      <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-[11px] text-center truncate">
-                        Observation / Finding
-                      </div>
-                    ) : (
+                    {isMultiRange ? (
+                      <textarea
+                        rows={2}
+                        placeholder="Male: 3.5 - 7.2&#10;Female: 2.6 - 6.0"
+                        value={param.reference_text || ""}
+                        onChange={(e) => {
+                          const updated = [...newTestForm.parameters];
+                          updated[index].reference_text = e.target.value;
+                          setNewTestForm({ ...newTestForm, parameters: updated });
+                        }}
+                        className="w-full p-1.5 border rounded-lg bg-white font-mono text-[11px] leading-tight outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    ) : isNumeric ? (
                       <div className="flex gap-1.5">
                         <input
                           type="number"
                           placeholder="Min"
-                          value={param.min}
+                          value={param.min || ""}
                           onChange={(e) => {
                             const updated = [...newTestForm.parameters];
                             updated[index].min = e.target.value;
@@ -268,7 +313,7 @@ export default function TestManager({
                         <input
                           type="number"
                           placeholder="Max"
-                          value={param.max}
+                          value={param.max || ""}
                           onChange={(e) => {
                             const updated = [...newTestForm.parameters];
                             updated[index].max = e.target.value;
@@ -277,9 +322,18 @@ export default function TestManager({
                           className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
                         />
                       </div>
+                    ) : isQual ? (
+                      <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-[11px] text-center truncate">
+                        Negative (Normal)
+                      </div>
+                    ) : (
+                      <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-[11px] text-center truncate">
+                        Observation / Report
+                      </div>
                     )}
                   </div>
 
+                  {/* Remove Button */}
                   <div className="sm:col-span-1 flex justify-center">
                     <button
                       type="button"
@@ -307,21 +361,37 @@ export default function TestManager({
         </div>
       </div>
 
-      {/* DIRECTORY */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
-        <h3 className="font-bold text-sm text-slate-800 mb-4">
-          Live Diagnostic Test Catalog ({testCatalog.length} Investigations)
-        </h3>
+      {/* 3. LIVE DIAGNOSTIC CATALOG DIRECTORY */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h3 className="font-bold text-sm text-slate-900">
+              Live Diagnostic Catalog ({testCatalog.length} Investigations)
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">Click edit to update parameters, pricing, or multiple reference ranges</p>
+          </div>
+
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search test, code, dept..."
+              value={searchCatalog}
+              onChange={(e) => setSearchCatalog(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-          {testCatalog.map((t) => (
+          {filteredCatalog.map((t) => (
             <div key={t.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs flex flex-col justify-between hover:shadow-md transition">
               <div>
                 <div className="flex justify-between items-start mb-1">
-                  <span className="font-black text-sm text-slate-900">{t.name}</span>
+                  <span className="font-black text-sm text-slate-900 leading-tight">{t.name}</span>
                   <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono font-bold text-[10px]">{t.code}</span>
                 </div>
-                <div className="flex items-center gap-1.5 my-1">
+                <div className="flex items-center gap-1.5 my-1.5">
                   <span className="px-2 py-0.5 bg-slate-200 text-slate-800 font-bold rounded text-[10px]">
                     {t.dept_id?.replace("DEP-", "") || "GEN"}
                   </span>
@@ -331,7 +401,7 @@ export default function TestManager({
                     </span>
                   )}
                 </div>
-                <p className="text-slate-500 font-medium">{t.sample_type} • {t.tube_color}</p>
+                <p className="text-slate-500 font-medium">{t.sample_type || "Blood"} • {t.tube_color || "Standard"}</p>
                 <p className="font-mono text-xs font-bold text-emerald-700 mt-1">Price: ৳ {t.price}</p>
               </div>
 
@@ -345,6 +415,7 @@ export default function TestManager({
                 <button
                   onClick={() => handleDeleteTest(t.id, t.name)}
                   className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                  title="Delete test"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -354,7 +425,7 @@ export default function TestManager({
         </div>
       </div>
 
-      {/* EDIT MODAL (RESTORED FULL CAPABILITY) */}
+      {/* 4. EDIT TEST MODAL (WITH MULTI-RANGE SUPPORT) */}
       {editingTest && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-4xl w-full shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
@@ -381,7 +452,7 @@ export default function TestManager({
                   type="text"
                   value={editingTest.name || ""}
                   onChange={(e) => setEditingTest({ ...editingTest, name: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 />
               </div>
 
@@ -455,7 +526,7 @@ export default function TestManager({
                 className="w-4 h-4 text-blue-600 rounded cursor-pointer"
               />
               <label htmlFor="editIsProfileCheck" className="text-xs font-bold text-slate-700 cursor-pointer">
-                Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, CBC)
+                Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, KFT)
               </label>
             </div>
 
@@ -463,8 +534,8 @@ export default function TestManager({
             <div className="mt-8 border-t pt-6">
               <div className="flex justify-between items-center mb-3">
                 <div>
-                  <h4 className="font-bold text-xs uppercase text-slate-800 tracking-wider">Parameters & Reference Limits</h4>
-                  <p className="text-[11px] text-slate-400">Modify parameter names, types, units, and ranges</p>
+                  <h4 className="font-bold text-xs uppercase text-slate-800 tracking-wider">Parameters & Clinical Limits</h4>
+                  <p className="text-[11px] text-slate-400">Modify parameter names, types, units, and custom multi-ranges (Gender / Age)</p>
                 </div>
                 <button
                   type="button"
@@ -475,13 +546,18 @@ export default function TestManager({
                 </button>
               </div>
 
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
                 {(editingTest.parameters || []).map((param, index) => {
-                  const isQual = param.param_type === "qualitative";
-                  const isText = param.param_type === "text";
+                  const currentType = param.reference_text || param.ref_text ? "multirange" : (param.param_type || "numeric");
+                  const isMultiRange = currentType === "multirange";
+                  const isNumeric = currentType === "numeric";
+                  const isQual = currentType === "qualitative";
+                  const isText = currentType === "text";
 
                   return (
-                    <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs items-center">
+                    <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs items-center">
+                      
+                      {/* Name */}
                       <div className="sm:col-span-4">
                         <input
                           type="text"
@@ -492,27 +568,33 @@ export default function TestManager({
                             updated[index].name = e.target.value;
                             setEditingTest({ ...editingTest, parameters: updated });
                           }}
-                          className="w-full p-2 border rounded-lg bg-white font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full p-2 border rounded-lg bg-white font-semibold outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
 
+                      {/* Type */}
                       <div className="sm:col-span-3">
                         <select
-                          value={param.param_type || "numeric"}
+                          value={currentType}
                           onChange={(e) => {
                             const updated = [...editingTest.parameters];
                             updated[index].param_type = e.target.value;
+                            if (e.target.value !== "multirange") {
+                              updated[index].reference_text = "";
+                            }
                             if (e.target.value === "text") updated[index].unit = "Report";
                             setEditingTest({ ...editingTest, parameters: updated });
                           }}
                           className="w-full p-2 border rounded-lg bg-white font-bold text-blue-700 outline-none"
                         >
                           <option value="numeric">Numeric (Min – Max)</option>
-                          <option value="qualitative">Qualitative (+ / - Reactive)</option>
+                          <option value="multirange">Multi-Range (Gender / Age / Text)</option>
+                          <option value="qualitative">Qualitative (+ / -)</option>
                           <option value="text">Descriptive Text (Imaging)</option>
                         </select>
                       </div>
 
+                      {/* Unit */}
                       <div className="sm:col-span-2">
                         <input
                           type="text"
@@ -527,16 +609,21 @@ export default function TestManager({
                         />
                       </div>
 
+                      {/* Range Input */}
                       <div className="sm:col-span-2">
-                        {isQual ? (
-                          <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-[11px] text-center truncate">
-                            Normal: Negative
-                          </div>
-                        ) : isText ? (
-                          <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-[11px] text-center truncate">
-                            Observation
-                          </div>
-                        ) : (
+                        {isMultiRange ? (
+                          <textarea
+                            rows={2}
+                            placeholder="Male: 3.5 - 7.2&#10;Female: 2.6 - 6.0"
+                            value={param.reference_text || param.ref_text || ""}
+                            onChange={(e) => {
+                              const updated = [...editingTest.parameters];
+                              updated[index].reference_text = e.target.value;
+                              setEditingTest({ ...editingTest, parameters: updated });
+                            }}
+                            className="w-full p-1.5 border rounded-lg bg-white font-mono text-[11px] leading-tight outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        ) : isNumeric ? (
                           <div className="flex gap-1.5">
                             <input
                               type="number"
@@ -563,9 +650,18 @@ export default function TestManager({
                               className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
                             />
                           </div>
+                        ) : isQual ? (
+                          <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-center">
+                            Negative
+                          </div>
+                        ) : (
+                          <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-center">
+                            Observation
+                          </div>
                         )}
                       </div>
 
+                      {/* Remove Button */}
                       <div className="sm:col-span-1 flex justify-center">
                         <button
                           type="button"

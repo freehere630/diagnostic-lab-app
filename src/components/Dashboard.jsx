@@ -1,13 +1,16 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { 
   Search, Calendar, Receipt, DollarSign, CheckCircle2, 
-  AlertCircle, X, ChevronLeft, ChevronRight, Clock 
+  AlertCircle, X, ChevronLeft, ChevronRight, Clock,
+  MessageCircle, RotateCcw, AlertTriangle 
 } from "lucide-react";
+import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
+import { markSampleRecollected } from "../services/api";
 
 export default function Dashboard({
-  orders,
-  departments,
-  testCatalog,
+  orders = [],
+  departments = [],
+  testCatalog = [],
   setSelectedOrderId,
   setActiveTab,
   handlePrintMoneyReceipt,
@@ -25,8 +28,9 @@ export default function Dashboard({
   pageSize = 20,
   isLoading
 }) {
-  const [settleOrder, setSettleOrder] = React.useState(null);
-  const [collectionAmount, setCollectionAmount] = React.useState("");
+  const [settleOrder, setSettleOrder] = useState(null);
+  const [collectionAmount, setCollectionAmount] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   // STRICT TIME SORTING: Latest timestamp and registration at the top
   const sortedOrders = useMemo(() => {
@@ -36,6 +40,16 @@ export default function Dashboard({
       return timeB - timeA;
     });
   }, [orders]);
+
+  // REPEAT SAMPLE RECOLLECTION FILTER (Hemolyzed, Clotted, Rejected Samples)
+  const recollectionOrders = useMemo(() => {
+    return sortedOrders.filter(
+      (o) =>
+        (o.sample_status || "").toLowerCase().includes("repeat") ||
+        (o.sample_status || "").toLowerCase().includes("recollection") ||
+        (o.verifierRemarks || "").toUpperCase().includes("RECOLLECTION REQUIRED")
+    );
+  }, [sortedOrders]);
 
   const totalRevenue = sortedOrders.reduce((acc, o) => acc + (o.billing?.paid || 0), 0);
   const totalDue = sortedOrders.reduce((acc, o) => acc + (o.billing?.due || 0), 0);
@@ -53,6 +67,20 @@ export default function Dashboard({
     if (isNaN(amt) || amt <= 0) return alert("Please enter a valid collection amount.");
     handleSettleDue(settleOrder.orderId, amt);
     setSettleOrder(null);
+  };
+
+  const handleMarkRecollectedAction = async (orderId) => {
+    if (!window.confirm("Confirm new blood sample has been drawn and received for analysis?")) return;
+    setActionLoading(true);
+    try {
+      await markSampleRecollected(orderId);
+      alert("✅ Sample marked as Recollected! Now available for laboratory analysis.");
+      window.location.reload();
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const formatEntryTime = (dateStr, createdAtStr) => {
@@ -111,7 +139,7 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Date Filters & Active Presets */}
+        {/* Date Filters & Presets */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-slate-600 flex items-center gap-1">
@@ -138,7 +166,6 @@ export default function Dashboard({
             />
           </div>
 
-          {/* Quick Preset Buttons */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button type="button" onClick={() => setPreset("TODAY")} className={getPresetBtnClass("TODAY")}>Today</button>
             <button type="button" onClick={() => setPreset("YESTERDAY")} className={getPresetBtnClass("YESTERDAY")}>Yesterday</button>
@@ -148,6 +175,59 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+
+      {/* 1. URGENT REPEAT SAMPLE RECOLLECTION BANNER (HEMOLYSIS / CLOT ALERT) */}
+      {recollectionOrders.length > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-500 rounded-2xl p-5 shadow-lg space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5 text-rose-950 font-black text-sm">
+              <AlertTriangle className="w-5 h-5 text-rose-600 animate-bounce" />
+              <span>URGENT: {recollectionOrders.length} Specimen(s) Require Immediate Recollection (Hemolyzed / Clotted)</span>
+            </div>
+            <span className="px-3 py-1 bg-rose-600 text-white rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              Action Required
+            </span>
+          </div>
+
+          <div className="divide-y divide-rose-200 text-xs">
+            {recollectionOrders.map((ord) => (
+              <div key={ord.orderId} className="py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <span className="text-slate-900 font-extrabold text-sm">{ord.patient?.name}</span> 
+                  <span className="font-mono text-blue-700 font-bold ml-2">({ord.patient?.id})</span>
+                  <span className="text-slate-600 font-mono ml-2">📞 {ord.patient?.phone}</span>
+                  <span className="text-slate-500 font-mono ml-2">Barcode: {ord.barcode}</span>
+                  <p className="text-[11px] text-rose-800 mt-0.5 font-bold flex items-center gap-1">
+                    <span>Rejection Reason:</span>
+                    <span className="bg-rose-100 text-rose-900 px-2 py-0.5 rounded border border-rose-300">
+                      {ord.verifierRemarks || "Hemolyzed Specimen (Cellular breakdown)"}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => sendRecollectionWhatsApp(ord, ord.verifierRemarks || "Hemolyzed Specimen")}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition shadow"
+                    title="Send WhatsApp notice to patient"
+                  >
+                    <MessageCircle className="w-4 h-4" /> WhatsApp Recall Notice
+                  </button>
+
+                  <button
+                    disabled={actionLoading}
+                    onClick={() => handleMarkRecollectedAction(ord.orderId)}
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-blue-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition shadow"
+                    title="Mark new blood sample drawn"
+                  >
+                    <RotateCcw className="w-4 h-4" /> Mark Recollected
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Metrics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 w-full">
@@ -199,9 +279,10 @@ export default function Dashboard({
               <tbody className="divide-y divide-slate-100">
                 {sortedOrders.map((ord) => {
                   const hasDue = (ord.billing?.due || 0) > 0;
+                  const isRecollection = (ord.sample_status || "").toLowerCase().includes("repeat") || (ord.verifierRemarks || "").toUpperCase().includes("RECOLLECTION REQUIRED");
 
                   return (
-                    <tr key={ord.orderId} className="hover:bg-blue-50/40 transition">
+                    <tr key={ord.orderId} className={`hover:bg-blue-50/40 transition ${isRecollection ? "bg-rose-50/40" : ""}`}>
                       <td className="py-3.5 px-4 font-mono text-slate-600">
                         <span className="flex items-center gap-1 font-bold text-slate-800">
                           <Clock className="w-3.5 h-3.5 text-blue-600" />
@@ -229,9 +310,15 @@ export default function Dashboard({
                       </td>
                       
                       <td className="py-3.5 px-4">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${ord.qcStatus === "Verified" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                          {ord.qcStatus}
-                        </span>
+                        {isRecollection ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 flex items-center gap-1 w-fit">
+                            <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Required
+                          </span>
+                        ) : (
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${ord.qcStatus === "Verified" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                            {ord.qcStatus}
+                          </span>
+                        )}
                       </td>
                       
                       <td className="py-3.5 px-4 text-right space-x-1.5">
@@ -265,7 +352,7 @@ export default function Dashboard({
           </div>
         )}
 
-        {/* PAGINATION CONTROLS (20 RECORDS PER PAGE) */}
+        {/* Pagination Controls */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-100 text-xs">
           <span className="text-slate-500">
             Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b> to{" "}

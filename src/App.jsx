@@ -124,7 +124,7 @@ export default function App() {
 
           setPatientTrackingOrder({
             orderId: data.id,
-            receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "")}-${data.id.slice(-4)}`,
+            receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "").slice(4)}-${data.id.slice(-4)}`,
             date: data.order_date,
             createdAt: data.created_at || data.order_date,
             barcode: data.barcode,
@@ -171,7 +171,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // 3. Paginated Orders Fetch (Accurate Doctor Resolution)
+  // 3. Paginated Orders Fetch
   const fetchPaginatedOrders = async () => {
     if (!currentUser) return;
     setIsLoading(true);
@@ -187,7 +187,6 @@ export default function App() {
       const formatted = (res.orders || []).map((o, idx) => {
         const matchedTests = (o.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
         
-        // Accurate Doctor Resolution from address / patient / doctor
         const resolvedDoctor = 
           (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
             ? o.patient.address.replace("Ref: ", "") 
@@ -195,14 +194,14 @@ export default function App() {
 
         return {
           orderId: o.id || o.orderId,
-          receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "")}-${String(1001 + idx)}`,
+          receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "").slice(4)}-${String(1001 + idx)}`,
           date: o.order_date || o.date || todayStr,
           createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
           barcode: o.barcode,
           doctor: resolvedDoctor,
           patient: {
             ...(o.patient || {}),
-            id: o.patient_id || `PID-${1000 + idx}`,
+            id: o.patient_id || `P-${1000 + idx}`,
             name: o.patient?.name || "Patient",
             phone: o.patient?.phone || "N/A",
             age: o.patient?.age || 0,
@@ -276,7 +275,7 @@ export default function App() {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-// Inside src/App.jsx:
+  // Pure 9-digit barcode on vial labels
   const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
     const vials = {};
@@ -290,7 +289,6 @@ export default function App() {
       if (!vials[key]) {
         vials[key] = {
           deptCode,
-          // PURE 9-DIGIT NUMBER MATCHING THE ORDER BARCODE
           testBarcode: activeOrder.barcode || String(Math.floor(100000000 + Math.random() * 900000000)),
           patientId: activeOrder.patient?.id || "P-1001",
           patientName: activeOrder.patient?.name || "Patient",
@@ -302,7 +300,7 @@ export default function App() {
     });
     return Object.values(vials);
   }, [activeOrder]);
-  // Strict isolation for CBC
+
   const departmentGroupedReports = useMemo(() => {
     if (!activeOrder?.tests) return [];
     const grouped = {};
@@ -318,7 +316,7 @@ export default function App() {
 
       if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
         groupKey = "DEP-HEM-CBC";
-        groupName = "Hematology (Complete Blood Count Automation)";
+        groupName = "Hematology & Coagulation";
         groupIcon = "🩸";
       }
 
@@ -369,7 +367,7 @@ export default function App() {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nRef. Doctor: ${createdOrder.patient?.doctor}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
+      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nSample Barcode: ${createdOrder.barcode}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
       setActiveTab("dashboard");
       fetchPaginatedOrders();
     } catch (e) { 
@@ -459,19 +457,22 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // Restored full-featured Edit Opening Handler
+// Inside src/App.jsx around line 350:
+
   const handleOpenEditModal = (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
     const normalizedParams = rawParams.length > 0
       ? rawParams.map((p, i) => ({
           id: p.id || `p-${i + 1}`,
           name: p.name || "",
-          param_type: p.param_type || "numeric",
+          param_type: p.reference_text || p.ref_text ? "multirange" : (p.param_type || "numeric"),
           unit: p.unit || "",
           min: p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : ""),
-          max: p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : "")
+          max: p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : ""),
+          // PRESERVE MULTI-RANGE TEXT
+          reference_text: p.reference_text || p.ref_text || ""
         }))
-      : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "" }];
+      : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "", reference_text: "" }];
 
     setEditingTest({
       ...t,
@@ -488,16 +489,26 @@ export default function App() {
     });
   };
 
-  const handleSaveTestEdits = async () => {
+   const handleSaveTestEdits = async () => {
     if (!editingTest) return;
+    if (!editingTest.name || !editingTest.code) {
+      return alert("Test Name and Short Code are required.");
+    }
+
     setIsLoading(true);
     try {
       await updateExistingTest(editingTest.id, editingTest);
       alert("✅ Test Updated Successfully!");
       setEditingTest(null);
+
+      // Re-fetch fresh data from Supabase
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) {
+      alert("⚠️ Error saving test: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDeleteTest = async (testId, testName) => {
@@ -510,7 +521,6 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // Seeding Radiology & Imaging with live update (NO RELOAD)
   const handleSeedRadiology = async () => {
     setIsLoading(true);
     try {
@@ -518,7 +528,7 @@ export default function App() {
       const { departments: depts, tests } = await getMasterData();
       setDepartments(depts || []);
       setTestCatalog(tests || []);
-      alert("✅ Standard Radiology & Imaging Catalog (X-Ray, USG, CT, MRI, ECG) added successfully!");
+      alert("✅ Standard Radiology & Imaging Catalog added successfully!");
     } catch (e) {
       alert("Notice loading radiology tests: " + e.message);
     } finally {
@@ -575,7 +585,7 @@ export default function App() {
       localStorage.setItem("apex_lab_settings", JSON.stringify(settingsData));
       const saved = await saveLabSettings(settingsData);
       setLabSettings(saved || settingsData);
-      alert("✅ Custom Template Saved to Database & Print!");
+      alert("✅ Settings Saved to Database!");
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
@@ -730,11 +740,23 @@ export default function App() {
           />
         )}
 
+{/* REPORTS & PRINT */}
         {activeTab === "reports" && (
           <ReportsPrint 
             activeOrder={activeOrder} 
+            currentUser={currentUser} // <-- PASS CURRENT USER
             departmentGroupedReports={departmentGroupedReports} 
-            handlePrintDepartmentA4Report={(deptId) => printDepartmentA4Report(deptId, activeOrder, departmentGroupedReports, staffList, labSettings, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })))} 
+            handlePrintDepartmentA4Report={(deptId, usePad) => 
+              printDepartmentA4Report(
+                deptId, 
+                activeOrder, 
+                departmentGroupedReports, 
+                staffList, 
+                labSettings, 
+                () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })),
+                usePad
+              )
+            } 
             staffList={staffList} 
             labSettings={labSettings} 
             onOpenVerificationModal={() => setPatientTrackingOrder(activeOrder)} 

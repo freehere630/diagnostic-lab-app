@@ -600,66 +600,122 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
   return data;
 }
 
-// ==========================================
-// 9. TEST CATALOG CRUD MANAGEMENT
-// ==========================================
 export async function createNewTestWithParameters(testData) {
-  const testId = `T-${testData.code.toUpperCase().replace(/\s+/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
+  const testId = `T-${testData.code.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
+
   const { data: test, error: tErr } = await supabase
     .from("tests")
     .insert({
       id: testId,
-      code: testData.code,
-      name: testData.name,
-      dept_id: testData.deptId,
+      code: testData.code.trim().toUpperCase(),
+      name: testData.name.trim(),
+      dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
       price: parseFloat(testData.price) || 0,
-      sample_type: testData.sampleType,
-      tube_color: testData.tubeColor,
-      is_profile: testData.isProfile || false
-    }).select().single();
-  if (tErr) throw tErr;
+      sample_type: testData.sampleType || testData.sample_type || "Serum",
+      tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+      is_profile: Boolean(testData.isProfile || testData.is_profile)
+    })
+    .select()
+    .single();
+
+  if (tErr) throw new Error("Failed to create test: " + tErr.message);
 
   if (testData.parameters && testData.parameters.length > 0) {
-    const paramRows = testData.parameters.filter((p) => p.name?.trim()).map((p, idx) => ({
-      id: `P-${testId}-${idx + 1}`,
-      test_id: testId,
-      name: p.name,
-      param_type: p.param_type || "numeric",
-      unit: p.unit || "",
-      min_range: p.min ? parseFloat(p.min) : null,
-      max_range: p.max ? parseFloat(p.max) : null
-    }));
-    if (paramRows.length > 0) await supabase.from("test_parameters").insert(paramRows);
+    const paramRows = testData.parameters
+      .filter((p) => p.name && p.name.trim() !== "")
+      .map((p, idx) => {
+        const minVal = p.min !== "" && p.min !== null && p.min !== undefined && !isNaN(parseFloat(p.min)) ? parseFloat(p.min) : null;
+        const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
+        const refText = (p.reference_text || p.ref_text || "").trim();
+
+        // Ensure param_type is strictly valid for Postgres ('numeric', 'qualitative', 'text')
+        let safeType = p.param_type || "numeric";
+        if (safeType === "multirange") safeType = "numeric"; // Stored as numeric with custom reference_text!
+
+        return {
+          id: `P-${testId}-${idx + 1}`,
+          test_id: testId,
+          name: p.name.trim(),
+          param_type: safeType,
+          unit: (p.unit || "").trim(),
+          min_range: minVal,
+          max_range: maxVal,
+          reference_text: refText || null
+        };
+      });
+
+    if (paramRows.length > 0) {
+      const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
+      if (insErr) {
+        // Fallback if reference_text column is not yet in Supabase
+        const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
+        const { error: retryErr } = await supabase.from("test_parameters").insert(safeRows);
+        if (retryErr) throw new Error("Failed to save parameters: " + retryErr.message);
+      }
+    }
   }
+
   return test;
 }
 
 export async function updateExistingTest(testId, testData) {
-  await supabase.from("tests").update({
-    code: testData.code,
-    name: testData.name,
-    dept_id: testData.deptId || testData.dept_id,
-    price: parseFloat(testData.price) || 0,
-    sample_type: testData.sampleType || testData.sample_type,
-    tube_color: testData.tubeColor || testData.tube_color,
-    is_profile: testData.isProfile !== undefined ? testData.isProfile : (testData.is_profile || false)
-  }).eq("id", testId);
+  // 1. Update Test Master Record
+  const { error: tErr } = await supabase
+    .from("tests")
+    .update({
+      code: testData.code.trim().toUpperCase(),
+      name: testData.name.trim(),
+      dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
+      price: parseFloat(testData.price) || 0,
+      sample_type: testData.sampleType || testData.sample_type || "Serum",
+      tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+      is_profile: Boolean(testData.isProfile || testData.is_profile)
+    })
+    .eq("id", testId);
 
-  await supabase.from("test_parameters").delete().eq("test_id", testId);
-  if (testData.parameters && testData.parameters.length > 0) {
-    const paramRows = testData.parameters.filter((p) => p.name?.trim()).map((p, idx) => ({
-      id: `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`,
-      test_id: testId,
-      name: p.name,
-      param_type: p.param_type || "numeric",
-      unit: p.unit || "",
-      min_range: p.min_range !== undefined && p.min_range !== "" ? parseFloat(p.min_range) : (p.min ? parseFloat(p.min) : null),
-      max_range: p.max_range !== undefined && p.max_range !== "" ? parseFloat(p.max_range) : (p.max ? parseFloat(p.max) : null)
-    }));
-    if (paramRows.length > 0) await supabase.from("test_parameters").insert(paramRows);
+  if (tErr) throw new Error("Failed to update test details: " + tErr.message);
+
+  // 2. Prepare Clean Parameters (Never NaN)
+  const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
+
+  if (validParams.length > 0) {
+    const paramRows = validParams.map((p, idx) => {
+      const rawMin = p.min !== undefined && p.min !== "" ? p.min : p.min_range;
+      const rawMax = p.max !== undefined && p.max !== "" ? p.max : p.max_range;
+      const minVal = rawMin !== "" && rawMin !== null && rawMin !== undefined && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
+      const maxVal = rawMax !== "" && rawMax !== null && rawMax !== undefined && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
+      const refText = (p.reference_text || p.ref_text || "").trim();
+
+      const existingId = p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
+
+      // Ensure param_type is strictly valid for Postgres ('numeric', 'qualitative', 'text')
+      let safeType = p.param_type || "numeric";
+      if (safeType === "multirange") safeType = "numeric"; // Stored as numeric with custom reference_text!
+
+      return {
+        id: existingId,
+        test_id: testId,
+        name: p.name.trim(),
+        param_type: safeType,
+        unit: (p.unit || "").trim(),
+        min_range: minVal,
+        max_range: maxVal,
+        reference_text: refText || null
+      };
+    });
+
+    // 3. Delete old parameters and insert clean new rows safely
+    await supabase.from("test_parameters").delete().eq("test_id", testId);
+
+    const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
+    if (insErr) {
+      console.warn("Insert with reference_text failed, retrying safe insert:", insErr.message);
+      const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
+      const { error: retryErr } = await supabase.from("test_parameters").insert(safeRows);
+      if (retryErr) throw new Error("Failed to save parameters: " + retryErr.message);
+    }
   }
 }
-
 export async function deleteTest(testId) {
   await supabase.from("order_tests").delete().eq("test_id", testId);
   await supabase.from("test_parameters").delete().eq("test_id", testId);
@@ -736,5 +792,34 @@ export async function saveLabSettings(settingsData) {
     report_design: settingsData.reportDesign || settingsData.report_design || {},
     receipt_design: settingsData.receiptDesign || settingsData.receipt_design || {}
   }).select().single();
+  return data;
+}
+
+// Add to src/services/api.js:
+
+export async function requestSampleRecollection(orderId, reason = "Hemolyzed", remarks = "") {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      sample_status: "Repeat Collection Required",
+      qc_status: "Pending",
+      verifier_remarks: `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim()
+    })
+    .eq("id", orderId);
+
+  if (error) throw error;
+  return data;
+}
+
+export async function markSampleRecollected(orderId) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      sample_status: "Recollected - In Analysis",
+      qc_status: "Pending"
+    })
+    .eq("id", orderId);
+
+  if (error) throw error;
   return data;
 }

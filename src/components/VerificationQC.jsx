@@ -1,5 +1,10 @@
 import React from "react";
-import { ShieldCheck, CloudUpload, Lock, MessageSquare, Sparkles, FileText } from "lucide-react";
+import { 
+  ShieldCheck, CloudUpload, Lock, MessageSquare, 
+  Sparkles, FileText, AlertOctagon, MessageCircle 
+} from "lucide-react";
+import { requestSampleRecollection } from "../services/api";
+import { sendReportReadyWhatsApp, sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 
 export default function VerificationQC({ 
   activeOrder, 
@@ -21,6 +26,35 @@ export default function VerificationQC({
 
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
+
+  // REJECT SAMPLE HANDLER (HEMOLYSIS, CLOTTED, ETC.)
+  const handleRejectSample = async () => {
+    const reason = prompt(
+      "Enter reason for sample rejection:\n1. Hemolyzed Specimen\n2. Clotted Specimen (EDTA)\n3. Insufficient Quantity (QNS)\n4. Lipemic Specimen",
+      "Hemolyzed Specimen"
+    );
+    if (!reason || !reason.trim()) return;
+
+    try {
+      await requestSampleRecollection(activeOrder.orderId, reason.trim());
+      alert(`⚠️ Sample marked as '${reason.trim()}'.\nUrgent recollection notice posted to Dashboard.`);
+
+      if (window.confirm(`Open WhatsApp to send recollection notice to ${activeOrder.patient?.name} now?`)) {
+        sendRecollectionWhatsApp(activeOrder, reason.trim());
+      }
+      window.location.reload();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  };
+
+  // ENHANCED VERIFY HANDLER WITH 1-CLICK WHATSAPP DISPATCH
+  const onVerifyClick = async () => {
+    await handleVerifyInDb();
+    if (window.confirm(`✅ Report Verified & Locked!\n\nSend digital report download link to ${activeOrder.patient?.name} on WhatsApp now?`)) {
+      sendReportReadyWhatsApp(activeOrder);
+    }
+  };
 
   const RADIOLOGY_NORMAL_PRESETS = [
     {
@@ -56,16 +90,27 @@ export default function VerificationQC({
           </p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {saveStatus?.state === "saving" && (
-            <span className="text-xs font-semibold text-amber-600 flex items-center gap-1">
+            <span className="text-xs font-semibold text-amber-600 flex items-center gap-1 mr-2">
               <CloudUpload className="w-3.5 h-3.5 animate-bounce" /> Syncing...
             </span>
           )}
 
+          {/* REJECT SAMPLE (HEMOLYSIS) BUTTON */}
+          {!activeOrder.isLocked && (
+            <button
+              onClick={handleRejectSample}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+              title="Reject specimen due to hemolysis or clotting"
+            >
+              <AlertOctagon className="w-4 h-4 text-rose-600" /> Reject Sample (Hemolyzed)
+            </button>
+          )}
+
           {canVerifyReport ? (
             <button
-              onClick={handleVerifyInDb}
+              onClick={onVerifyClick}
               disabled={activeOrder.isLocked || isLoading}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
             >
@@ -130,7 +175,7 @@ export default function VerificationQC({
             );
           }
 
-          // Pathology / Biochemistry / Hematology (All Parameters including full CBC)
+          // Pathology / Biochemistry / Hematology Table
           return (
             <div key={test.id} className="bg-white rounded-2xl border overflow-hidden shadow-sm">
               <div className="bg-slate-100 px-4 py-2.5 font-black text-xs uppercase text-slate-800 border-b flex justify-between items-center">
@@ -142,10 +187,10 @@ export default function VerificationQC({
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b text-slate-500 font-bold">
-                    <th className="py-2.5 px-4">Parameter</th>
-                    <th className="py-2.5 px-4 w-56">Observed Result</th>
-                    <th className="py-2.5 px-4">Unit</th>
-                    <th className="py-2.5 px-4">Reference Range</th>
+                    <th className="py-2.5 px-4 w-1/3">Parameter</th>
+                    <th className="py-2.5 px-4 w-48">Observed Result</th>
+                    <th className="py-2.5 px-4 w-28">Unit</th>
+                    <th className="py-2.5 px-4">Clinical Reference Range</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -157,8 +202,8 @@ export default function VerificationQC({
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-50/60 transition">
-                        <td className="py-2 px-4 font-semibold text-slate-800">{p.name}</td>
-                        <td className="py-2 px-4">
+                        <td className="py-2.5 px-4 font-semibold text-slate-800 align-top">{p.name}</td>
+                        <td className="py-2.5 px-4 align-top">
                           {isQual ? (
                             <select
                               disabled={activeOrder.isLocked}
@@ -181,11 +226,19 @@ export default function VerificationQC({
                             />
                           )}
                         </td>
-                        <td className="py-2 px-4 text-slate-500 font-mono">{p.unit || "—"}</td>
-                        <td className="py-2 px-4 text-slate-600 font-mono">
-                          {p.min_range !== null && p.max_range !== null && p.min_range !== undefined
-                            ? `${p.min_range} - ${p.max_range}`
-                            : "Normal"}
+                        <td className="py-2.5 px-4 text-slate-500 font-mono align-top">{p.unit || "—"}</td>
+                        
+                        {/* MULTI-RANGE (GENDER / AGE / CUSTOM TEXT) COLUMN */}
+                        <td className="py-2.5 px-4 text-slate-700 font-mono text-xs leading-relaxed align-top">
+                          {p.reference_text || p.ref_text ? (
+                            <div className="whitespace-pre-line text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded-lg border border-blue-100">
+                              {p.reference_text || p.ref_text}
+                            </div>
+                          ) : p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "" ? (
+                            <span className="font-semibold">{p.min_range} - {p.max_range}</span>
+                          ) : (
+                            <span className="text-slate-400">Normal</span>
+                          )}
                         </td>
                       </tr>
                     );

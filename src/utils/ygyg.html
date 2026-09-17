@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=780, initial-scale=1.0">
+<title>Al Fattah Diagnostic & Consultation Center</title>
+
+<style>
+  /* =========================
+     PAGE: EXACTLY 780 x 1050px
+     ========================= */
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 780px;
+    min-width: 780px;
+    height: 1050px;
+    min-height: 1050px;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  .report-page {
+    position: relative;
+    width: 780px;
+    height: 1050px;
+    overflow: hidden;
+    background: #d9d9d9;
+  }
+
+  /* =========================
+     HEADER: 780 x 132px
+     ========================= */
+  .header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 780px;
+    height: 132px;
+    background: #25102d;
+    color: #fff;
+  }
+
+  .brand {
+    position: absolute;
+    left: 24px;
+    top: 25px;
+    width: 205px;
+    text-align: center;
+  }
+
+  .brand-logo {
+    display: block;
+    width: 62px;
+    height: 62px;
+    object-fit: contain;
+    margin: 0 auto 2px;
+  }
+
+  .tagline {
+    margin: 0;
+    font-size: 8.5px;
+    line-height: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+
+  .center-title {
+    position: absolute;
+    top: 26px;
+    right: 25px;
+    width: 500px;
+    text-align: right;
+  }
+
+  .center-title h1 {
+    margin: 0;
+    font-size: 31px;
+    line-height: 35px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+
+  .center-title h2 {
+    margin: 1px 0 0;
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 700;
+  }
+
+  /* =========================
+     CONTENT AREA
+     ========================= */
+  .content {
+    position: absolute;
+    left: 0;
+    top: 132px;
+    width: 780px;
+    height: 846px;
+    background: #d9d9d9;
+  }
+
+  /*
+    Put your report / patient / test-result HTML inside .content-inner.
+    The blank area is intentionally kept because the reference image
+    contains only the header and footer.
+  */
+  .content-inner {
+    width: 100%;
+    height: 100%;
+    padding: 20px 28px;
+  }
+
+  /* =========================
+     FOOTER: 780 x 72px
+     ========================= */
+  .footer {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 780px;
+    height: 72px;
+    border-top: 1px solid #222;
+    background: #d9d9d9;
+    display: flex;
+    align-items: center;
+    padding: 0 64px;
+  }
+
+  .footer-item {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .footer-icon {
+    width: 25px;
+    height: 25px;
+    object-fit: contain;
+    margin-right: 7px;
+    flex: 0 0 auto;
+  }
+
+  .footer-text {
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 700;
+    color: #111;
+  }
+
+  .phone {
+    margin-left: 11px;
+  }
+
+  /* =========================
+     PRINT
+     ========================= */
+  @page {
+    size: 780px 1050px;
+    margin: 0;
+  }
+
+  @media print {
+    html, body {
+      width: 780px;
+      height: 1050px;
+      margin: 0;
+      padding: 0;
+    }
+
+    .report-page {
+      width: 780px;
+      height: 1050px;
+      page-break-after: always;
+    }
+  }
+</style>
+</head>
+
+<body>
+  <div class="report-page">
+
+    <header class="header">
+      <div class="brand">
+        <img class="brand-logo" src="assets/logo-af.png" alt="Al Fattah logo">
+        <p class="tagline">With Al-Fattah on the Journey to Wellness</p>
+      </div>
+
+      <div class="center-title">
+        <h1>AL FATTAH</h1>
+        <h2>DIAGNOSTIC &amp; CONSULTATION CENTER</h2>
+      </div>
+    </header>
+
+    <main class="content">
+      <div class="content-inner">
+        <!-- YOUR REPORT CONTENT GOES HERE -->
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-item">
+        <img class="footer-icon" src="assets/location-pin.png" alt="Location">
+        <span class="footer-text">Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212</span>
+      </div>
+
+      <div class="footer-item phone">
+        <img class="footer-icon" src="assets/live-chat.png" alt="Phone">
+        <span class="footer-text">01723854472, 01624787444</span>
+      </div>
+    </footer>
+
+  </div>
+</body>
+</html>
