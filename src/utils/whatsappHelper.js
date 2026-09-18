@@ -5,17 +5,26 @@ export function formatPhoneForWhatsApp(phone) {
   if (!phone) return "";
   let clean = phone.replace(/[^0-9]/g, "");
 
-  // Bangladesh numbers: 017xxxxxxxx -> 88017xxxxxxxx
-  if (clean.startsWith("01") && clean.length === 11) {
-    clean = "88" + clean;
-  } else if (clean.startsWith("1") && clean.length === 10) {
-    clean = "880" + clean;
+  // If already starts with 880 (e.g. 88017xxxxxxxx)
+  if (clean.startsWith("880")) {
+    return clean;
   }
+
+  // If starts with 01 (e.g. 017xxxxxxxx / 015xxxxxxxx) -> add 88
+  if (clean.startsWith("01")) {
+    return "88" + clean;
+  }
+
+  // If starts with 1 (e.g. 17xxxxxxxx) -> add 880
+  if (clean.startsWith("1")) {
+    return "880" + clean;
+  }
+
   return clean;
 }
 
 /**
- * 1. Send Verified Report Link via WhatsApp (100% Free)
+ * 1. Send Verified Report Link directly into WhatsApp Web (No intermediate button)
  */
 export function sendReportReadyWhatsApp(order, labSettings = {}) {
   if (!order || !order.patient?.phone) {
@@ -48,12 +57,13 @@ ${reportUrl}
 _For inquiries, please contact our hotline: ${phoneHotline}_
 _Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212_`;
 
-  const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-  window.open(waUrl, "_blank");
+  // DIRECT WHATSAPP WEB URL (Skips landing page completely)
+  const directWaUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+  window.open(directWaUrl, "_blank");
 }
 
 /**
- * 2. Send Repeat Collection Notice via WhatsApp (100% Free)
+ * 2. Send Repeat Collection Notice directly into WhatsApp Web
  */
 export function sendRecollectionWhatsApp(order, reason = "Hemolyzed Specimen", labSettings = {}) {
   if (!order || !order.patient?.phone) {
@@ -82,6 +92,7 @@ Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212
 
 Thank you for your cooperation in ensuring the highest clinical standards.`;
 
-  const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-  window.open(waUrl, "_blank");
+  // DIRECT WHATSAPP WEB URL (Skips landing page completely)
+  const directWaUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+  window.open(directWaUrl, "_blank");
 }

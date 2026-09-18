@@ -17,7 +17,7 @@ export default function ReceptionPOS({
   setPaidVal,
   handleSaveOrderToDb,
   isLoading,
-  doctorsList = [] // <--- Passed safely with default empty array
+  doctorsList = []
 }) {
   const [posFilterType, setPosFilterType] = useState("ALL"); // 'ALL' | 'SINGLE' | 'PROFILE'
   const [posSearch, setPosSearch] = useState("");
@@ -29,7 +29,7 @@ export default function ReceptionPOS({
   const [patientHistoryList, setPatientHistoryList] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
-  // Helper to reliably determine if a test is a Multi-Parameter Profile / Panel
+  // Helper to reliably check if a test is a Multi-Parameter Profile / Panel
   const checkIsProfile = (test) => {
     if (!test) return false;
     const isProfFlag = 
@@ -42,6 +42,37 @@ export default function ReceptionPOS({
     const params = test.test_parameters || test.parameters || [];
     return isProfFlag || params.length > 1;
   };
+
+  // 1. REAGENT AVAILABILITY FILTER: Completely hides tests that are out of stock / turned off
+  const availableCatalog = useMemo(() => {
+    return (testCatalog || []).filter(
+      (test) => test.is_available !== false && test.is_active !== false
+    );
+  }, [testCatalog]);
+
+  // 2. Filtered Catalog based on search and single/profile tab
+  const filteredCatalog = useMemo(() => {
+    return availableCatalog.filter((test) => {
+      const isProfile = checkIsProfile(test);
+
+      const matchType =
+        posFilterType === "ALL" ||
+        (posFilterType === "SINGLE" && !isProfile) ||
+        (posFilterType === "PROFILE" && isProfile);
+
+      const query = posSearch.trim().toLowerCase();
+      const matchSearch =
+        !query ||
+        (test.name && test.name.toLowerCase().includes(query)) ||
+        (test.code && test.code.toLowerCase().includes(query)) ||
+        (test.sample_type && test.sample_type.toLowerCase().includes(query));
+
+      return matchType && matchSearch;
+    });
+  }, [availableCatalog, posFilterType, posSearch]);
+
+  const singleCount = useMemo(() => availableCatalog.filter(t => !checkIsProfile(t)).length, [availableCatalog]);
+  const profileCount = useMemo(() => availableCatalog.filter(t => checkIsProfile(t)).length, [availableCatalog]);
 
   // Live Patient Search debouncer
   useEffect(() => {
@@ -99,30 +130,6 @@ export default function ReceptionPOS({
     }
   }, [netPayable, paidVal, setPaidVal]);
 
-  // Filtered Catalog
-  const filteredCatalog = useMemo(() => {
-    return testCatalog.filter((test) => {
-      const isProfile = checkIsProfile(test);
-
-      const matchType =
-        posFilterType === "ALL" ||
-        (posFilterType === "SINGLE" && !isProfile) ||
-        (posFilterType === "PROFILE" && isProfile);
-
-      const query = posSearch.trim().toLowerCase();
-      const matchSearch =
-        !query ||
-        (test.name && test.name.toLowerCase().includes(query)) ||
-        (test.code && test.code.toLowerCase().includes(query)) ||
-        (test.sample_type && test.sample_type.toLowerCase().includes(query));
-
-      return matchType && matchSearch;
-    });
-  }, [testCatalog, posFilterType, posSearch]);
-
-  const singleCount = useMemo(() => testCatalog.filter(t => !checkIsProfile(t)).length, [testCatalog]);
-  const profileCount = useMemo(() => testCatalog.filter(t => checkIsProfile(t)).length, [testCatalog]);
-
   const safeDoctorsList = Array.isArray(doctorsList) ? doctorsList : [];
 
   return (
@@ -166,7 +173,7 @@ export default function ReceptionPOS({
               type="text"
               value={lookupQuery}
               onChange={(e) => setLookupQuery(e.target.value)}
-              placeholder="Type Patient ID (PID-...), Phone Number (017...), or Name..."
+              placeholder="Type Patient ID (P-1001...), Phone Number (017...), or Name..."
               className="w-full pl-4 pr-10 py-2.5 bg-white text-slate-900 rounded-xl text-xs font-semibold outline-none shadow-sm focus:ring-2 focus:ring-blue-400"
             />
             {isSearching && (
@@ -306,7 +313,7 @@ export default function ReceptionPOS({
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                 }`}
               >
-                All Tests ({testCatalog.length})
+                All Available ({availableCatalog.length})
               </button>
 
               <button
@@ -338,7 +345,7 @@ export default function ReceptionPOS({
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search SGPT, Glucose, LFT..."
+                placeholder="Search test, code, sample..."
                 value={posSearch}
                 onChange={(e) => setPosSearch(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 font-medium"
@@ -346,10 +353,10 @@ export default function ReceptionPOS({
             </div>
           </div>
 
-          {/* TESTS GRID */}
+          {/* TESTS GRID (ONLY IN-STOCK REAGENT TESTS SHOWN) */}
           {filteredCatalog.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              No tests found matching the selected filter or search term.
+              No tests currently available matching the selected filter.
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">

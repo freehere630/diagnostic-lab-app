@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { 
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult, 
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest, 
-  deleteTest, getStaffUsers, registerStaffUser, deleteStaffUser,
+  deleteTest, toggleTestAvailability, getStaffUsers, registerStaffUser, deleteStaffUser,
   getLabSettings, saveLabSettings, settleOrderDue,
   getDoctorsList, createOrUpdateDoctor, deleteDoctor, seedRadiologyCatalog
 } from "./services/api";
@@ -80,7 +80,7 @@ export default function App() {
   const [newTestForm, setNewTestForm] = useState({ 
     name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum", 
     tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, 
-    parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "" }] 
+    parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
   });
 
   // 1. Check Public QR Scan Link
@@ -457,8 +457,7 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-// Inside src/App.jsx around line 350:
-
+  // OPEN EDIT MODAL (PRESERVES MULTI-RANGE GENDER/AGE TEXT)
   const handleOpenEditModal = (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
     const normalizedParams = rawParams.length > 0
@@ -469,7 +468,6 @@ export default function App() {
           unit: p.unit || "",
           min: p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : ""),
           max: p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : ""),
-          // PRESERVE MULTI-RANGE TEXT
           reference_text: p.reference_text || p.ref_text || ""
         }))
       : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "", reference_text: "" }];
@@ -485,30 +483,22 @@ export default function App() {
       sampleType: t.sample_type || t.sampleType || "Serum",
       tubeColor: t.tube_color || t.tubeColor || "Red / Yellow (SST / Plain Clot)",
       isProfile: t.is_profile !== undefined ? Boolean(t.is_profile) : Boolean(t.isProfile),
+      is_available: t.is_available !== undefined ? t.is_available : true,
       parameters: normalizedParams
     });
   };
 
-   const handleSaveTestEdits = async () => {
+  const handleSaveTestEdits = async () => {
     if (!editingTest) return;
-    if (!editingTest.name || !editingTest.code) {
-      return alert("Test Name and Short Code are required.");
-    }
-
+    if (!editingTest.name || !editingTest.code) return alert("Fill Name and Code.");
     setIsLoading(true);
     try {
       await updateExistingTest(editingTest.id, editingTest);
       alert("✅ Test Updated Successfully!");
       setEditingTest(null);
-
-      // Re-fetch fresh data from Supabase
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
-    } catch (e) {
-      alert("⚠️ Error saving test: " + e.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
   const handleDeleteTest = async (testId, testName) => {
@@ -519,6 +509,18 @@ export default function App() {
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+  };
+
+  // 1-CLICK REAGENT STOCK TOGGLE HANDLER
+  const handleToggleReagent = async (testId, newStatus) => {
+    try {
+      await toggleTestAvailability(testId, newStatus);
+      setTestCatalog((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, is_available: newStatus } : t))
+      );
+    } catch (e) {
+      alert("Error updating reagent status: " + e.message);
+    }
   };
 
   const handleSeedRadiology = async () => {
@@ -740,11 +742,11 @@ export default function App() {
           />
         )}
 
-{/* REPORTS & PRINT */}
+        {/* REPORTS & PRINT (WITH PRE-PRINTED AL-FATTAH PAD TOGGLE) */}
         {activeTab === "reports" && (
           <ReportsPrint 
             activeOrder={activeOrder} 
-            currentUser={currentUser} // <-- PASS CURRENT USER
+            currentUser={currentUser} 
             departmentGroupedReports={departmentGroupedReports} 
             handlePrintDepartmentA4Report={(deptId, usePad) => 
               printDepartmentA4Report(
@@ -774,6 +776,7 @@ export default function App() {
             handleSaveNewTest={handleSaveNewTest} 
             handleSaveTestEdits={handleSaveTestEdits} 
             handleDeleteTest={handleDeleteTest} 
+            handleToggleReagent={handleToggleReagent}
             editingTest={editingTest} 
             setEditingTest={setEditingTest} 
             handleOpenEditModal={handleOpenEditModal}

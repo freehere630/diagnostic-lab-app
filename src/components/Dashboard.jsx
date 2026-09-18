@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { 
   Search, Calendar, Receipt, DollarSign, CheckCircle2, 
   AlertCircle, X, ChevronLeft, ChevronRight, Clock,
-  MessageCircle, RotateCcw, AlertTriangle 
+  MessageCircle, RotateCcw, AlertTriangle, ChevronDown 
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
@@ -32,23 +32,37 @@ export default function Dashboard({
   const [collectionAmount, setCollectionAmount] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
-  // STRICT TIME SORTING: Latest timestamp and registration at the top
+  // Messenger Bubble Open/Close State
+  const [isBubbleOpen, setIsBubbleOpen] = useState(false);
+
+  // Local state for orders so recollection clears instantly without page reload
+  const [localOrders, setLocalOrders] = useState(orders);
+
+  // Sync if parent orders update
+  React.useEffect(() => {
+    setLocalOrders(orders);
+  }, [orders]);
+
+  // STRICT TIME SORTING: Latest registration on top
   const sortedOrders = useMemo(() => {
-    return [...orders].sort((a, b) => {
+    return [...localOrders].sort((a, b) => {
       const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
       const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
       return timeB - timeA;
     });
-  }, [orders]);
+  }, [localOrders]);
 
-  // REPEAT SAMPLE RECOLLECTION FILTER (Hemolyzed, Clotted, Rejected Samples)
+  // REPEAT SAMPLE RECOLLECTION FILTER
   const recollectionOrders = useMemo(() => {
-    return sortedOrders.filter(
-      (o) =>
-        (o.sample_status || "").toLowerCase().includes("repeat") ||
-        (o.sample_status || "").toLowerCase().includes("recollection") ||
-        (o.verifierRemarks || "").toUpperCase().includes("RECOLLECTION REQUIRED")
-    );
+    return sortedOrders.filter((o) => {
+      const status = (o.sample_status || "").toLowerCase();
+      const remarks = (o.verifierRemarks || "").toUpperCase();
+      const isPendingRecollection = 
+        status.includes("repeat collection required") || 
+        status === "repeat collection" ||
+        (remarks.includes("RECOLLECTION REQUIRED") && !status.includes("recollected"));
+      return isPendingRecollection;
+    });
   }, [sortedOrders]);
 
   const totalRevenue = sortedOrders.reduce((acc, o) => acc + (o.billing?.paid || 0), 0);
@@ -69,13 +83,29 @@ export default function Dashboard({
     setSettleOrder(null);
   };
 
+  // Instant local clear without full reload
   const handleMarkRecollectedAction = async (orderId) => {
-    if (!window.confirm("Confirm new blood sample has been drawn and received for analysis?")) return;
     setActionLoading(true);
     try {
       await markSampleRecollected(orderId);
-      alert("✅ Sample marked as Recollected! Now available for laboratory analysis.");
-      window.location.reload();
+      
+      // Update local state instantly so the bubble updates in real time
+      setLocalOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === orderId
+            ? {
+                ...o,
+                sample_status: "Sample Recollected",
+                verifierRemarks: "New sample recollected. In analysis."
+              }
+            : o
+        )
+      );
+
+      // If all cleared, close bubble
+      if (recollectionOrders.length <= 1) {
+        setIsBubbleOpen(false);
+      }
     } catch (e) {
       alert("Error: " + e.message);
     } finally {
@@ -112,7 +142,7 @@ export default function Dashboard({
   };
 
   return (
-    <div className="space-y-6 w-full font-sans text-slate-800">
+    <div className="space-y-6 w-full font-sans text-slate-800 relative">
       
       {/* Search & Preset Bar */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -176,59 +206,6 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* 1. URGENT REPEAT SAMPLE RECOLLECTION BANNER (HEMOLYSIS / CLOT ALERT) */}
-      {recollectionOrders.length > 0 && (
-        <div className="bg-rose-50 border-2 border-rose-500 rounded-2xl p-5 shadow-lg space-y-3 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5 text-rose-950 font-black text-sm">
-              <AlertTriangle className="w-5 h-5 text-rose-600 animate-bounce" />
-              <span>URGENT: {recollectionOrders.length} Specimen(s) Require Immediate Recollection (Hemolyzed / Clotted)</span>
-            </div>
-            <span className="px-3 py-1 bg-rose-600 text-white rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              Action Required
-            </span>
-          </div>
-
-          <div className="divide-y divide-rose-200 text-xs">
-            {recollectionOrders.map((ord) => (
-              <div key={ord.orderId} className="py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <span className="text-slate-900 font-extrabold text-sm">{ord.patient?.name}</span> 
-                  <span className="font-mono text-blue-700 font-bold ml-2">({ord.patient?.id})</span>
-                  <span className="text-slate-600 font-mono ml-2">📞 {ord.patient?.phone}</span>
-                  <span className="text-slate-500 font-mono ml-2">Barcode: {ord.barcode}</span>
-                  <p className="text-[11px] text-rose-800 mt-0.5 font-bold flex items-center gap-1">
-                    <span>Rejection Reason:</span>
-                    <span className="bg-rose-100 text-rose-900 px-2 py-0.5 rounded border border-rose-300">
-                      {ord.verifierRemarks || "Hemolyzed Specimen (Cellular breakdown)"}
-                    </span>
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => sendRecollectionWhatsApp(ord, ord.verifierRemarks || "Hemolyzed Specimen")}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition shadow"
-                    title="Send WhatsApp notice to patient"
-                  >
-                    <MessageCircle className="w-4 h-4" /> WhatsApp Recall Notice
-                  </button>
-
-                  <button
-                    disabled={actionLoading}
-                    onClick={() => handleMarkRecollectedAction(ord.orderId)}
-                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-blue-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition shadow"
-                    title="Mark new blood sample drawn"
-                  >
-                    <RotateCcw className="w-4 h-4" /> Mark Recollected
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Metrics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 w-full">
         {metrics.map((m, idx) => (
@@ -279,10 +256,10 @@ export default function Dashboard({
               <tbody className="divide-y divide-slate-100">
                 {sortedOrders.map((ord) => {
                   const hasDue = (ord.billing?.due || 0) > 0;
-                  const isRecollection = (ord.sample_status || "").toLowerCase().includes("repeat") || (ord.verifierRemarks || "").toUpperCase().includes("RECOLLECTION REQUIRED");
+                  const isRecollection = (ord.sample_status || "").toLowerCase().includes("repeat");
 
                   return (
-                    <tr key={ord.orderId} className={`hover:bg-blue-50/40 transition ${isRecollection ? "bg-rose-50/40" : ""}`}>
+                    <tr key={ord.orderId} className={`hover:bg-blue-50/40 transition ${isRecollection ? "bg-rose-50/30" : ""}`}>
                       <td className="py-3.5 px-4 font-mono text-slate-600">
                         <span className="flex items-center gap-1 font-bold text-slate-800">
                           <Clock className="w-3.5 h-3.5 text-blue-600" />
@@ -382,6 +359,87 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* COMPACT MESSENGER BUBBLE NOTIFICATION (SAVES SPACE)                       */}
+      {/* ========================================================================= */}
+      {recollectionOrders.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 font-sans">
+          
+          {/* EXPANDABLE MESSENGER CARD */}
+          {isBubbleOpen && (
+            <div className="mb-3 bg-white w-84 sm:w-96 rounded-2xl shadow-2xl border border-rose-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+              
+              {/* Card Header */}
+              <div className="bg-rose-600 text-white px-4 py-3 flex justify-between items-center shadow">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-white animate-bounce" />
+                  <span className="font-extrabold text-xs tracking-wide">
+                    Urgent Recollection Needed ({recollectionOrders.length})
+                  </span>
+                </div>
+                <button
+                  onClick={() => setIsBubbleOpen(false)}
+                  className="p-1 hover:bg-white/20 rounded-lg text-white/90 hover:text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Patient List */}
+              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 p-2 text-xs">
+                {recollectionOrders.map((ord) => (
+                  <div key={ord.orderId} className="p-2.5 hover:bg-rose-50/50 rounded-xl transition space-y-1.5">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="font-black text-slate-900">{ord.patient?.name}</span>
+                        <span className="font-mono text-blue-700 font-bold ml-1.5">({ord.patient?.id})</span>
+                      </div>
+                      <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 rounded font-bold text-[9px] uppercase">
+                        Hemolyzed
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      📞 {ord.patient?.phone} • Barcode: {ord.barcode}
+                    </div>
+
+                    <div className="flex gap-1.5 pt-1">
+                      <button
+                        onClick={() => sendRecollectionWhatsApp(ord, "Hemolyzed Specimen")}
+                        className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm transition"
+                      >
+                        <MessageCircle className="w-3 h-3" /> WhatsApp Recall
+                      </button>
+
+                      <button
+                        disabled={actionLoading}
+                        onClick={() => handleMarkRecollectedAction(ord.orderId)}
+                        className="py-1 px-2 bg-slate-900 hover:bg-blue-600 text-white rounded-lg font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm transition"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Recollected
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* FLOATING MESSENGER BUBBLE BUTTON */}
+          <button
+            onClick={() => setIsBubbleOpen(!isBubbleOpen)}
+            className="flex items-center gap-2 px-4 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-2xl font-black text-xs transition-all transform hover:scale-105 active:scale-95 border-2 border-white"
+          >
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-200 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+            </span>
+            <span>{recollectionOrders.length} Sample Recall{recollectionOrders.length > 1 ? 's' : ''}</span>
+            {isBubbleOpen ? <ChevronDown className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          </button>
+        </div>
+      )}
 
       {/* Due Settlement Popup Modal */}
       {settleOrder && (

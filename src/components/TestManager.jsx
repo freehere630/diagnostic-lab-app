@@ -9,6 +9,7 @@ export default function TestManager({
   handleSaveNewTest,
   handleSaveTestEdits,
   handleDeleteTest,
+  handleToggleReagent,
   editingTest,
   setEditingTest,
   handleOpenEditModal,
@@ -19,9 +20,7 @@ export default function TestManager({
 }) {
   const [searchCatalog, setSearchCatalog] = useState("");
 
-  // =========================================================================
-  // PARAMETER ROW MANAGEMENT (CREATE FORM)
-  // =========================================================================
+  // Parameter Row Management (Create Form)
   const addCreateParameterRow = () => {
     setNewTestForm({
       ...newTestForm,
@@ -48,9 +47,7 @@ export default function TestManager({
     });
   };
 
-  // =========================================================================
-  // PARAMETER ROW MANAGEMENT (EDIT MODAL)
-  // =========================================================================
+  // Parameter Row Management (Edit Modal)
   const addEditParameterRow = () => {
     if (!editingTest) return;
     setEditingTest({
@@ -368,7 +365,7 @@ export default function TestManager({
             <h3 className="font-bold text-sm text-slate-900">
               Live Diagnostic Catalog ({testCatalog.length} Investigations)
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Click edit to update parameters, pricing, or multiple reference ranges</p>
+            <p className="text-xs text-slate-400 mt-0.5">Toggle reagent stock, edit pricing, or update clinical reference limits</p>
           </div>
 
           <div className="relative w-full sm:w-64">
@@ -405,7 +402,25 @@ export default function TestManager({
                 <p className="font-mono text-xs font-bold text-emerald-700 mt-1">Price: ৳ {t.price}</p>
               </div>
 
-              <div className="flex gap-2 mt-4 pt-3 border-t border-slate-200">
+              {/* 1-CLICK REAGENT STOCK TOGGLE SWITCH */}
+              <div className="mt-3 pt-2.5 border-t border-slate-200 flex justify-between items-center">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Reagent:</span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleReagent && handleToggleReagent(t.id, t.is_available === false)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition shadow-sm ${
+                    t.is_available === false
+                      ? "bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200"
+                      : "bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200"
+                  }`}
+                  title={t.is_available === false ? "Click to mark reagent in stock" : "Click if out of reagent to hide from POS"}
+                >
+                  <span className={`w-2 h-2 rounded-full ${t.is_available === false ? "bg-rose-600" : "bg-emerald-600"}`}></span>
+                  {t.is_available === false ? "Out of Reagent (Hidden)" : "In Stock (Active)"}
+                </button>
+              </div>
+
+              <div className="flex gap-2 mt-3 pt-2.5 border-t border-slate-200">
                 <button
                   onClick={() => handleOpenEditModal(t)}
                   className="flex-1 py-1.5 bg-slate-900 hover:bg-blue-600 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 transition"

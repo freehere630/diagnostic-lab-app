@@ -53,7 +53,7 @@ const MASTER_CBC_PARAMETERS = [
   { name: "Platelet Large Cell Ratio (P-LCR)", unit: "%", min: 13.0, max: 43.0, type: "numeric" }
 ];
 
-// SILENT AUTO-SEEDER (Runs automatically without buttons)
+// SILENT AUTO-SEEDER (Runs automatically without user clicks)
 async function ensureSilent5PartCBC(existingTests = []) {
   const cbcTestId = "T-CBC-5PART";
   const existingCbc = existingTests.find(
@@ -65,7 +65,6 @@ async function ensureSilent5PartCBC(existingTests = []) {
 
   const existingParams = existingCbc ? (existingCbc.test_parameters || existingCbc.parameters || []) : [];
 
-  // If already full 24 parameters, return immediately
   if (existingCbc && existingParams.length >= 20) {
     return existingTests;
   }
@@ -87,7 +86,8 @@ async function ensureSilent5PartCBC(existingTests = []) {
       price: 400,
       sample_type: "Whole Blood",
       tube_color: "Purple / Lavender (EDTA)",
-      is_profile: true
+      is_profile: true,
+      is_available: true
     });
 
     if (existingParams.length < 20) {
@@ -119,7 +119,7 @@ async function ensureSilent5PartCBC(existingTests = []) {
     console.warn("Silent CBC verification notice:", err.message);
   }
 
-  // Guaranteed in-memory fallback
+  // Fallback in-memory object
   const inMemoryCbc = {
     id: cbcTestId,
     code: "CBC",
@@ -129,6 +129,7 @@ async function ensureSilent5PartCBC(existingTests = []) {
     sample_type: "Whole Blood",
     tube_color: "Purple / Lavender (EDTA)",
     is_profile: true,
+    is_available: true,
     test_parameters: MASTER_CBC_PARAMETERS.map((p, idx) => ({
       id: `P-CBC-${String(idx + 1).padStart(2, "0")}`,
       test_id: cbcTestId,
@@ -449,30 +450,28 @@ export async function getAllOrders() {
   });
 }
 
-// Inside createNewOrder in src/services/api.js:
-
+// ==========================================
+// 6. CREATE NEW ORDER (PURE 9-DIGIT BARCODE & SHORT PID)
+// ==========================================
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
-  // 1. SHORT PATIENT ID (e.g. P-1024)
+  // Short Patient ID (e.g. P-1024)
   const patientId = patientData.id && patientData.id.trim() 
     ? patientData.id.trim() 
     : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  // 2. STRICTLY PURE 9-DIGIT NUMERIC SAMPLE BARCODE (e.g. 482910385)
-  // Zero letters, zero hyphens, zero symbols - perfect for Maglumi & KT-44 scanners
+  // STRICTLY PURE 9-DIGIT NUMERIC SAMPLE BARCODE
   const barcode = String(Math.floor(100000000 + Math.random() * 900000000));
 
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
-  const timeCompact = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0') + String(now.getSeconds()).padStart(2, '0');
   
-  // Clean short Order ID & Receipt No
   const orderId = `ORD-${todayCompact.slice(2)}-${Math.floor(1000 + Math.random() * 9000)}`;
   const receiptNo = `RCP-${todayCompact.slice(4)}-${Math.floor(1000 + Math.random() * 9000)}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // Save Patient
+  // 1. Save Patient
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -483,7 +482,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
 
-  // Calculate Billing
+  // 2. Accurate Subtotal Calculation from Selected Tests
   const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
   const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
   const finalDiscountPercent = discount || 0;
@@ -509,12 +508,13 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("orders").insert(orderRow); } catch (e) {}
 
-  // Link Tests
+  // 3. Link Tests
   if (testIds && testIds.length > 0) {
     const orderTestRows = testIds.map((tid) => ({ order_id: orderId, test_id: tid }));
     try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
   }
 
+  // 4. In-Memory Complete Object
   const completeOrder = {
     ...orderRow,
     orderId: orderId,
@@ -549,6 +549,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   return completeOrder;
 }
+
 // ==========================================
 // 7. SETTLE DUE AMOUNT
 // ==========================================
@@ -600,6 +601,77 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
   return data;
 }
 
+// ==========================================
+// 9. SAMPLE REJECTION & RECOLLECTION WORKFLOW
+// ==========================================
+export async function requestSampleRecollection(orderId, reason = "Hemolyzed Specimen", remarks = "") {
+  const fullRemarks = `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim();
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      sample_status: "Repeat Collection Required",
+      qc_status: "Pending",
+      verifier_remarks: fullRemarks
+    })
+    .eq("id", orderId);
+
+  if (error) throw error;
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+    const updated = local.map((o) =>
+      (o.id === orderId || o.orderId === orderId)
+        ? { ...o, sample_status: "Repeat Collection Required", verifierRemarks: fullRemarks }
+        : o
+    );
+    localStorage.setItem("apex_local_orders", JSON.stringify(updated));
+  } catch (e) {}
+
+  return data;
+}
+
+export async function markSampleRecollected(orderId) {
+  // Clears the flag from BOTH sample_status AND verifier_remarks
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      sample_status: "Sample Recollected",
+      verifier_remarks: "New sample recollected. In laboratory analysis."
+    })
+    .eq("id", orderId);
+
+  if (error) throw error;
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+    const updated = local.map((o) =>
+      (o.id === orderId || o.orderId === orderId)
+        ? { 
+            ...o, 
+            sample_status: "Sample Recollected", 
+            verifierRemarks: "New sample recollected. In laboratory analysis." 
+          }
+        : o
+    );
+    localStorage.setItem("apex_local_orders", JSON.stringify(updated));
+  } catch (e) {}
+
+  return data;
+}
+
+// ==========================================
+// 10. TEST CATALOG CRUD & REAGENT AVAILABILITY
+// ==========================================
+export async function toggleTestAvailability(testId, isAvailable) {
+  const { data, error } = await supabase
+    .from("tests")
+    .update({ is_available: isAvailable })
+    .eq("id", testId);
+
+  if (error) throw error;
+  return data;
+}
+
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -613,7 +685,8 @@ export async function createNewTestWithParameters(testData) {
       price: parseFloat(testData.price) || 0,
       sample_type: testData.sampleType || testData.sample_type || "Serum",
       tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-      is_profile: Boolean(testData.isProfile || testData.is_profile)
+      is_profile: Boolean(testData.isProfile || testData.is_profile),
+      is_available: testData.is_available !== undefined ? testData.is_available : true
     })
     .select()
     .single();
@@ -628,9 +701,9 @@ export async function createNewTestWithParameters(testData) {
         const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
         const refText = (p.reference_text || p.ref_text || "").trim();
 
-        // Ensure param_type is strictly valid for Postgres ('numeric', 'qualitative', 'text')
+        // Postgres check constraint safety: only 'numeric', 'qualitative', 'text'
         let safeType = p.param_type || "numeric";
-        if (safeType === "multirange") safeType = "numeric"; // Stored as numeric with custom reference_text!
+        if (safeType === "multirange") safeType = "numeric";
 
         return {
           id: `P-${testId}-${idx + 1}`,
@@ -647,7 +720,7 @@ export async function createNewTestWithParameters(testData) {
     if (paramRows.length > 0) {
       const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
       if (insErr) {
-        // Fallback if reference_text column is not yet in Supabase
+        // Fallback retry without reference_text if column not created yet
         const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
         const { error: retryErr } = await supabase.from("test_parameters").insert(safeRows);
         if (retryErr) throw new Error("Failed to save parameters: " + retryErr.message);
@@ -669,7 +742,8 @@ export async function updateExistingTest(testId, testData) {
       price: parseFloat(testData.price) || 0,
       sample_type: testData.sampleType || testData.sample_type || "Serum",
       tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-      is_profile: Boolean(testData.isProfile || testData.is_profile)
+      is_profile: Boolean(testData.isProfile || testData.is_profile),
+      is_available: testData.is_available !== undefined ? testData.is_available : true
     })
     .eq("id", testId);
 
@@ -688,9 +762,8 @@ export async function updateExistingTest(testId, testData) {
 
       const existingId = p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
 
-      // Ensure param_type is strictly valid for Postgres ('numeric', 'qualitative', 'text')
       let safeType = p.param_type || "numeric";
-      if (safeType === "multirange") safeType = "numeric"; // Stored as numeric with custom reference_text!
+      if (safeType === "multirange") safeType = "numeric";
 
       return {
         id: existingId,
@@ -704,7 +777,6 @@ export async function updateExistingTest(testId, testData) {
       };
     });
 
-    // 3. Delete old parameters and insert clean new rows safely
     await supabase.from("test_parameters").delete().eq("test_id", testId);
 
     const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
@@ -716,6 +788,7 @@ export async function updateExistingTest(testId, testData) {
     }
   }
 }
+
 export async function deleteTest(testId) {
   await supabase.from("order_tests").delete().eq("test_id", testId);
   await supabase.from("test_parameters").delete().eq("test_id", testId);
@@ -723,7 +796,7 @@ export async function deleteTest(testId) {
 }
 
 // ==========================================
-// 10. STAFF USERS
+// 11. STAFF USERS
 // ==========================================
 export async function getStaffUsers() {
   try {
@@ -766,7 +839,7 @@ export async function deleteStaffUser(userId) {
 }
 
 // ==========================================
-// 11. HOSPITAL BRANDING & SETTINGS
+// 12. HOSPITAL BRANDING & SETTINGS
 // ==========================================
 export async function getLabSettings() {
   try {
@@ -792,34 +865,5 @@ export async function saveLabSettings(settingsData) {
     report_design: settingsData.reportDesign || settingsData.report_design || {},
     receipt_design: settingsData.receiptDesign || settingsData.receipt_design || {}
   }).select().single();
-  return data;
-}
-
-// Add to src/services/api.js:
-
-export async function requestSampleRecollection(orderId, reason = "Hemolyzed", remarks = "") {
-  const { data, error } = await supabase
-    .from("orders")
-    .update({
-      sample_status: "Repeat Collection Required",
-      qc_status: "Pending",
-      verifier_remarks: `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim()
-    })
-    .eq("id", orderId);
-
-  if (error) throw error;
-  return data;
-}
-
-export async function markSampleRecollected(orderId) {
-  const { data, error } = await supabase
-    .from("orders")
-    .update({
-      sample_status: "Recollected - In Analysis",
-      qc_status: "Pending"
-    })
-    .eq("id", orderId);
-
-  if (error) throw error;
   return data;
 }

@@ -27,32 +27,74 @@ export default function VerificationQC({
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
 
-  // REJECT SAMPLE HANDLER (HEMOLYSIS, CLOTTED, ETC.)
-  const handleRejectSample = async () => {
-    const reason = prompt(
-      "Enter reason for sample rejection:\n1. Hemolyzed Specimen\n2. Clotted Specimen (EDTA)\n3. Insufficient Quantity (QNS)\n4. Lipemic Specimen",
-      "Hemolyzed Specimen"
-    );
-    if (!reason || !reason.trim()) return;
+  // 1. STRICT VERIFICATION CHECK: Verifies that EVERY single parameter has a result entered
+  const validateAllResultsEntered = () => {
+    const missing = [];
 
-    try {
-      await requestSampleRecollection(activeOrder.orderId, reason.trim());
-      alert(`⚠️ Sample marked as '${reason.trim()}'.\nUrgent recollection notice posted to Dashboard.`);
+    (activeOrder.tests || []).forEach((test) => {
+      const rawParams = test.test_parameters || test.parameters || [];
+      
+      if (rawParams.length > 0) {
+        rawParams.forEach((p) => {
+          const val = activeOrder.results?.[p.id]?.value !== undefined 
+            ? activeOrder.results[p.id].value 
+            : (activeOrder.results?.[test.id]?.value ?? "");
 
-      if (window.confirm(`Open WhatsApp to send recollection notice to ${activeOrder.patient?.name} now?`)) {
-        sendRecollectionWhatsApp(activeOrder, reason.trim());
+          if (val === undefined || val === null || String(val).trim() === "") {
+            missing.push(`${test.name} → ${p.name}`);
+          }
+        });
+      } else {
+        const val = activeOrder.results?.[test.id]?.value ?? "";
+        if (val === undefined || val === null || String(val).trim() === "") {
+          missing.push(test.name);
+        }
       }
-      window.location.reload();
+    });
+
+    return missing;
+  };
+
+  // 2. 1-CLICK INSTANT REJECT & WHATSAPP (NO MODALS, NO RELOAD)
+  const handleRejectHemolyzedInstant = async () => {
+    // Immediately open WhatsApp in the direct user-click context (bypasses browser popup blockers)
+    sendRecollectionWhatsApp(activeOrder, "Hemolyzed Specimen");
+
+    // Silently update database in the background
+    try {
+      await requestSampleRecollection(activeOrder.orderId, "Hemolyzed Specimen");
+      // Update local memory so screen reflects change immediately without page reload
+      activeOrder.sample_status = "Repeat Collection Required";
+      activeOrder.verifierRemarks = "[RECOLLECTION REQUIRED: Hemolyzed Specimen]";
     } catch (e) {
-      alert("Error: " + e.message);
+      console.error("Background DB update notice:", e);
     }
   };
 
-  // ENHANCED VERIFY HANDLER WITH 1-CLICK WHATSAPP DISPATCH
-  const onVerifyClick = async () => {
-    await handleVerifyInDb();
-    if (window.confirm(`✅ Report Verified & Locked!\n\nSend digital report download link to ${activeOrder.patient?.name} on WhatsApp now?`)) {
-      sendReportReadyWhatsApp(activeOrder);
+  // 3. 1-CLICK VERIFY & WHATSAPP REPORT DISPATCH (WITH STRICT BLANK CHECK)
+  const onVerifyClickInstant = async () => {
+    // 1. Block verification if any parameter is missing
+    const missingResults = validateAllResultsEntered();
+
+    if (missingResults.length > 0) {
+      alert(
+        `⛔ CANNOT COMPLETE VERIFICATION!\n\n` +
+        `All parameters must have a result before verification can be completed.\n` +
+        `Missing results for (${missingResults.length} parameter(s)):\n\n` +
+        missingResults.slice(0, 6).map((m) => `• ${m}`).join("\n") +
+        (missingResults.length > 6 ? `\n...and ${missingResults.length - 6} more` : "")
+      );
+      return;
+    }
+
+    // 2. Open WhatsApp with verified certificate link
+    sendReportReadyWhatsApp(activeOrder);
+
+    // 3. Lock & verify in database in the background
+    try {
+      await handleVerifyInDb();
+    } catch (e) {
+      console.error("Verification notice:", e);
     }
   };
 
@@ -97,25 +139,26 @@ export default function VerificationQC({
             </span>
           )}
 
-          {/* REJECT SAMPLE (HEMOLYSIS) BUTTON */}
+          {/* 1-CLICK REJECT & WHATSAPP */}
           {!activeOrder.isLocked && (
             <button
-              onClick={handleRejectSample}
-              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-              title="Reject specimen due to hemolysis or clotting"
+              onClick={handleRejectHemolyzedInstant}
+              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md active:scale-95"
+              title="1-Click: Flags sample as Hemolyzed and opens WhatsApp recall notice"
             >
-              <AlertOctagon className="w-4 h-4 text-rose-600" /> Reject Sample (Hemolyzed)
+              <AlertOctagon className="w-4 h-4" /> Reject (Hemolyzed) & WhatsApp
             </button>
           )}
 
+          {/* 1-CLICK VERIFY & WHATSAPP (WITH BLANK VALIDATION) */}
           {canVerifyReport ? (
             <button
-              onClick={onVerifyClick}
+              onClick={onVerifyClickInstant}
               disabled={activeOrder.isLocked || isLoading}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow active:scale-95"
             >
               <ShieldCheck className="w-4 h-4" />
-              {activeOrder.isLocked ? "Verified & Locked" : "Verify & Lock Report"}
+              {activeOrder.isLocked ? "Verified & Locked" : "Verify & Send WhatsApp"}
             </button>
           ) : (
             <div className="px-3 py-1.5 bg-slate-100 border border-slate-300 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-1.5">
