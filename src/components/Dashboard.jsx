@@ -124,12 +124,12 @@ export default function Dashboard({
   };
 
   const metrics = [
-    { label: "Page Orders", val: sortedOrders.length, color: "text-slate-900", border: "border-blue-500" },
+    { label: "Orders", val: sortedOrders.length, color: "text-slate-900", border: "border-blue-500" },
     { label: "Total in Period", val: totalCount, color: "text-indigo-600", border: "border-purple-500" },
     { label: "Pending QC", val: pendingQC, color: "text-amber-600", border: "border-amber-500" },
     { label: "Verified Ready", val: verifiedCount, color: "text-emerald-600", border: "border-emerald-500" },
-    { label: "Page Collected", val: `৳ ${totalRevenue.toFixed(0)}`, color: "text-emerald-700 font-black", border: "border-emerald-600" },
-    { label: "Page Due", val: `৳ ${totalDue.toFixed(0)}`, color: "text-rose-600 font-black", border: "border-rose-500" },
+    { label: "Collected", val: `৳ ${totalRevenue.toFixed(0)}`, color: "text-emerald-700 font-black", border: "border-emerald-600" },
+    { label: "Due", val: `৳ ${totalDue.toFixed(0)}`, color: "text-rose-600 font-black", border: "border-rose-500" },
   ];
 
   const getPresetBtnClass = (presetName) => {

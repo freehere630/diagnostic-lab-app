@@ -41,10 +41,10 @@ export function sendReportReadyWhatsApp(order, labSettings = {}) {
   const reportUrl = `${window.location.origin}/?track=${encodeURIComponent(order.orderId || order.id)}&bc=${encodeURIComponent(order.barcode || "")}`;
 
   const message = 
-`🏥 *${labName}*
+`🏥 ${labName}
 *CLINICAL LABORATORY REPORT READY*
 
-Dear *${patientName}*,
+Dear ${patientName},
 Your diagnostic investigation report is now *clinically verified* and ready for download.
 
 📋 *Patient ID (UHID):* ${pid}
@@ -78,15 +78,15 @@ export function sendRecollectionWhatsApp(order, reason = "Hemolyzed Specimen", l
   const phoneHotline = labSettings?.phone || "01723854472, 01624787444";
 
   const message = 
-`⚠️ *${labName}*
+`⚠️ ${labName}
 *URGENT: REPEAT SAMPLE COLLECTION NOTICE*
 
-Dear *${patientName}* (ID: ${pid}),
-During quality control analysis of your recent test sample, our laboratory noted *${reason}* (cellular breakdown during collection).
+Dear ${patientName} (ID: ${pid}),
+During quality control analysis of your recent test sample, our laboratory noted *${reason}*.
 
 To guarantee 100% medical accuracy for your physician, our consultant pathologist recommends a *complimentary (free) repeat sample collection*.
 
-📍 *Please visit our phlebotomy counter at your earliest convenience:*
+📍 *Please visit our Diagnostic at your earliest convenience:*
 Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212
 📞 *Hotline:* ${phoneHotline}
 
