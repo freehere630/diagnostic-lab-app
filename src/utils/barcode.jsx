@@ -1,6 +1,7 @@
+// Replace src/utils/barcode.jsx with this:
+
 import React, { useMemo } from "react";
 
-// Standard GS1 Code 128B Encoding Table
 const CODE128_PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
   "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
@@ -17,8 +18,8 @@ const CODE128_PATTERNS = [
 
 export function encodeCode128(text) {
   if (!text) return "";
-  const clean = text.trim();
-  let checksum = 104; // Start B
+  const clean = String(text).trim();
+  let checksum = 104;
   let patternStr = CODE128_PATTERNS[104];
 
   for (let i = 0; i < clean.length; i++) {
@@ -31,29 +32,36 @@ export function encodeCode128(text) {
 
   const checkDigit = checksum % 103;
   patternStr += CODE128_PATTERNS[checkDigit];
-  patternStr += CODE128_PATTERNS[106]; // Stop code
+  patternStr += CODE128_PATTERNS[106];
   return patternStr;
 }
 
-export function BarcodeSVG({ value, height = 30 }) {
-  const pattern = useMemo(() => encodeCode128(value || "0000"), [value]);
+export function BarcodeSVG({ value, height = 44 }) {
+  const pattern = useMemo(() => encodeCode128(value || "0000000000"), [value]);
   
-  let x = 0;
+  const quietZone = 12;
+  let x = quietZone;
   const rects = [];
-  const moduleWidth = 1.4;
+  const moduleWidth = 2.0; // Bold bars for scanning
 
   for (let i = 0; i < pattern.length; i++) {
     const w = parseInt(pattern[i], 10) * moduleWidth;
     if (i % 2 === 0) {
       rects.push(
-        <rect key={i} x={x} y="0" width={w} height={height} fill="#000000" />
+        <rect key={i} x={x.toFixed(1)} y="0" width={w.toFixed(1)} height={height} fill="#000000" />
       );
     }
     x += w;
   }
+  x += quietZone;
 
   return (
-    <svg className="w-full" style={{ height: `${height}px` }} viewBox={`0 0 ${x} ${height}`} preserveAspectRatio="none">
+    <svg 
+      className="w-full" 
+      style={{ height: `${height}px` }} 
+      viewBox={`0 0 ${x.toFixed(1)} ${height}`} 
+      preserveAspectRatio="none"
+    >
       <rect width="100%" height="100%" fill="#ffffff" />
       {rects}
     </svg>

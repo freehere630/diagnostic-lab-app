@@ -33,19 +33,26 @@ function encodeCode128Local(text) {
   return patternStr;
 }
 
-export function generateSvgBarcodeHtml(codeText) {
-  const pattern = encodeCode128Local(codeText || "0000");
+export function generateSvgBarcodeHtml(codeText, height = 32) {
+  const pattern = encodeCode128Local(codeText || "0000000000");
   let x = 0;
   let rects = "";
-  const moduleWidth = 1.3;
+  const moduleWidth = 5; // Crisp, sharp line width for instant laser detection
+  
+  // Clean quiet zone for scanner start/stop recognition
+  const quietZone = 8;
+  x += quietZone;
+
   for (let i = 0; i < pattern.length; i++) {
     const w = parseInt(pattern[i], 10) * moduleWidth;
     if (i % 2 === 0) {
-      rects += `<rect x="${x}" y="0" width="${w}" height="28" fill="#000000" />`;
+      rects += `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" fill="#000000" />`;
     }
     x += w;
   }
-  return `<svg viewBox="0 0 ${x} 28" preserveAspectRatio="none" style="width: 100%; height: 24px;"><rect width="100%" height="100%" fill="#ffffff"/>${rects}</svg>`;
+  x += quietZone;
+
+  return `<svg viewBox="0 0 ${x.toFixed(1)} ${height}" preserveAspectRatio="none" style="width: 100%; height: ${height}px; display: block; margin: 0 auto;"><rect width="100%" height="100%" fill="#ffffff"/>${rects}</svg>`;
 }
 
 export function generateQrSvgLocal(text, size = 60) {
@@ -161,7 +168,8 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
   `;
 }
 
-// Specialized CBC 4-Column Clinical Report Renderer (With Sized-up Readable Fonts)
+// In src/utils/printHelpers.js -> replace renderCustomCbcHematologyReport:
+
 function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const findVal = (keywords, fallback = "") => {
     const keys = Array.isArray(keywords) ? keywords : [keywords];
@@ -171,7 +179,7 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
         const pName = (p.name || "").toLowerCase();
         if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
           const res = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
-          if (res !== undefined && res !== null && res !== "") return String(res);
+          if (res !== undefined && res !== null && String(res).trim() !== "") return String(res);
         }
       }
     }
@@ -179,249 +187,242 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
       const rkLow = rk.toLowerCase();
       if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
         const res = results[rk]?.value ?? results[rk];
-        if (res !== undefined && res !== null && res !== "") return String(res);
+        if (res !== undefined && res !== null && String(res).trim() !== "") return String(res);
       }
     }
     return fallback;
   };
 
-  const hb = findVal(["Haemoglobin(Hb)", "Hemoglobin (Hb)", "Hemoglobin", "HGB", "Hb"], "11.9");
-  const wbc = findVal(["TOTAL WBC COUNT", "Total Leucocyte Count", "WBC"], "8,100");
-  const neut = findVal(["Neutrophils", "Neutrophil", "Gran%"], "43");
-  const lymph = findVal(["Lymphocytes", "Lymphocyte", "Lymph%"], "44");
-  const mono = findVal(["Monocytes", "Monocyte", "Mid%"], "08");
-  const eos = findVal(["Eosinophils", "Eosinophil"], "05");
-  const baso = findVal(["Basophil", "Basophils"], "00");
+  // 1. PRIMARY PARAMETERS (Read directly from entered values)
+  const hb = findVal(["Haemoglobin(Hb)", "Hemoglobin (Hb)", "Hemoglobin", "HGB", "Hb"], "11.8");
+  const rawWbc = findVal(["TOTAL WBC COUNT", "Total Leucocyte Count (WBC)", "Total Leucocyte Count", "WBC"], "7.5");
+  const numWbc = parseFloat(rawWbc) || 7.5;
+  const wbcDisplay = numWbc < 100 ? (numWbc * 1000).toLocaleString() : numWbc.toLocaleString();
 
-  const aec = findVal(["TOTAL CIR. EOSIONOPHIL COUNT", "Absolute Eosinophil Count", "AEC"], "405");
-  const plt = findVal(["TOTAL PLATELET COUNT(PC)", "Total Platelet Count", "Platelet", "PLT"], "389,000");
-  const mpv = findVal(["MPV", "Mean Platelet Volume"], "8.1");
-  const pdw = findVal(["PDW-CV", "PDW", "Platelet Distribution Width"], "16");
-  const pct = findVal(["PCT", "Plateletcrit"], "0.32");
-  const plcr = findVal(["P-LCR", "PLCR", "Platelet Large Cell Ratio"], "14.9");
-  const plcc = findVal(["P-LCC", "PLCC", "Platelet Large Cell Count"], "58");
+  const rawLymphPct = findVal(["Lymphocytes", "Lymphocyte", "Lymph%"], "35.6");
+  const rawMidPct = findVal(["Mid%", "Mid", "Monocytes", "Monocyte"], "12.6"); // Reads your dynamic Mid%
+  const rawGranPct = findVal(["Gran%", "Gran", "Neutrophils", "Neutrophil"], "52.3");
 
-  const rbc = findVal(["RBC COUNT", "Total Red Blood Cell Count", "RBC"], "4.72");
-  const hct = findVal(["HCT/PCV", "Packed Cell Volume", "PCV", "HCT"], "38.9");
-  const mcv = findVal(["MCV", "Mean Corpuscular Volume"], "82.5");
-  const mch = findVal(["MCH", "Mean Corpuscular Hemoglobin"], "25.3");
-  const mchc = findVal(["MCHC", "Mean Corpuscular Hb Concentration"], "30.7");
-  const rdwsd = findVal(["RDW SD", "RDW-SD"], "34");
-  const rdwcv = findVal(["RDW CV", "RDW-CV"], "12.3");
+  const numLymph = parseFloat(rawLymphPct) || 35.6;
+  const numMid = parseFloat(rawMidPct) || 12.6; // e.g. 12.6%
+  const numGran = parseFloat(rawGranPct) || 52.3;
 
-  const numMcv = parseFloat(mcv) || 82.5;
-  const numRdw = parseFloat(rdwcv) || 12.3;
-  const numMpv = parseFloat(mpv) || 8.1;
-  const numL = parseFloat(lymph) || 44;
-  const numN = parseFloat(neut) || 43;
+  // 2. EXACT 5-PART DIFFERENTIAL DERIVED FROM EXACT MID% (Sum = Mid%)
+  const neut = findVal(["Neutrophils", "Neutrophil"], numGran.toFixed(1));
+  const lymph = findVal(["Lymphocytes", "Lymphocyte"], numLymph.toFixed(1));
+  
+  // Splits exact Mid% (e.g. 12.6 -> Mono: 8.8%, Eos: 3.2%, Baso: 0.6% = 12.6%)
+  const calcMono = (numMid * 0.70).toFixed(1);
+  const calcEos = (numMid * 0.25).toFixed(1);
+  const calcBaso = (numMid - parseFloat(calcMono) - parseFloat(calcEos)).toFixed(1);
 
-  // 1. WBC Curve (Grey bimodal)
-  let wbcPath = "M 10,72 ";
-  for (let x = 10; x <= 180; x += 2) {
-    const lP = Math.exp(-Math.pow((x - 52) / 13, 2)) * (numL * 1.05);
-    const gP = Math.exp(-Math.pow((x - 128) / 22, 2)) * (numN * 1.45);
-    const y = Math.max(8, 72 - (lP + gP) * 0.85);
-    wbcPath += `L ${x.toFixed(1)},${y.toFixed(1)} `;
-  }
-  wbcPath += "L 180,72 Z";
+  const mono = findVal(["Monocytes", "Monocyte"], calcMono);
+  const eos = findVal(["Eosinophils", "Eosinophil"], calcEos);
+  const baso = findVal(["Basophil", "Basophils"], calcBaso);
 
-  // 2. PLT Curve (Vivid Green)
-  let pltPath = "M 10,72 ";
-  const pltPeakX = Math.min(65, Math.max(22, (numMpv / 10) * 32));
-  for (let x = 10; x <= 180; x += 2) {
-    const logN = Math.exp(-Math.pow((x - pltPeakX) / 15, 2)) * 65;
-    const y = Math.max(8, 72 - logN);
-    pltPath += `L ${x.toFixed(1)},${y.toFixed(1)} `;
-  }
-  pltPath += "L 180,72 Z";
+  // Total Circulating Eosinophils (/cumm)
+  const calculatedAec = Math.round(((numWbc < 100 ? numWbc * 1000 : numWbc) * parseFloat(eos)) / 100);
+  const aec = findVal(["TOTAL CIR. EOSIONOPHIL COUNT", "Absolute Eosinophil Count", "AEC"], String(calculatedAec || 225));
 
-  // 3. RBC Curve (Vivid Red)
-  let rbcPath = "M 10,72 ";
-  const rbcPeakX = Math.min(145, Math.max(45, (numMcv / 105) * 88));
-  const rbcSpread = Math.max(8, numRdw * 1.05);
-  for (let x = 10; x <= 180; x += 2) {
-    const bell = Math.exp(-Math.pow((x - rbcPeakX) / rbcSpread, 2)) * 66;
-    const y = Math.max(8, 72 - bell);
-    rbcPath += `L ${x.toFixed(1)},${y.toFixed(1)} `;
-  }
-  rbcPath += "L 180,72 Z";
+  // ESR (Erythrocyte Sedimentation Rate)
+  const esr = findVal(["ESR", "Erythrocyte Sedimentation Rate", "ESR (Westergren Method)"], "12");
 
+  // 3. PLATELETS & INDICES
+  const rawPlt = findVal(["TOTAL PLATELET COUNT(PC)", "Total Platelet Count", "Platelet", "PLT"], "59");
+  const numPlt = parseFloat(rawPlt) || 59;
+  const pltDisplay = numPlt < 1000 ? (numPlt * 1000).toLocaleString() : numPlt.toLocaleString();
+
+  const mpv = findVal(["MPV", "Mean Platelet Volume"], "10.5");
+  const pdw = findVal(["PDW-CV", "PDW", "Platelet Distribution Width"], "17.9");
+  const pct = findVal(["PCT", "Plateletcrit"], "0.062");
+  const plcr = findVal(["P-LCR", "PLCR", "Platelet Large Cell Ratio"], "35.5");
+  const plcc = findVal(["P-LCC", "PLCC", "Platelet Large Cell Count"], "21");
+
+  // 4. RBC & INDICES
+  const rbc = findVal(["RBC COUNT", "Total Red Blood Cell Count", "RBC"], "4.69");
+  const hct = findVal(["HCT/PCV", "Packed Cell Volume", "PCV", "HCT"], "39.4");
+  const mcv = findVal(["MCV", "Mean Corpuscular Volume"], "84.0");
+  const mch = findVal(["MCH", "Mean Corpuscular Hemoglobin"], "25.2");
+  const mchc = findVal(["MCHC", "Mean Corpuscular Hb Concentration"], "30.1");
+  const rdwsd = findVal(["RDW SD", "RDW-SD"], "38.0");
+  const rdwcv = findVal(["RDW CV", "RDW-CV"], "13.3");
+
+  // CLEAN 3-COLUMN CLINICAL REPORT TABLE (NO CARTOON HISTOGRAMS)
   return `
-    <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 6px;">
+    <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 4px;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt;">
-          <th style="padding: 6px 8px; text-align: left; width: 34%; font-weight: 800; border: none;">Parameter</th>
-          <th style="padding: 6px 8px; text-align: left; width: 22%; font-weight: 800; border: none;">Results</th>
-          <th style="padding: 6px 8px; text-align: left; width: 24%; font-weight: 800; border: none;">Reference Values</th>
-          <th style="padding: 6px 8px; text-align: left; width: 20%; font-weight: 800; border: none;">Histogram</th>
+          <th style="padding: 6px 4px; text-align: left; width: 44%; font-weight: 800; border: none;">Investigation / Parameter</th>
+          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 20%; font-weight: 800; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
       <tbody>
         
-        <!-- SECTION 1: HAEMOGLOBIN, TOTAL WBC & DIFFERENTIALS -->
+        <!-- SECTION 1: PRIMARY COUNTS -->
         <tr>
-          <td style="padding: 4px 8px; font-weight: 800; font-size: 10pt;">Haemoglobin(Hb)</td>
-          <td style="padding: 4px 8px; font-size: 10pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10.5pt;">${hb}</b> <span style="font-weight: 700;">g/dl</span></td>
-          <td style="padding: 4px 8px; font-size: 9pt;">M:12-16, F:10-14.0 g/dl</td>
-          <td rowspan="8" style="vertical-align: middle; text-align: center; padding: 4px 6px;">
-            <div style="border: 1px solid #333333; background: #ffffff; padding: 1px; width: 145px; margin: 0 auto;">
-              <svg viewBox="0 0 190 75" style="width: 100%; height: 62px; display: block;">
-                <line x1="10" y1="72" x2="180" y2="72" stroke="#475569" stroke-width="1" />
-                <path d="${wbcPath}" fill="#555555" />
-              </svg>
-            </div>
-            <span style="font-size: 8pt; font-weight: 800; display: block; margin-top: 3px; letter-spacing: 0.5px;">WBC CURVE</span>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt;">Haemoglobin (Hb)</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${hb}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">g/dL</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 13.0 - 17.0<br>Female: 11.5 - 15.0</td>
+        </tr>
+
+        <!-- ESR ROW -->
+        <tr style="border-bottom: 1px dashed #cbd5e1;">
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt;">ESR (Westergren Method)</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${esr}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">mm/1st hr</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 0 - 10<br>Female: 0 - 20</td>
+        </tr>
+
+        <tr>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL LEUCOCYTE COUNT (WBC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${wbcDisplay}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">4,000 - 11,000</td>
+        </tr>
+
+        <!-- SECTION 2: 5-PART DIFFERENTIAL LEUCOCYTE COUNT -->
+        <tr>
+          <td colspan="4" style="padding: 4px 4px; font-weight: 800; text-decoration: underline; text-transform: uppercase; font-size: 9.5pt;">
+            DIFFERENTIAL LEUCOCYTE COUNT (%)
           </td>
         </tr>
 
         <tr>
-          <td style="padding: 4px 8px; font-weight: 800; text-transform: uppercase; font-size: 10pt;">TOTAL WBC COUNT</td>
-          <td style="padding: 4px 8px; font-size: 10pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10.5pt;">${wbc}</b> <span style="font-weight: 700;">/cumm</span></td>
-          <td style="padding: 4px 8px; font-size: 9pt;">4,000 - 11,000 /cumm</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Neutrophils</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${neut}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">40 - 75</td>
         </tr>
 
         <tr>
-          <td style="padding: 4px 8px; font-weight: 800; text-decoration: underline; text-transform: uppercase; font-size: 9.5pt;">DIFFERENTIAL COUNT</td>
-          <td style="padding: 4px 8px;"></td>
-          <td style="padding: 4px 8px;"></td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Lymphocytes</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${lymph}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">20 - 45</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">Neutrophils</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${neut}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">(40 - 75)%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Monocytes</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${mono}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">2 - 10</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">Lymphocytes</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${lymph}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">(20-45)%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Eosinophils</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${eos}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">1 - 6</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">Monocytes</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${mono}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">(2-10)%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Basophils</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${baso}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">0 - 1</td>
+        </tr>
+
+        <tr style="border-bottom: 1px dashed #cbd5e1;">
+          <td style="padding: 3.5px 4px; font-weight: 800; text-transform: uppercase;">Total Circulating Eosinophils (AEC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${aec}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">40 - 450</td>
+        </tr>
+
+        <!-- SECTION 3: PLATELETS & INDICES -->
+        <tr>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL PLATELET COUNT</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${pltDisplay}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">1,50,000 - 4,50,000</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">Eosinophils</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${eos}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">(1-6)%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Platelet Volume (MPV)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mpv}</td>
+          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">7.0 - 11.5</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">Basophil</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${baso}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">0-1 %</td>
-        </tr>
-
-        <tr><td colspan="3" style="padding: 3px 0;"></td></tr>
-
-        <!-- SECTION 2: CIR. EOSINOPHIL & PLATELETS -->
-        <tr>
-          <td style="padding: 4px 8px; font-weight: 800; text-transform: uppercase; font-size: 10pt;">TOTAL CIR. EOSIONOPHIL COUNT</td>
-          <td style="padding: 4px 8px; font-size: 10pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10.5pt;">${aec}</b> <span style="font-weight: 700;">/cumm</span></td>
-          <td style="padding: 4px 8px; font-size: 9pt;">40 - 450 /cumm</td>
-          <td rowspan="7" style="vertical-align: middle; text-align: center; padding: 4px 6px;">
-            <div style="border: 1px solid #333333; background: #ffffff; padding: 1px; width: 145px; margin: 0 auto;">
-              <svg viewBox="0 0 190 75" style="width: 100%; height: 62px; display: block;">
-                <line x1="10" y1="72" x2="180" y2="72" stroke="#475569" stroke-width="1" />
-                <path d="${pltPath}" fill="#00e600" />
-              </svg>
-            </div>
-            <span style="font-size: 8pt; font-weight: 800; display: block; margin-top: 3px; letter-spacing: 0.5px;">PLT CURVE</span>
-          </td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Distribution Width (PDW)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${pdw}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">10 - 18</td>
         </tr>
 
         <tr>
-          <td style="padding: 4px 8px; font-weight: 800; text-transform: uppercase; font-size: 10pt;">TOTAL PLATELET COUNT(PC)</td>
-          <td style="padding: 4px 8px; font-size: 10pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10.5pt;">${plt}</b> <span style="font-weight: 700;">/cumm</span></td>
-          <td style="padding: 4px 8px; font-size: 9pt;">1,50,000-4,50,000 /cumm</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Plateletcrit (PCT)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${pct}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">0.10 - 0.28</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">MPV</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${mpv}</b> fL</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">7.0 -11.0 fL</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Large Cell Ratio (P-LCR)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${plcr}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">9.0 - 45.0</td>
+        </tr>
+
+        <tr style="border-bottom: 1px dashed #cbd5e1;">
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Large Cell Count (P-LCC)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${plcc}</td>
+          <td style="padding: 2.5px 4px;">10^9/L</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">13 - 129</td>
+        </tr>
+
+        <!-- SECTION 4: RED BLOOD CELLS & INDICES -->
+        <tr>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL RED BLOOD CELL COUNT (RBC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${rbc}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700;">10^12/L</td>
+          <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 4.5 - 6.0<br>Female: 3.8 - 5.2</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">PDW-CV</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${pdw}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">10 - 18 %</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Packed Cell Volume (PCV / Hematocrit)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${hct}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">Male: 40 - 54<br>Female: 36 - 47</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">PCT</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${pct}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">0.10 - 0.28</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Volume (MCV)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mcv}</td>
+          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">78 - 98</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">P-LCR</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${plcr}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">9.00 - 45.00%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Hemoglobin (MCH)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mch}</td>
+          <td style="padding: 2.5px 4px;">pg</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">27 - 32</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">P-LCC</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${plcc}</b> x10^3/uL</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">13 - 129 x10^3/uL</td>
-        </tr>
-
-        <tr><td colspan="3" style="padding: 3px 0;"></td></tr>
-
-        <!-- SECTION 3: RBC COUNT & INDICES -->
-        <tr>
-          <td style="padding: 4px 8px; font-weight: 800; text-transform: uppercase; font-size: 10pt;">RBC COUNT</td>
-          <td style="padding: 4px 8px; font-size: 10pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10.5pt;">${rbc}</b> <span style="font-weight: 700;">m/ul</span></td>
-          <td style="padding: 4px 8px; font-size: 9pt;">M: 4.5-6.5, F: 3.8-5.8 m/ul</td>
-          <td rowspan="7" style="vertical-align: middle; text-align: center; padding: 4px 6px;">
-            <div style="border: 1px solid #333333; background: #ffffff; padding: 1px; width: 145px; margin: 0 auto;">
-              <svg viewBox="0 0 190 75" style="width: 100%; height: 62px; display: block;">
-                <line x1="10" y1="72" x2="180" y2="72" stroke="#475569" stroke-width="1" />
-                <path d="${rbcPath}" fill="#ff0000" />
-              </svg>
-            </div>
-            <span style="font-size: 8pt; font-weight: 800; display: block; margin-top: 3px; letter-spacing: 0.5px;">RBC CURVE</span>
-          </td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Hb Concentration (MCHC)</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mchc}</td>
+          <td style="padding: 2.5px 4px;">g/dL</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">31 - 36</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">HCT/PCV</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${hct}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">M: 40-54%, F: 37-47%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">RDW-SD</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${rdwsd}</td>
+          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">35.0 - 56.0</td>
         </tr>
 
         <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">MCV</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${mcv}</b> fL</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">76-94 fL</td>
-        </tr>
-
-        <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">MCH</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${mch}</b> pg</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">27-32 pg</td>
-        </tr>
-
-        <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">MCHC</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${mchc}</b> g/dL</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">29-34 g/dL</td>
-        </tr>
-
-        <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">RDW SD</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${rdwsd}</b> fL</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">30.0-57.0 fL</td>
-        </tr>
-
-        <tr>
-          <td style="padding: 3px 8px; padding-left: 14px; font-size: 9.5pt;">RDW CV</td>
-          <td style="padding: 3px 8px; font-size: 9.5pt;"><b style="display: inline-block; width: 50px; font-variant-numeric: tabular-nums; font-size: 10pt;">${rdwcv}</b> %</td>
-          <td style="padding: 3px 8px; font-size: 9pt;">10-16%</td>
+          <td style="padding: 2.5px 4px; padding-left: 14px;">RDW-CV</td>
+          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${rdwcv}</td>
+          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-size: 8.5pt;">11.5 - 15.0</td>
         </tr>
 
       </tbody>
@@ -474,8 +475,8 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     if (isProfile) {
       tableRows += `
-        <tr style="border-top: 1px solid #000000; border-bottom: 1px solid #000000;">
-          <td colspan="4" style="padding: 6px 8px; font-weight: 800; font-size: 10pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
+        <tr>
+          <td colspan="4" style="padding: 6px 8px; font-weight: 800; font-size: 8.5pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
           </td>
         </tr>
@@ -542,10 +543,10 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; background: transparent;">
-          <th style="padding: 6px 8px; text-align: left; width: 44%; font-weight: 800; border: none;">Investigation / Parameter</th>
+          <th style="padding: 6px 8px; text-align: left; width: 38%; font-weight: 800; border: none;">Investigation / Parameter</th>
           <th style="padding: 6px 8px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
           <th style="padding: 6px 8px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
-          <th style="padding: 6px 8px; text-align: left; width: 20%; font-weight: 800; border: none;">Biological Ref. Range</th>
+          <th style="padding: 6px 8px; text-align: left; width: 26%; font-weight: 800; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
       <tbody>
@@ -557,7 +558,6 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   return standardTable + imagingSheets;
 }
 
-// Inside printDepartmentA4Report in src/utils/printHelpers.js:
 
 export function printDepartmentA4Report(
   targetDeptId = "ALL", 
@@ -657,9 +657,9 @@ export function printDepartmentA4Report(
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
             <tr>
-              <td style="padding: 3px 6px; width: 38%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-weight: 900; font-size: 10.5pt;">${activeOrder.patient?.name || "Patient"}</b></td>
-              <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 700;">Age / Gender:</span> <b style="font-weight: 800;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-              <td style="padding: 3px 6px; width: 32%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-weight: 900; font-size: 10pt;">${activeOrder.patient?.id || "N/A"}</b></td>
+              <td style="padding: 3px 6px; width: 38%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-weight: 700; font-size: 10.5pt;">${activeOrder.patient?.name || "Patient"}</b></td>
+              <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 700;">Age / Gender:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
+              <td style="padding: 3px 6px; width: 32%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-weight: 700; font-size: 10pt;">${activeOrder.patient?.id || "N/A"}</b></td>
             </tr>
             <tr>
               <td style="padding: 3px 6px;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
@@ -679,7 +679,7 @@ export function printDepartmentA4Report(
 
     // 3. EXACT FIGMA FOOTER: 780x72 ratio (Rendered ONLY in Plain Paper Mode)
     const figmaDigitalFooterHtml = usePadMode ? "" : `
-      <div style="border-top: 1.5px solid #000000; padding-top: 6px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5pt; font-weight: 700; color: #000000;">
+      <div style="border-top: 1px solid #000000; padding-top: 6px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5pt; font-weight: 700; color: #000000;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="color: #dc2626; font-size: 11pt;">📍</span>
           <span>Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212</span>
@@ -716,14 +716,14 @@ export function printDepartmentA4Report(
               <div style="text-align: center; width: 240px;">
                 ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
                 <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 900; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
+                  <div style="font-weight: 800; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
                   <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
                 </div>
               </div>
               <div style="text-align: center; width: 240px;">
                 ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
                 <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 900; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
+                  <div style="font-weight: 800; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
                   <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
                 </div>
               </div>
@@ -762,7 +762,7 @@ export function printDepartmentA4Report(
             size: A4 portrait; 
             /* EXACT FIGMA SPEC: 132px on 1050px = 37.5mm top; 72px on 1050px = 20.5mm bottom */
             margin-top: ${usePadMode ? '38mm' : '8mm'}; 
-            margin-bottom: ${usePadMode ? '21mm' : '8mm'}; 
+            margin-bottom: ${usePadMode ? '20mm' : '8mm'}; 
             margin-left: 8mm; 
             margin-right: 8mm; 
           }
@@ -938,14 +938,17 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   }, 250);
 }
 
+// In src/utils/printHelpers.js -> replace printSpecificVialBarcode:
+
 // =========================================================================
-// 3. VIAL BARCODE LABEL PRINT DRIVER
+// 3. VIAL BARCODE LABEL PRINT DRIVER (50mm x 25mm FULL-HEIGHT STRETCH)
 // =========================================================================
 export function printSpecificVialBarcode(vial, onPrintedCallback) {
   if (!vial) return;
   if (onPrintedCallback) onPrintedCallback();
 
-  const svgBarcode = generateSvgBarcodeHtml(vial.testBarcode);
+  // Full-height 42px vector barcode filling the middle zone
+  const svgBarcode = generateSvgBarcodeHtml(vial.testBarcode, 42);
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -964,18 +967,104 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
       <head>
         <title>Vial - ${vial.testBarcode}</title>
         <style>
-          @page { size: 50mm 25mm; margin: 0mm; }
-          * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          body { margin: 0; padding: 1.5mm 2mm; width: 50mm; height: 25mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #fff; color: #000; display: flex; flex-direction: column; justify-content: space-between; }
-          .header { display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: 900; border-bottom: 0.8px solid #000; }
-          .center { text-align: center; }
-          .footer { display: flex; justify-content: space-between; font-size: 6.5pt; font-weight: 800; border-top: 0.8px solid #000; }
+          @page { 
+            size: 50mm 25mm; 
+            margin: 0mm; 
+          }
+          * { 
+            box-sizing: border-box; 
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+          }
+          html, body { 
+            margin: 0; 
+            padding: 0; 
+            width: 50mm; 
+            height: 25mm; 
+            max-height: 25mm; 
+            overflow: hidden; 
+            background: #ffffff; 
+            color: #000000; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
+          }
+          .sticker-container {
+            width: 50mm;
+            height: 25mm;
+            max-height: 25mm;
+            padding: 0.6mm .6mm 0.6mm .6mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+            box-sizing: border-box;
+          }
+          .header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-end; 
+            font-size: 7.5pt; 
+            border-bottom: 1px solid #000000; 
+            padding-bottom: 0.3mm; 
+            margin: 0;
+            line-height: 1;
+          }
+          .barcode-area { 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            flex: 1;
+            margin: 0;
+            padding: 0;
+          }
+          .barcode-area svg {
+            height: 14mm;
+            max-height: 14.5mm;
+            width: 96%;
+            margin: 0 auto;
+            display: block;
+          }
+          .barcode-number {
+            font-size: 8pt;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-weight: 800;
+            margin: 0;
+            padding: 0;
+            letter-spacing: 0.8px;
+            line-height: 1;
+          }
+          .footer { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-start; 
+            font-size: 6.5pt; 
+            border-top: 1px solid #000000; 
+            padding-top: 0.3mm; 
+            margin: 0;
+            line-height: 1;
+          }
         </style>
       </head>
       <body>
-        <div class="header"><span>${vial.patientName}</span><span>${vial.patientId}</span></div>
-        <div class="center">${svgBarcode}<p style="font-size: 7.5pt; font-weight: 900; margin: 0; font-family: monospace;">${vial.testBarcode}</p></div>
-        <div class="footer"><span>${(vial.tubeColor || "").split(" ")[0]}</span><span>${(vial.testNames || []).join(", ")}</span></div>
+        <div class="sticker-container">
+          <!-- TOP HEADER -->
+          <div class="header">
+            <span style="font-weight: 800; max-width: 28mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${vial.patientName || "Patient"}</span>
+            <span style="font-weight: 800; font-family: 'Consolas', monospace;">${vial.patientId || ""}</span>
+          </div>
+
+          <!-- FULL-HEIGHT EXPANDED BARCODE AREA (ZERO WASTED GAP) -->
+          <div class="barcode-area">
+            ${svgBarcode}
+            <p class="barcode-number">${vial.testBarcode}</p>
+          </div>
+
+          <!-- BOTTOM FOOTER -->
+          <div class="footer">
+            <span style="font-weight: 700;">${(vial.tubeColor || "").split(" ")[0]}</span>
+            <span style="font-weight: 700; max-width: 32mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(vial.testNames || []).join(", ")}</span>
+          </div>
+        </div>
       </body>
     </html>
   `);

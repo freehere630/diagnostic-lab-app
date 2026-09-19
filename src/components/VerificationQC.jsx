@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { 
   ShieldCheck, CloudUpload, Lock, MessageSquare, 
-  Sparkles, FileText, AlertOctagon, MessageCircle 
+  Sparkles, FileText, AlertOctagon, Zap, Calculator 
 } from "lucide-react";
 import { requestSampleRecollection } from "../services/api";
 import { sendReportReadyWhatsApp, sendRecollectionWhatsApp } from "../utils/whatsappHelper";
@@ -15,6 +15,9 @@ export default function VerificationQC({
   saveStatus, 
   currentUser 
 }) {
+  // Machine box state
+  const [machineInputs, setMachineInputs] = useState({ wbc: "", gran: "", lymph: "", mid: "" });
+
   if (!activeOrder) {
     return (
       <div className="p-12 text-center text-slate-400 font-sans bg-white rounded-2xl border border-dashed border-slate-200">
@@ -27,27 +30,128 @@ export default function VerificationQC({
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
 
-  // 1. STRICT VERIFICATION CHECK: Verifies that EVERY single parameter has a result entered
+  // 1. AUTOMATIC REAL-TIME MATHEMATICAL CALCULATION ENGINE
+  // Triggers automatically whenever WBC, Gran%, Lymph%, or Mid% changes
+  const runLiveAutoCalculation = (test, updatedInputs) => {
+    const rawParams = test.test_parameters || test.parameters || [];
+    
+    const getParam = (keywords) => {
+      const keys = Array.isArray(keywords) ? keywords : [keywords];
+      return rawParams.find(p => keys.some(k => (p.name || "").toLowerCase().includes(k.toLowerCase())));
+    };
+
+    const numWbc = parseFloat(updatedInputs.wbc) || 7.5;
+    const numGran = parseFloat(updatedInputs.gran);
+    const numLymph = parseFloat(updatedInputs.lymph);
+    const numMid = parseFloat(updatedInputs.mid);
+
+    // 1. Calculate Neutrophils & ANC
+    if (!isNaN(numGran) && numGran >= 0) {
+      const neutParam = getParam(["neutrophils", "neutrophil"]);
+      const ancParam = getParam(["absolute neutrophil", "anc"]);
+      const neutVal = numGran.toFixed(1);
+      const ancVal = ((numWbc * numGran) / 100).toFixed(2);
+
+      if (neutParam) handleResultInput(neutParam.id, neutVal);
+      if (ancParam) handleResultInput(ancParam.id, ancVal);
+    }
+
+    // 2. Calculate Lymphocytes & ALC
+    if (!isNaN(numLymph) && numLymph >= 0) {
+      const lymphParam = getParam(["lymphocytes", "lymphocyte"]);
+      const alcParam = getParam(["absolute lymphocyte", "alc"]);
+      const lymphVal = numLymph.toFixed(1);
+      const alcVal = ((numWbc * numLymph) / 100).toFixed(2);
+
+      if (lymphParam) handleResultInput(lymphParam.id, lymphVal);
+      if (alcParam) handleResultInput(alcParam.id, alcVal);
+    }
+
+    // 3. Calculate Monocytes, Eosinophils, Basophils, AMC, AEC, ABC, & Total Circulating Eos
+    if (!isNaN(numMid) && numMid >= 0) {
+      const monoVal = (numMid * 0.70).toFixed(1); // 12.6 * 0.70 = 8.8%
+      const eosVal = (numMid * 0.25).toFixed(1);  // 12.6 * 0.25 = 3.2%
+      const basoVal = Math.max(0, (numMid - parseFloat(monoVal) - parseFloat(eosVal))).toFixed(1); // 0.6%
+
+      const amcVal = ((numWbc * parseFloat(monoVal)) / 100).toFixed(2);
+      const aecVal = ((numWbc * parseFloat(eosVal)) / 100).toFixed(2);
+      const abcVal = ((numWbc * parseFloat(basoVal)) / 100).toFixed(2);
+      const cirEosVal = Math.round(((numWbc < 100 ? numWbc * 1000 : numWbc) * parseFloat(eosVal)) / 100);
+
+      const monoParam = getParam(["monocyte", "monocytes"]);
+      const eosParam  = getParam(["eosinophil", "eosinophils"]);
+      const basoParam = getParam(["basophil", "basophils"]);
+      const amcParam  = getParam(["absolute monocyte", "amc"]);
+      const aecParam  = getParam(["absolute eosinophil count (aec)", "absolute eosinophil"]);
+      const abcParam  = getParam(["absolute basophil", "abc"]);
+      const cirEosParam = getParam(["total cir. eosionophil", "circulating eosinophil"]);
+
+      if (monoParam) handleResultInput(monoParam.id, monoVal);
+      if (eosParam)  handleResultInput(eosParam.id, eosVal);
+      if (basoParam) handleResultInput(basoParam.id, basoVal);
+      if (amcParam)  handleResultInput(amcParam.id, amcVal);
+      if (aecParam)  handleResultInput(aecParam.id, aecVal);
+      if (abcParam)  handleResultInput(abcParam.id, abcVal);
+      if (cirEosParam) handleResultInput(cirEosParam.id, String(cirEosVal));
+    }
+  };
+
+  // Handlers for individual machine box typing
+  const onGranChange = (test, val) => {
+    const updated = { ...machineInputs, gran: val };
+    setMachineInputs(updated);
+    runLiveAutoCalculation(test, updated);
+  };
+
+  const onLymphChange = (test, val) => {
+    const updated = { ...machineInputs, lymph: val };
+    setMachineInputs(updated);
+    runLiveAutoCalculation(test, updated);
+  };
+
+  const onMidChange = (test, val) => {
+    const updated = { ...machineInputs, mid: val };
+    setMachineInputs(updated);
+    runLiveAutoCalculation(test, updated);
+  };
+
+  // 2. SMART VERIFICATION CHECK
   const validateAllResultsEntered = () => {
     const missing = [];
 
     (activeOrder.tests || []).forEach((test) => {
+      const isCbc = (test.code || "").toUpperCase().includes("CBC") || (test.name || "").toLowerCase().includes("blood count");
       const rawParams = test.test_parameters || test.parameters || [];
       
-      if (rawParams.length > 0) {
-        rawParams.forEach((p) => {
-          const val = activeOrder.results?.[p.id]?.value !== undefined 
-            ? activeOrder.results[p.id].value 
-            : (activeOrder.results?.[test.id]?.value ?? "");
-
-          if (val === undefined || val === null || String(val).trim() === "") {
-            missing.push(`${test.name} → ${p.name}`);
+      if (isCbc) {
+        // For CBC: Require primary machine parameters
+        const primaryCbcKeys = ["WBC", "Hemoglobin", "RBC", "Platelet", "MCV", "Neutrophil", "Lymphocyte"];
+        
+        primaryCbcKeys.forEach((key) => {
+          const p = rawParams.find(pr => (pr.name || "").toLowerCase().includes(key.toLowerCase()));
+          if (p) {
+            const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
+            if (val === undefined || val === null || String(val).trim() === "") {
+              missing.push(`CBC → ${p.name}`);
+            }
           }
         });
       } else {
-        const val = activeOrder.results?.[test.id]?.value ?? "";
-        if (val === undefined || val === null || String(val).trim() === "") {
-          missing.push(test.name);
+        if (rawParams.length > 0) {
+          rawParams.forEach((p) => {
+            const val = activeOrder.results?.[p.id]?.value !== undefined 
+              ? activeOrder.results[p.id].value 
+              : (activeOrder.results?.[test.id]?.value ?? "");
+
+            if (val === undefined || val === null || String(val).trim() === "") {
+              missing.push(`${test.name} → ${p.name}`);
+            }
+          });
+        } else {
+          const val = activeOrder.results?.[test.id]?.value ?? "";
+          if (val === undefined || val === null || String(val).trim() === "") {
+            missing.push(test.name);
+          }
         }
       }
     });
@@ -55,15 +159,12 @@ export default function VerificationQC({
     return missing;
   };
 
-  // 2. 1-CLICK INSTANT REJECT & WHATSAPP (NO MODALS, NO RELOAD)
+  // 3. 1-CLICK INSTANT REJECT & WHATSAPP
   const handleRejectHemolyzedInstant = async () => {
-    // Immediately open WhatsApp in the direct user-click context (bypasses browser popup blockers)
     sendRecollectionWhatsApp(activeOrder, "Hemolyzed Specimen");
 
-    // Silently update database in the background
     try {
       await requestSampleRecollection(activeOrder.orderId, "Hemolyzed Specimen");
-      // Update local memory so screen reflects change immediately without page reload
       activeOrder.sample_status = "Repeat Collection Required";
       activeOrder.verifierRemarks = "[RECOLLECTION REQUIRED: Hemolyzed Specimen]";
     } catch (e) {
@@ -71,15 +172,14 @@ export default function VerificationQC({
     }
   };
 
-  // 3. 1-CLICK VERIFY & WHATSAPP REPORT DISPATCH (WITH STRICT BLANK CHECK)
+  // 4. 1-CLICK VERIFY & WHATSAPP REPORT DISPATCH
   const onVerifyClickInstant = async () => {
-    // 1. Block verification if any parameter is missing
     const missingResults = validateAllResultsEntered();
 
     if (missingResults.length > 0) {
       alert(
         `⛔ CANNOT COMPLETE VERIFICATION!\n\n` +
-        `All parameters must have a result before verification can be completed.\n` +
+        `Required parameters must have a result before verification can be completed.\n` +
         `Missing results for (${missingResults.length} parameter(s)):\n\n` +
         missingResults.slice(0, 6).map((m) => `• ${m}`).join("\n") +
         (missingResults.length > 6 ? `\n...and ${missingResults.length - 6} more` : "")
@@ -87,10 +187,8 @@ export default function VerificationQC({
       return;
     }
 
-    // 2. Open WhatsApp with verified certificate link
     sendReportReadyWhatsApp(activeOrder);
 
-    // 3. Lock & verify in database in the background
     try {
       await handleVerifyInDb();
     } catch (e) {
@@ -150,7 +248,7 @@ export default function VerificationQC({
             </button>
           )}
 
-          {/* 1-CLICK VERIFY & WHATSAPP (WITH BLANK VALIDATION) */}
+          {/* 1-CLICK VERIFY & WHATSAPP */}
           {canVerifyReport ? (
             <button
               onClick={onVerifyClickInstant}
@@ -174,6 +272,7 @@ export default function VerificationQC({
         {(activeOrder.tests || []).map((test) => {
           const dept = (test.dept_id || test.deptId || "").toUpperCase();
           const isRadiology = dept.includes("RAD") || dept.includes("USG") || dept.includes("CT") || dept.includes("MRI") || dept.includes("CARD");
+          const isCbc = test.code?.toUpperCase().includes("CBC") || test.name?.toLowerCase().includes("blood count");
           const rawParams = test.test_parameters || test.parameters || [];
           const paramId = rawParams[0]?.id || test.id;
           const currentVal = activeOrder.results?.[paramId]?.value || activeOrder.results?.[test.id]?.value || "";
@@ -220,74 +319,151 @@ export default function VerificationQC({
 
           // Pathology / Biochemistry / Hematology Table
           return (
-            <div key={test.id} className="bg-white rounded-2xl border overflow-hidden shadow-sm">
-              <div className="bg-slate-100 px-4 py-2.5 font-black text-xs uppercase text-slate-800 border-b flex justify-between items-center">
-                <span>{test.name} {test.code ? `(${test.code})` : ""}</span>
+            <div key={test.id} className="bg-white rounded-2xl border overflow-hidden shadow-sm p-4 space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b">
+                <span className="font-black text-sm uppercase text-slate-800">{test.name} {test.code ? `(${test.code})` : ""}</span>
                 <span className="text-[10px] font-semibold text-slate-500">
                   {rawParams.length} Parameters
                 </span>
               </div>
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b text-slate-500 font-bold">
-                    <th className="py-2.5 px-4 w-1/3">Parameter</th>
-                    <th className="py-2.5 px-4 w-48">Observed Result</th>
-                    <th className="py-2.5 px-4 w-28">Unit</th>
-                    <th className="py-2.5 px-4">Clinical Reference Range</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rawParams.map((p) => {
-                    const val = activeOrder.results?.[p.id]?.value !== undefined 
-                      ? activeOrder.results[p.id].value 
-                      : (activeOrder.results?.[test.id]?.value || "");
-                    const isQual = p.param_type === "qualitative";
 
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition">
-                        <td className="py-2.5 px-4 font-semibold text-slate-800 align-top">{p.name}</td>
-                        <td className="py-2.5 px-4 align-top">
-                          {isQual ? (
-                            <select
-                              disabled={activeOrder.isLocked}
-                              value={val}
-                              onChange={(e) => handleResultInput(p.id, e.target.value)}
-                              className="w-full p-1.5 border rounded-lg font-bold text-xs bg-white outline-none"
-                            >
-                              <option value="">-- Select --</option>
-                              <option value="Negative">Negative (Normal)</option>
-                              <option value="Positive">Positive (Reactive)</option>
-                            </select>
-                          ) : (
-                            <input
-                              type="text"
-                              disabled={activeOrder.isLocked}
-                              value={val}
-                              onChange={(e) => handleResultInput(p.id, e.target.value)}
-                              placeholder="Enter value"
-                              className="w-full p-1.5 border border-slate-300 rounded-lg font-mono font-bold text-xs outline-none text-center focus:ring-2 focus:ring-blue-500 bg-white"
-                            />
-                          )}
-                        </td>
-                        <td className="py-2.5 px-4 text-slate-500 font-mono align-top">{p.unit || "—"}</td>
-                        
-                        {/* MULTI-RANGE (GENDER / AGE / CUSTOM TEXT) COLUMN */}
-                        <td className="py-2.5 px-4 text-slate-700 font-mono text-xs leading-relaxed align-top">
-                          {p.reference_text || p.ref_text ? (
-                            <div className="whitespace-pre-line text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded-lg border border-blue-100">
-                              {p.reference_text || p.ref_text}
-                            </div>
-                          ) : p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "" ? (
-                            <span className="font-semibold">{p.min_range} - {p.max_range}</span>
-                          ) : (
-                            <span className="text-slate-400">Normal</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              {/* ========================================================================= */}
+              {/* LIVE 3-PART KT-44 AUTO-CALCULATION BAR                                    */}
+              {/* ========================================================================= */}
+              {isCbc && !activeOrder.isLocked && (
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 shadow-sm space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-black text-xs text-amber-950 flex items-center gap-1.5">
+                      <Calculator className="w-4 h-4 text-amber-600 animate-pulse" />
+                      3-Part KT-44 Machine Screen Input (Auto-Calculates 5-Part Differential Live on Screen)
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded-full">
+                      Live Auto-Calculation Active
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* 1. Gran% Input */}
+                    <div>
+                      <label className="font-extrabold text-[11px] text-slate-700 block mb-1">
+                        1. Granulocytes (Gran%)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 52.3"
+                        value={machineInputs.gran}
+                        onChange={(e) => onGranChange(test, e.target.value)}
+                        className="w-full p-2 border-2 border-amber-300 focus:border-amber-500 rounded-xl font-mono font-bold text-center bg-white outline-none text-sm text-slate-900"
+                      />
+                      <span className="text-[9px] text-slate-500 block text-center mt-0.5">→ Auto-fills Neutrophils & ANC</span>
+                    </div>
+
+                    {/* 2. Lymph% Input */}
+                    <div>
+                      <label className="font-extrabold text-[11px] text-slate-700 block mb-1">
+                        2. Lymphocytes (Lymph%)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 35.6"
+                        value={machineInputs.lymph}
+                        onChange={(e) => onLymphChange(test, e.target.value)}
+                        className="w-full p-2 border-2 border-amber-300 focus:border-amber-500 rounded-xl font-mono font-bold text-center bg-white outline-none text-sm text-slate-900"
+                      />
+                      <span className="text-[9px] text-slate-500 block text-center mt-0.5">→ Auto-fills Lymphocytes & ALC</span>
+                    </div>
+
+                    {/* 3. Mid% Input */}
+                    <div>
+                      <label className="font-black text-[11px] text-rose-900 block mb-1 flex justify-between">
+                        <span>3. Mid-cells (Mid%) *</span>
+                        <span className="text-rose-600 font-bold">Auto-splits</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 12.6"
+                        value={machineInputs.mid}
+                        onChange={(e) => onMidChange(test, e.target.value)}
+                        className="w-full p-2 border-2 border-rose-500 focus:ring-2 focus:ring-rose-400 rounded-xl font-mono font-black text-center bg-white outline-none text-sm text-rose-900 shadow-sm"
+                      />
+                      <span className="text-[9px] text-rose-600 font-bold block text-center mt-0.5">
+                        → Auto-splits into Mono (8.8%), Eos (3.2%), Baso (0.6%) & AEC
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Parameter Table */}
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b text-slate-600 font-bold">
+                      <th className="py-2.5 px-4 w-1/3">Parameter</th>
+                      <th className="py-2.5 px-4 w-48">Observed Result</th>
+                      <th className="py-2.5 px-4 w-28">Unit</th>
+                      <th className="py-2.5 px-4">Clinical Reference Range</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rawParams.map((p) => {
+                      const val = activeOrder.results?.[p.id]?.value !== undefined 
+                        ? activeOrder.results[p.id].value 
+                        : (activeOrder.results?.[test.id]?.value || "");
+                      const isQual = p.param_type === "qualitative";
+
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50/60 transition">
+                          <td className="py-2.5 px-4 font-semibold text-slate-800 align-top">{p.name}</td>
+                          <td className="py-2.5 px-4 align-top">
+                            {isQual ? (
+                              <select
+                                disabled={activeOrder.isLocked}
+                                value={val}
+                                onChange={(e) => handleResultInput(p.id, e.target.value)}
+                                className="w-full p-1.5 border rounded-lg font-bold text-xs bg-white outline-none"
+                              >
+                                <option value="">-- Select --</option>
+                                <option value="Negative">Negative (Normal)</option>
+                                <option value="Positive">Positive (Reactive)</option>
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                disabled={activeOrder.isLocked}
+                                value={val}
+                                onChange={(e) => {
+                                  handleResultInput(p.id, e.target.value);
+                                  // If typing into WBC, update auto-calculation live
+                                  if ((p.name || "").toLowerCase().includes("wbc")) {
+                                    runLiveAutoCalculation(test, { ...machineInputs, wbc: e.target.value });
+                                  }
+                                }}
+                                placeholder="Enter value"
+                                className="w-full p-1.5 border border-slate-300 rounded-lg font-mono font-bold text-xs outline-none text-center focus:ring-2 focus:ring-blue-500 bg-white"
+                              />
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-500 font-mono align-top">{p.unit || "—"}</td>
+                          
+                          {/* MULTI-RANGE / GENDER / AGE REFERENCE RANGE */}
+                          <td className="py-2.5 px-4 text-slate-700 font-mono text-xs leading-relaxed align-top">
+                            {p.reference_text || p.ref_text ? (
+                              <div className="whitespace-pre-line text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded-lg border border-blue-100">
+                                {p.reference_text || p.ref_text}
+                              </div>
+                            ) : p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "" ? (
+                              <span className="font-semibold">{p.min_range} - {p.max_range}</span>
+                            ) : (
+                              <span className="text-slate-400">Normal</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           );
         })}

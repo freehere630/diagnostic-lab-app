@@ -14,45 +14,44 @@ export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-PAT", name: "Clinical Pathology & Urine", icon: "🧫" }
 ];
 
-// ==========================================
-// 24-PARAMETER 5-PART CBC PROFILE DEFINITION
-// ==========================================
-const MASTER_CBC_PARAMETERS = [
-  // --- PRIMARY COUNTS ---
-  { name: "Total Leucocyte Count (WBC)", unit: "10^9/L", min: 4.0, max: 11.0, type: "numeric" },
-  { name: "Total Red Blood Cell Count (RBC)", unit: "10^12/L", min: 3.8, max: 5.8, type: "numeric" },
-  { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric" },
-  { name: "Packed Cell Volume (PCV / Hematocrit)", unit: "%", min: 36.0, max: 50.0, type: "numeric" },
+// Inside src/services/api.js -> in MASTER_CBC_PARAMETERS:
 
-  // --- 5-PART DIFFERENTIAL LEUCOCYTE COUNT (%) ---
+const MASTER_CBC_PARAMETERS = [
+  // --- PRIMARY COUNTS & MACHINE DIFFERENTIALS ---
+  { name: "Total Leucocyte Count (WBC)", unit: "10^9/L", min: 4.0, max: 11.0, type: "numeric" },
+  { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric" },
+  { name: "ESR (Westergren Method)", unit: "mm/1st hr", min: 0.0, max: 20.0, type: "numeric" },
+  
+  // 3-PART ANALYZER MACHINE INPUTS (Type your screen numbers here):
+  { name: "Granulocytes (Gran%)", unit: "%", min: 40.0, max: 75.0, type: "numeric" },
+  { name: "Lymphocytes (Lymph%)", unit: "%", min: 20.0, max: 45.0, type: "numeric" },
+  { name: "Mid-cells (Mid%)", unit: "%", min: 2.0, max: 15.0, type: "numeric" }, // <-- YOUR MID% INPUT BOX
+
+  // AUTO-CALCULATED 5-PART DIFFERENTIAL (Calculates live when you type Mid% and Gran%):
   { name: "Neutrophils", unit: "%", min: 40.0, max: 75.0, type: "numeric" },
   { name: "Lymphocytes", unit: "%", min: 20.0, max: 45.0, type: "numeric" },
-  { name: "Monocytes", unit: "%", min: 2.0, max: 8.0, type: "numeric" },
+  { name: "Monocytes", unit: "%", min: 2.0, max: 10.0, type: "numeric" },
   { name: "Eosinophils", unit: "%", min: 1.0, max: 6.0, type: "numeric" },
   { name: "Basophils", unit: "%", min: 0.0, max: 1.0, type: "numeric" },
+  { name: "TOTAL CIR. EOSIONOPHIL COUNT", unit: "/cumm", min: 40.0, max: 450.0, type: "numeric" },
 
-  // --- ABSOLUTE LEUCOCYTE COUNTS (#) ---
-  { name: "Absolute Neutrophil Count (ANC)", unit: "10^9/L", min: 2.0, max: 7.5, type: "numeric" },
-  { name: "Absolute Lymphocyte Count (ALC)", unit: "10^9/L", min: 1.0, max: 4.0, type: "numeric" },
-  { name: "Absolute Monocyte Count (AMC)", unit: "10^9/L", min: 0.2, max: 0.8, type: "numeric" },
-  { name: "Absolute Eosinophil Count (AEC)", unit: "10^9/L", min: 0.04, max: 0.4, type: "numeric" },
-  { name: "Absolute Basophil Count (ABC)", unit: "10^9/L", min: 0.01, max: 0.1, type: "numeric" },
-
-  // --- RBC INDICES ---
+  // --- RED BLOOD CELL & INDICES ---
+  { name: "Total Red Blood Cell Count (RBC)", unit: "10^12/L", min: 3.8, max: 5.8, type: "numeric" },
+  { name: "Packed Cell Volume (PCV / Hematocrit)", unit: "%", min: 36.0, max: 50.0, type: "numeric" },
   { name: "Mean Corpuscular Volume (MCV)", unit: "fL", min: 78.0, max: 98.0, type: "numeric" },
   { name: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", min: 27.0, max: 32.0, type: "numeric" },
   { name: "Mean Corpuscular Hb Concentration (MCHC)", unit: "g/dL", min: 31.0, max: 36.0, type: "numeric" },
-  { name: "RDW-CV", unit: "%", min: 11.5, max: 15.0, type: "numeric" },
   { name: "RDW-SD", unit: "fL", min: 35.0, max: 56.0, type: "numeric" },
+  { name: "RDW-CV", unit: "%", min: 11.5, max: 15.0, type: "numeric" },
 
   // --- PLATELET INDICES ---
   { name: "Total Platelet Count", unit: "10^9/L", min: 150.0, max: 450.0, type: "numeric" },
   { name: "Mean Platelet Volume (MPV)", unit: "fL", min: 7.4, max: 11.5, type: "numeric" },
-  { name: "Platelet Distribution Width (PDW)", unit: "fL", min: 9.0, max: 17.0, type: "numeric" },
-  { name: "Plateletcrit (PCT)", unit: "%", min: 0.15, max: 0.50, type: "numeric" },
-  { name: "Platelet Large Cell Ratio (P-LCR)", unit: "%", min: 13.0, max: 43.0, type: "numeric" }
+  { name: "Platelet Distribution Width (PDW)", unit: "%", min: 10.0, max: 18.0, type: "numeric" },
+  { name: "Plateletcrit (PCT)", unit: "%", min: 0.10, max: 0.28, type: "numeric" },
+  { name: "Platelet Large Cell Ratio (P-LCR)", unit: "%", min: 9.0, max: 45.0, type: "numeric" },
+  { name: "Platelet Large Cell Count (P-LCC)", unit: "10^9/L", min: 13.0, max: 129.0, type: "numeric" }
 ];
-
 // SILENT AUTO-SEEDER (Runs automatically without user clicks)
 async function ensureSilent5PartCBC(existingTests = []) {
   const cbcTestId = "T-CBC-5PART";
@@ -460,7 +459,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
   // STRICTLY PURE 9-DIGIT NUMERIC SAMPLE BARCODE
-  const barcode = String(Math.floor(100000000 + Math.random() * 900000000));
+   const barcode = String(Math.floor(1000000000 + Math.random() * 9000000000));
 
   const now = new Date();
   const nowIso = now.toISOString();
