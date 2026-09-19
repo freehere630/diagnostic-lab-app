@@ -251,7 +251,7 @@ export default function ReportsPrint({
             }}
             className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow transition whitespace-nowrap"
           >
-            <DollarSign className="w-4 h-4" /> Collect ৳{activeOrder.billing?.due} & Mark Paid
+            <div className="w-4 h-4" /> Collect ৳{activeOrder.billing?.due} & Mark Paid
           </button>
         </div>
       )}
