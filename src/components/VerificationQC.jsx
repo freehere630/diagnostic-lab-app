@@ -390,7 +390,7 @@ export default function VerificationQC({
 
                     {/* 3. Mid% Input */}
                     <div>
-                      <label className="font-black text-[11px] text-rose-900 block mb-1 flex justify-between">
+                      <label className="font-black text-[11px] text-rose-900 mb-1 flex justify-between">
                         <span>3. Mid-cells (Mid%) *</span>
                         <span className="text-rose-600 font-bold">Auto-splits</span>
                       </label>
