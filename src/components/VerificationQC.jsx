@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { requestSampleRecollection } from "../services/api";
 import { sendReportReadyWhatsApp, sendRecollectionWhatsApp } from "../utils/whatsappHelper";
-
+import { getDepartmentVialBarcode } from "../utils/printHelpers";
 export default function VerificationQC({ 
   activeOrder, 
   handleResultInput, 
@@ -222,12 +222,27 @@ export default function VerificationQC({
     <div className="space-y-6 w-full font-sans text-slate-800">
       
       {/* Top Header */}
+
       <div className="bg-white p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full shadow-sm">
-        <div>
+              <div>
           <h2 className="font-bold text-base text-slate-900">{activeOrder.patient?.name || "Patient"} (ID: {activeOrder.patient?.id || "N/A"})</h2>
-          <p className="text-xs text-slate-500">
-            Barcode: <b className="font-mono text-blue-600">{activeOrder.barcode || "N/A"}</b> | Ref. Doctor: <b className="text-slate-700">{activeOrder.patient?.doctor || activeOrder.doctor || "Self"}</b>
-          </p>
+          
+          {/* DISPLAY ALL SPECIFIC VIAL BARCODES ASSIGNED TO THIS PATIENT */}
+          <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-600">Vial Barcodes:</span>
+            {(activeOrder.tests || []).reduce((acc, t) => {
+              const code = getDepartmentVialBarcode(activeOrder, t.dept_id || t.deptId);
+              const tube = (t.tube_color || "Vial").split(" ")[0];
+              if (!acc.some(x => x.code === code)) acc.push({ code, tube });
+              return acc;
+            }, []).map((v, i) => (
+              <span key={i} className="font-mono font-bold bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
+                {v.tube}: {v.code}
+              </span>
+            ))}
+            <span className="text-slate-400">|</span>
+            <span>Ref. Doctor: <b className="text-slate-700">{activeOrder.patient?.doctor || activeOrder.doctor || "Self"}</b></span>
+          </div>
         </div>
         
         <div className="flex items-center gap-2">

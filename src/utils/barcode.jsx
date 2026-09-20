@@ -1,7 +1,6 @@
-// Replace src/utils/barcode.jsx with this:
-
 import React, { useMemo } from "react";
 
+// Standard GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
   "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
@@ -16,39 +15,52 @@ const CODE128_PATTERNS = [
   "114131","311141","411131","211412","211214","211232","2331112"
 ];
 
-export function encodeCode128(text) {
-  if (!text) return "";
-  const clean = String(text).trim();
-  let checksum = 104;
-  let patternStr = CODE128_PATTERNS[104];
+// CODE 128C COMPRESSION (Pairs digits -> Cuts line density by 50%)
+export function encodeCode128C(numericText) {
+  const digits = String(numericText || "").replace(/\D/g, "");
+  if (!digits) return "";
 
-  for (let i = 0; i < clean.length; i++) {
-    const code = clean.charCodeAt(i) - 32;
-    if (code >= 0 && code <= 95) {
-      checksum += code * (i + 1);
-      patternStr += CODE128_PATTERNS[code];
-    }
+  // Pad to even number of digits for 128C pairs
+  const cleanDigits = digits.length % 2 !== 0 ? "0" + digits : digits;
+
+  let checksum = 105; // Start C
+  let patternStr = CODE128_PATTERNS[105];
+
+  let weight = 1;
+  for (let i = 0; i < cleanDigits.length; i += 2) {
+    const pairValue = parseInt(cleanDigits.substr(i, 2), 10);
+    checksum += pairValue * weight;
+    patternStr += CODE128_PATTERNS[pairValue];
+    weight++;
   }
 
   const checkDigit = checksum % 103;
   patternStr += CODE128_PATTERNS[checkDigit];
-  patternStr += CODE128_PATTERNS[106];
+  patternStr += CODE128_PATTERNS[106]; // Stop C
   return patternStr;
 }
 
-export function BarcodeSVG({ value, height = 44 }) {
-  const pattern = useMemo(() => encodeCode128(value || "0000000000"), [value]);
+export function BarcodeSVG({ value, height = 34 }) {
+  const pattern = useMemo(() => encodeCode128C(value || "2026000001"), [value]);
   
-  const quietZone = 12;
+  const quietZone = 8;
   let x = quietZone;
   const rects = [];
-  const moduleWidth = 2.0; // Bold bars for scanning
+  const moduleWidth = 1.8; // Wide, spacious bars (NOT DENSE!)
 
   for (let i = 0; i < pattern.length; i++) {
     const w = parseInt(pattern[i], 10) * moduleWidth;
     if (i % 2 === 0) {
       rects.push(
-        <rect key={i} x={x.toFixed(1)} y="0" width={w.toFixed(1)} height={height} fill="#000000" />
+        <rect 
+          key={i} 
+          x={x.toFixed(1)} 
+          y="0" 
+          width={w.toFixed(1)} 
+          height={height} 
+          fill="#000000" 
+          shapeRendering="crispEdges" 
+        />
       );
     }
     x += w;
@@ -61,6 +73,7 @@ export function BarcodeSVG({ value, height = 44 }) {
       style={{ height: `${height}px` }} 
       viewBox={`0 0 ${x.toFixed(1)} ${height}`} 
       preserveAspectRatio="none"
+      shapeRendering="crispEdges"
     >
       <rect width="100%" height="100%" fill="#ffffff" />
       {rects}

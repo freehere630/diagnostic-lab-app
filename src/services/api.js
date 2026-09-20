@@ -449,28 +449,74 @@ export async function getAllOrders() {
   });
 }
 
-// ==========================================
-// 6. CREATE NEW ORDER (PURE 9-DIGIT BARCODE & SHORT PID)
-// ==========================================
+// In src/services/api.js -> replace createNewOrder:
+
+// In src/services/api.js -> replace createNewOrder:
+
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
-  // Short Patient ID (e.g. P-1024)
   const patientId = patientData.id && patientData.id.trim() 
     ? patientData.id.trim() 
     : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  // STRICTLY PURE 9-DIGIT NUMERIC SAMPLE BARCODE
-   const barcode = String(Math.floor(1000000000 + Math.random() * 9000000000));
+  const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
+
+  // 1. DEPARTMENT-LEVEL PHYSICAL VIAL GROUPING (1 Tube per Department, Excludes Imaging & ECG)
+  const departmentVials = [];
+  selectedTests.forEach((t) => {
+    const d = (t.dept_id || t.deptId || "").toUpperCase();
+    const s = (t.sample_type || "").toLowerCase();
+    const c = (t.code || "").toUpperCase();
+    const isImaging = d.includes("RAD") || d.includes("USG") || d.includes("CT") || d.includes("MRI") || d.includes("CARD") ||
+                      s.includes("no specimen") || s.includes("imaging") || s.includes("tracing") || c.includes("ECG") || c.includes("XRAY");
+    if (isImaging) return; // Skip specimen-less tests!
+
+    const deptId = t.dept_id || t.deptId || "DEP-GEN";
+    const deptCode = deptId.replace("DEP-", "");
+    const tubeColor = (t.tube_color || "Standard").split(" ")[0]; // "Red", "Purple", "Grey"
+    
+    // GROUP BY DEPARTMENT + TUBE COLOR (Every department gets its own vial!)
+    const key = `${deptCode}-${tubeColor}`;
+
+    if (!departmentVials.some((v) => v.key === key)) {
+      departmentVials.push({ 
+        key, 
+        deptId: deptId, 
+        deptCode: deptCode, 
+        tubeColor: tubeColor, 
+        testIds: [t.id, t.code, t.name],
+        testNames: [t.code || t.name]
+      });
+    } else {
+      const existing = departmentVials.find((v) => v.key === key);
+      existing.testIds.push(t.id, t.code, t.name);
+      existing.testNames.push(t.code || t.name);
+    }
+  });
+
+  const vialsCount = Math.max(1, departmentVials.length);
+
+  // 2. RESERVE EXACT NUMBER OF SEQUENTIAL BARCODES (One for each department)
+  const assignedBarcodes = await getNextSequentialBarcode(vialsCount);
+  const barcodeList = Array.isArray(assignedBarcodes) ? assignedBarcodes : [assignedBarcodes];
+
+  // Assign barcodes to each department vial
+  departmentVials.forEach((v, i) => {
+    v.barcode = barcodeList[i];
+  });
+
+  const primaryBarcode = barcodeList[0];
+  const lastBarcode = barcodeList[barcodeList.length - 1];
 
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
   
-  const orderId = `ORD-${todayCompact.slice(2)}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const receiptNo = `RCP-${todayCompact.slice(4)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const orderId = `ORD-${todayCompact.slice(2)}-${primaryBarcode.slice(-4)}`;
+  const receiptNo = `RCP-${todayCompact.slice(4)}-${primaryBarcode.slice(-4)}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // 1. Save Patient
+  // 3. Save Patient
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -481,8 +527,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
 
-  // 2. Accurate Subtotal Calculation from Selected Tests
-  const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
+  // 4. Save Order (Save lastBarcode to database so next order never collides!)
   const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
   const finalDiscountPercent = discount || 0;
   const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
@@ -493,7 +538,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const orderRow = {
     id: orderId,
     patient_id: patientId,
-    barcode: barcode,
+    barcode: lastBarcode, // Stored to guarantee next order starts on the next number!
     order_date: todayDate,
     created_at: nowIso,
     subtotal: subTotal,
@@ -507,20 +552,18 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("orders").insert(orderRow); } catch (e) {}
 
-  // 3. Link Tests
   if (testIds && testIds.length > 0) {
     const orderTestRows = testIds.map((tid) => ({ order_id: orderId, test_id: tid }));
     try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
   }
 
-  // 4. In-Memory Complete Object
   const completeOrder = {
     ...orderRow,
     orderId: orderId,
     date: todayDate,
     createdAt: nowIso,
     created_at: nowIso,
-    barcode: barcode,
+    barcode: primaryBarcode,
     doctor: referringDoctor,
     receiptNo: receiptNo,
     patient: {
@@ -533,6 +576,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       address: `Ref: ${referringDoctor}`
     },
     tests: selectedTests,
+    vials: departmentVials, // Each department has its own barcode
     order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
     billing: { subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaid, due: finalDue },
     results: {},
@@ -548,7 +592,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   return completeOrder;
 }
-
 // ==========================================
 // 7. SETTLE DUE AMOUNT
 // ==========================================
@@ -865,4 +908,55 @@ export async function saveLabSettings(settingsData) {
     receipt_design: settingsData.receiptDesign || settingsData.receipt_design || {}
   }).select().single();
   return data;
+}
+export async function getNextSequentialBarcode(count = 1) {
+  const yearPrefix = String(new Date().getFullYear()); // "2026"
+  let maxFoundSeq = 0;
+
+  try {
+    // 1. Fetch recent orders from Supabase to find the absolute highest barcode used
+    const { data: recentOrders } = await supabase
+      .from("orders")
+      .select("barcode, created_at")
+      .ilike("barcode", `${yearPrefix}%`)
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    if (recentOrders && recentOrders.length > 0) {
+      for (const ord of recentOrders) {
+        const rawDigits = String(ord.barcode || "").replace(/\D/g, "");
+        if (rawDigits.startsWith(yearPrefix)) {
+          const num = parseInt(rawDigits.slice(yearPrefix.length), 10);
+          if (!isNaN(num) && num > maxFoundSeq) {
+            maxFoundSeq = num;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Sequence lookup warning:", err);
+  }
+
+  // 2. Check local storage cache counter
+  try {
+    const localLast = parseInt(localStorage.getItem("apex_last_barcode_seq") || "0", 10);
+    if (localLast > maxFoundSeq) {
+      maxFoundSeq = localLast;
+    }
+  } catch (e) {}
+
+  const startSeq = maxFoundSeq + 1;
+  const generatedBarcodes = [];
+
+  for (let i = 0; i < count; i++) {
+    const seqStr = String(startSeq + i).padStart(5, "0"); // 5-digit sequence (00001, 00002...)
+    generatedBarcodes.push(`${yearPrefix}${seqStr}`);
+  }
+
+  // Save the highest reserved sequence to prevent any other order from taking it
+  try {
+    localStorage.setItem("apex_last_barcode_seq", String(startSeq + count - 1));
+  } catch (e) {}
+
+  return count === 1 ? generatedBarcodes[0] : generatedBarcodes;
 }

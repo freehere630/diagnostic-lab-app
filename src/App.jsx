@@ -8,7 +8,13 @@ import {
 } from "./services/api";
 import { supabase } from "./supabaseClient";
 
-import { printMoneyReceiptA5, printSpecificVialBarcode, printDepartmentA4Report } from "./utils/printHelpers";
+import { 
+  printMoneyReceiptA5, 
+  printSpecificVialBarcode, 
+  printDepartmentA4Report,
+  getAllOrderVials,
+  isImagingOrRadiologyInvestigation 
+} from "./utils/printHelpers";
 
 import Login from "./components/Login";
 import Navbar from "./components/Navbar";
@@ -209,6 +215,7 @@ export default function App() {
             doctor: resolvedDoctor
           },
           tests: matchedTests.length > 0 ? matchedTests : (o.tests || []),
+          vials: o.vials || [],
           billing: o.billing || { 
             subTotal: parseFloat(o.subtotal) || 0, 
             discount: parseFloat(o.discount_percent) || 0, 
@@ -275,30 +282,25 @@ export default function App() {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-  // Pure 9-digit barcode on vial labels
-  const departmentalVials = useMemo(() => {
+const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
-    const vials = {};
-    activeOrder.tests.forEach((test) => {
-      const dept = (test.dept_id || test.deptId || "").toUpperCase();
-      const isImaging = dept.includes("RAD") || dept.includes("IMG") || dept.includes("XRAY") || dept.includes("USG");
-      if (isImaging) return;
-
-      const deptCode = (test.dept_id || "GEN").replace("DEP-", "");
-      const key = `${deptCode}-${test.tube_color || "Vial"}`;
-      if (!vials[key]) {
-        vials[key] = {
-          deptCode,
-          testBarcode: activeOrder.barcode || String(Math.floor(100000000 + Math.random() * 900000000)),
-          patientId: activeOrder.patient?.id || "P-1001",
-          patientName: activeOrder.patient?.name || "Patient",
-          tubeColor: test.tube_color || "Standard Tube",
-          testNames: []
-        };
-      }
-      vials[key].testNames.push(test.code || test.name);
-    });
-    return Object.values(vials);
+    
+    // Resolves unique physical vials for each department
+    const resolvedVials = getAllOrderVials(activeOrder);
+    
+    return resolvedVials.map((v) => ({
+      deptCode: v.deptCode || "GEN",
+      testBarcode: v.barcode || activeOrder.barcode,
+      patientId: activeOrder.patient?.id || "P-1001",
+      patientName: activeOrder.patient?.name || "Patient",
+      tubeColor: v.tubeColor || "Standard",
+      // FIX: ONLY SHOW TESTS BELONGING TO THIS SPECIFIC VIAL!
+      testNames: v.testNames && v.testNames.length > 0 
+        ? v.testNames 
+        : (activeOrder.tests || [])
+            .filter(t => (t.dept_id || t.deptId || "").replace("DEP-", "") === v.deptCode)
+            .map(t => t.code || t.name)
+    }));
   }, [activeOrder]);
 
   const departmentGroupedReports = useMemo(() => {

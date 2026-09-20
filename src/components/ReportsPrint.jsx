@@ -8,7 +8,7 @@ import {
   buildUnifiedResultsTable, 
   isImagingOrRadiologyInvestigation 
 } from "../utils/printHelpers";
-
+import { getDepartmentVialBarcode } from "../utils/printHelpers";
 export default function ReportsPrint({ 
   activeOrder, 
   currentUser,
@@ -61,10 +61,11 @@ export default function ReportsPrint({
   const address = labSettings?.address || "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212";
   const phone = labSettings?.phone || "01723854472, 01624787444";
 
-  // LIVE ON-SCREEN REPORT PREVIEW (EXACT MATCH TO FIGMA PAD & SIZED-UP FONTS)
+// LIVE ON-SCREEN REPORT PREVIEW (MATCHES THE PRINTED REPORT EXACTLY)
   const getCompiledReportPreview = (group) => {
     const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
 
+    // Resolve Technologist & Verifier
     const techUser = staffList.find(u => u.role === "technologist") || {
       full_name: "Md. Al-Amin",
       designation: isImaging ? "Senior Medical Radiographer / Imaging Technologist" : "BSc in Medical Technology - Senior Technologist",
@@ -79,6 +80,7 @@ export default function ReportsPrint({
       signature_data: ""
     };
 
+    // CONDITIONAL SIGNATURES (ZERO NAMES / LINES BEFORE VERIFICATION)
     const renderSignatureHtml = (sigData, fallbackName) => {
       if (!isVerified) return `<div style="height: 38px;"></div>`;
       if (sigData && sigData.startsWith("data:image")) {
@@ -102,75 +104,80 @@ export default function ReportsPrint({
 
     const departmentBannerTitle = (group.dept?.name || "Clinical Pathology").toUpperCase();
 
+    // RESOLVE THIS SPECIFIC DEPARTMENT'S SEQUENTIAL VIAL BARCODE
+    const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
+
+    // NO BARCODE ON IMAGING / RADIOLOGY
     const sixthSlotDemographics = isImaging
       ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${group.dept?.name || "Radiology"}</b>`
-      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${activeOrder.barcode || ""}</b>`;
+      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
 
+    // 1. EXACT FIGMA HEADER (780px x 132px ratio)
     const figmaDigitalHeaderHtml = usePadMode ? `
-      <div style="background: #221430; color: #ffffff; padding: 12px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-radius: 4px; border-bottom: 2px dashed #a855f7;">
+      <div style="background: #20122e; color: #ffffff; padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px;">
         <div>
           <span style="font-size: 11pt; font-weight: 900; letter-spacing: 0.5px;">AL FATTAH DIAGNOSTIC & CONSULTATION CENTER</span>
-          <p style="font-size: 7.5pt; margin: 2px 0 0 0; color: #e2e8f0;">[Pre-Printed Header Zone: 780px x 132px (38mm) — Skipped on Physical Pad]</p>
+          <p style="font-size: 7.5pt; margin: 2px 0 0 0; color: #c7d2fe;">[Pre-Printed Header: 780px x 132px (38mm) — Skipped on physical pad]</p>
         </div>
-        <span style="font-size: 8pt; font-weight: bold; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 4px;">AL-FATTAH PAD MODE</span>
+        <span style="font-size: 8pt; font-weight: bold; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 4px;">PAD MODE</span>
       </div>
     ` : `
-      <div style="background: #221430; color: #ffffff; padding: 12px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 48px; max-width: 120px; object-fit: contain;" />` : `
-            <div style="width: 44px; height: 44px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #b91c1c; font-size: 14pt; border: 2px solid #16a34a;">
-              AF
-            </div>
-          `}
-          <div>
-            <div style="font-size: 6.5pt; color: #e2e8f0; letter-spacing: 0.3px; margin-bottom: 1px;">With Al-Fattah on the Journey to Wellness</div>
-          </div>
+      <div style="background: #20122e; color: #ffffff; height: 115px; box-sizing: border-box; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-radius: 2px;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+          <svg width="44" height="44" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="48" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+            <path d="M 50 8 A 42 42 0 0 0 50 92 A 34 34 0 0 1 50 8 Z" fill="#dc2626" />
+            <path d="M 36 28 L 64 28 L 64 56 C 64 70 50 78 50 78 C 50 78 36 70 36 56 Z" fill="#15803d" />
+            <text x="50" y="58" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" font-family="Arial, sans-serif">AF</text>
+          </svg>
+          <span style="font-size: 6.5pt; color: #e2e8f0; letter-spacing: 0.3px;">With Al-Fattah on the Journey to Wellness</span>
         </div>
         <div style="text-align: right;">
-          <h1 style="font-size: 18pt; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: 1.2px; line-height: 1;">AL FATTAH</h1>
-          <div style="font-size: 8.5pt; font-weight: 600; color: #f8fafc; letter-spacing: 0.8px; margin-top: 2px;">DIAGNOSTIC & CONSULTATION CENTER</div>
+          <div style="font-size: 20pt; font-weight: 900; color: #ffffff; letter-spacing: 1.5px; line-height: 1;">AL FATTAH</div>
+          <div style="font-size: 9pt; font-weight: 700; color: #ffffff; letter-spacing: 0.8px; margin-top: 4px;">DIAGNOSTIC & CONSULTATION CENTER</div>
         </div>
       </div>
     `;
 
-    // TRANSPARENT BACKGROUND PATIENT CARD, SIZED-UP 9.5PT FONTS
+    // 2. INLINE PATIENT DETAILS (TRANSPARENT BACKGROUND, SIZED-UP 9.5PT-10.5PT FONTS)
     const demographicsHtml = `
-      <div style="background: transparent; border: 1.5px solid #000000; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; font-size: 9.5pt; color: #000000;">
+      <div style=" padding: 12px 8px 12px 8px; border: 1.5px solid #000000; border-radius: 5px; margin-bottom: 8px; font-size: 9.5pt; color: #000000;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
             <tr>
-              <td style="padding: 3px 6px; width: 38%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-weight: 900; font-size: 10.5pt;">${activeOrder.patient?.name || "Patient"}</b></td>
-              <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 700;">Age / Gender:</span> <b style="font-weight: 800;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-              <td style="padding: 3px 6px; width: 32%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-weight: 900; font-size: 10pt;">${activeOrder.patient?.id || "N/A"}</b></td>
+              <td style="padding: 8px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 10.5pt; font-weight: 900;">${activeOrder.patient?.name || "Patient"}</b></td>
+              <td style="padding: 8px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 800;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
+              <td style="padding: 8px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 10pt; font-weight: 900;">${activeOrder.patient?.id || "N/A"}</b></td>
             </tr>
             <tr>
-              <td style="padding: 3px 6px;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
-              <td style="padding: 3px 6px;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
-              <td style="padding: 3px 6px;">${sixthSlotDemographics}</td>
+              <td style="padding: 8px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
+              <td style="padding: 8px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
+              <td style="padding: 8px 0;">${sixthSlotDemographics}</td>
             </tr>
           </table>
           ${usePadMode ? `
-            <div style="width: 50px; text-align: center; margin-left: 8px; flex-shrink: 0;">
-              ${generateQrSvgLocal(qrUrl, 46)}
-              <span style="font-size: 5.5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
+            <div style="width: 55px; text-align: center; margin-left: 8px; flex-shrink: 0;">
+              ${generateQrSvgLocal(qrUrl, 55)}
+              <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
             </div>
           ` : ""}
         </div>
       </div>
     `;
 
+    // 3. EXACT FIGMA FOOTER (780px x 72px ratio)
     const figmaDigitalFooterHtml = usePadMode ? `
-      <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #a855f7; text-align: center; color: #475569; font-size: 7.5pt;">
-        [Pre-Printed Footer Zone: 780px x 72px (21mm) — Solmaid Purbo Para, Vatara, Dhaka • 01723854472]
+      <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #cbd5e1; text-align: center; color: #475569; font-size: 7.5pt;">
+        [Pre-Printed Footer: Solmaid Purbo Para, Vatara, Dhaka • 01723854472, 01624787444]
       </div>
     ` : `
-      <div style="border-top: 1.5px solid #000000; padding-top: 6px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5pt; font-weight: 700; color: #000000;">
+      <div style="height: 48px; box-sizing: border-box; border-top: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; padding: 0 4px; font-size: 9pt; font-weight: 800; color: #000000; margin-top: 12px;">
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="color: #dc2626; font-size: 11pt;">📍</span>
+          <span style="color: #dc2626; font-size: 12pt;">📍</span>
           <span>Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212</span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 11pt;">🎧</span>
+          <span style="font-size: 12pt;">🎧</span>
           <span>01723854472, 01624787444</span>
         </div>
       </div>
@@ -189,10 +196,12 @@ export default function ReportsPrint({
             </span>
           </div>
 
+          <!-- RESULTS TABLE (EXACT CBC 4-COLUMN WITH ESR & NO CARTOON HISTOGRAMS) -->
           ${testsTableHtml}
           ${remarksHtml}
         </div>
 
+        <!-- DUAL SIGNATURES (ONLY AFTER VERIFICATION) & FOOTER -->
         <div>
           ${isVerified ? `
             <div style="margin-top: 22px; padding-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">

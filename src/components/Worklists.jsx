@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from "react";
 import { Search, Clock, Layers, CheckCircle2, AlertCircle } from "lucide-react";
+import { getDepartmentVialBarcode, getAllOrderVials } from "../utils/printHelpers";
 
 export default function Worklists({ orders = [], departments = [], setSelectedOrderId, setActiveTab }) {
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [worklistSearch, setWorklistSearch] = useState("");
 
-  // SORT: PENDING SAMPLES STRICTLY FIRST, THEN BY NEWEST TIMESTAMP
+  // SORT & FILTER: PENDING FIRST, EVERY VIAL BARCODE SEARCHABLE
   const sortedAndFiltered = useMemo(() => {
     return orders
       .filter((ord) => {
@@ -14,9 +15,13 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
           (ord.tests && ord.tests.some((t) => (t.dept_id || t.deptId) === deptFilter));
 
         const q = worklistSearch.trim().toLowerCase();
+        const orderVials = getAllOrderVials(ord);
+        const allBarcodes = [ord.barcode, ...orderVials.map(v => v.barcode)].filter(Boolean);
+
+        // SEARCH MATCHES PRIMARY BARCODE OR ANY SECONDARY VIAL BARCODE
         const matchSearch =
           !q ||
-          (ord.barcode && ord.barcode.toLowerCase().includes(q)) ||
+          allBarcodes.some(b => String(b).toLowerCase().includes(q)) ||
           (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
           (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q));
 
@@ -97,7 +102,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Search barcode, patient, UHID..."
+              placeholder="Search by ANY vial barcode, patient..."
               value={worklistSearch}
               onChange={(e) => setWorklistSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500"
@@ -112,7 +117,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
           <thead>
             <tr className="bg-slate-50 border-b text-slate-500 font-bold">
               <th className="py-3 px-4">Time / Date</th>
-              <th className="py-3 px-4">Barcode</th>
+              <th className="py-3 px-4">Vial Barcode(s)</th>
               <th className="py-3 px-4">Patient (UHID)</th>
               <th className="py-3 px-4">Assigned Tests</th>
               <th className="py-3 px-4">QC Status</th>
@@ -129,6 +134,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
             ) : (
               sortedAndFiltered.map((o) => {
                 const isPending = (o.qcStatus || o.qc_status) !== "Verified" && !o.isLocked;
+                const orderVials = getAllOrderVials(o);
 
                 return (
                   <tr 
@@ -143,7 +149,26 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                       <span className="text-[10px] text-slate-400 block">{o.date}</span>
                     </td>
 
-                    <td className="py-3 px-4 font-mono font-bold text-blue-700">{o.barcode}</td>
+                    {/* SHOWS ALL ASSIGNED VIAL BARCODES WITH TUBE COLORS */}
+                    <td className="py-3 px-4 font-mono font-bold text-xs">
+                      {deptFilter === "ALL" ? (
+                        <div className="flex flex-wrap gap-1.5 max-w-xs">
+                          {orderVials.length > 0 ? (
+                            orderVials.map((v, i) => (
+                              <span key={i} className="text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[11px] font-mono font-black flex items-center gap-1">
+                                {v.barcode} <span className="text-[9px] text-slate-500 font-normal">({v.tubeColor})</span>
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-blue-700 font-bold">{o.barcode}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-xs font-mono font-black">
+                          {getDepartmentVialBarcode(o, deptFilter)}
+                        </span>
+                      )}
+                    </td>
 
                     <td className="py-3 px-4 font-semibold text-slate-900">
                       <div>{o.patient?.name}</div>

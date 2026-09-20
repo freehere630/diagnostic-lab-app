@@ -1,6 +1,6 @@
 import { generateQrSvgString } from "./qrcode";
 
-// GS1 Code 128B Encoding Engine
+// GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
   "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
@@ -15,75 +15,53 @@ const CODE128_PATTERNS = [
   "114131","311141","411131","211412","211214","211232","2331112"
 ];
 
-function encodeCode128Local(text) {
-  if (!text) return "";
-  const clean = String(text).trim();
-  let checksum = 104;
-  let patternStr = CODE128_PATTERNS[104];
-  for (let i = 0; i < clean.length; i++) {
-    const code = clean.charCodeAt(i) - 32;
-    if (code >= 0 && code <= 95) {
-      checksum += code * (i + 1);
-      patternStr += CODE128_PATTERNS[code];
-    }
+// CODE 128C LOW-DENSITY NUMERIC COMPRESSION (SPACIOUS BOLD BARS)
+function encodeCode128C(numericText) {
+  const digits = String(numericText || "").replace(/\D/g, "");
+  if (!digits) return "";
+
+  const cleanDigits = digits.length % 2 !== 0 ? "0" + digits : digits;
+
+  let checksum = 105; // Start C
+  let patternStr = CODE128_PATTERNS[105];
+
+  let weight = 1;
+  for (let i = 0; i < cleanDigits.length; i += 2) {
+    const pairValue = parseInt(cleanDigits.substr(i, 2), 10);
+    checksum += pairValue * weight;
+    patternStr += CODE128_PATTERNS[pairValue];
+    weight++;
   }
+
   const checkDigit = checksum % 103;
   patternStr += CODE128_PATTERNS[checkDigit];
-  patternStr += CODE128_PATTERNS[106];
+  patternStr += CODE128_PATTERNS[106]; // Stop C
   return patternStr;
 }
 
 export function generateSvgBarcodeHtml(codeText, height = 32) {
-  const pattern = encodeCode128Local(codeText || "0000000000");
+  const pattern = encodeCode128C(codeText || "2026000001");
   let x = 0;
   let rects = "";
-  const moduleWidth = 5; // Crisp, sharp line width for instant laser detection
+  const moduleWidth = 5; // Sized for 38mm x 25mm labels
   
-  // Clean quiet zone for scanner start/stop recognition
-  const quietZone = 8;
+  const quietZone = 6;
   x += quietZone;
 
   for (let i = 0; i < pattern.length; i++) {
     const w = parseInt(pattern[i], 10) * moduleWidth;
     if (i % 2 === 0) {
-      rects += `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" fill="#000000" />`;
+      rects += `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" fill="#000000" shape-rendering="crispEdges" />`;
     }
     x += w;
   }
   x += quietZone;
 
-  return `<svg viewBox="0 0 ${x.toFixed(1)} ${height}" preserveAspectRatio="none" style="width: 100%; height: ${height}px; display: block; margin: 0 auto;"><rect width="100%" height="100%" fill="#ffffff"/>${rects}</svg>`;
+  return `<svg viewBox="0 0 ${x.toFixed(1)} ${height}" preserveAspectRatio="none" shape-rendering="crispEdges" style="width: 96%; height: ${height}px; display: block; margin: 0 auto;"><rect width="100%" height="100%" fill="#ffffff"/>${rects}</svg>`;
 }
 
 export function generateQrSvgLocal(text, size = 60) {
   return generateQrSvgString(text, size);
-}
-
-export function compileTemplate(templateHtml, tokens) {
-  let compiled = String(templateHtml || "");
-  Object.keys(tokens).forEach((key) => {
-    const regex = new RegExp(`{{${key}}}`, "g");
-    compiled = compiled.replace(regex, tokens[key] !== undefined ? tokens[key] : "");
-  });
-  return compiled;
-}
-
-export function getActiveTemplate(settings, type = "report") {
-  const directKey = type === "report" ? "apex_report_template" : "apex_receipt_template";
-  const directVal = localStorage.getItem(directKey);
-  if (directVal && directVal.trim() && !directVal.includes("border: 2px solid #000") && !directVal.includes("border: 1.5px solid #000")) {
-    return directVal;
-  }
-
-  const designObj = type === "report" 
-    ? (settings?.report_design || settings?.reportDesign)
-    : (settings?.receipt_design || settings?.receiptDesign);
-
-  if (typeof designObj === "object" && designObj?.templateHtml && !designObj.templateHtml.includes("border: 2px solid #000")) {
-    return designObj.templateHtml;
-  }
-
-  return "";
 }
 
 export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = "") {
@@ -102,6 +80,90 @@ export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = 
     c.includes("XRAY") || c.includes("USG") || c.includes("CT") || c.includes("MRI") || c.includes("ECG") || c.includes("ECHO") ||
     n.includes("X-RAY") || n.includes("ULTRASO") || n.includes("CT SCAN") || n.includes("MRI") || n.includes("ELECTROCARDIOGRAM")
   );
+}
+
+// =========================================================================
+// VIAL BARCODE RESOLVER (DYNAMICALLY ASSIGNS UNIQUE VIAL PER DEPARTMENT)
+// =========================================================================
+export function getAllOrderVials(order) {
+  if (!order || !order.tests) return [];
+
+  // If order already has pre-assigned physical vials array, normalize and return it
+  if (Array.isArray(order.vials) && order.vials.length > 0) {
+    return order.vials.map(v => ({
+      deptId: v.deptId || "DEP-GEN",
+      deptCode: v.deptCode || "GEN",
+      tubeColor: v.tubeColor || "Standard",
+      barcode: v.barcode || v.testBarcode || order.barcode,
+      testBarcode: v.barcode || v.testBarcode || order.barcode,
+      testIds: v.testIds || [],
+      testNames: v.testNames || []
+    }));
+  }
+
+  const vials = {};
+  const baseNum = parseInt(String(order.barcode || "202600001").replace(/\D/g, ""), 10) || 202600001;
+  let counter = 0;
+
+  for (const test of order.tests) {
+    if (isImagingOrRadiologyInvestigation(test, test.dept_id || test.deptId)) {
+      continue;
+    }
+
+    const deptId = test.dept_id || test.deptId || "DEP-GEN";
+    const deptCode = deptId.replace("DEP-", "");
+    const tubeColor = (test.tube_color || "Standard").split(" ")[0];
+    const key = `${deptCode}-${tubeColor}`; // 1 Unique Vial Per Department!
+
+    if (!vials[key]) {
+      const vialBarcode = String(baseNum + counter);
+      vials[key] = {
+        deptId: deptId,
+        deptCode: deptCode,
+        tubeColor: tubeColor,
+        barcode: vialBarcode,
+        testBarcode: vialBarcode,
+        testIds: [],
+        testNames: []
+      };
+      counter++;
+    }
+    vials[key].testIds.push(test.id, test.code);
+    vials[key].testNames.push(test.code || test.name);
+  }
+
+  return Object.values(vials);
+}
+
+export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
+  if (!order) return "";
+  const allVials = getAllOrderVials(order);
+  if (allVials.length === 0) return order.barcode || "";
+
+  // 1. Match by tests in this group (Most accurate!)
+  if (groupTests && groupTests.length > 0) {
+    for (const gt of groupTests) {
+      const matched = allVials.find(v => 
+        (v.testIds || []).includes(gt.id) || 
+        (v.testIds || []).includes(gt.code) || 
+        (v.testNames || []).includes(gt.name) ||
+        (v.testNames || []).includes(gt.code)
+      );
+      if (matched) return matched.barcode || matched.testBarcode;
+    }
+  }
+
+  // 2. Match by department ID (e.g. DEP-IMM -> IMM vial, DEP-BIO -> BIO vial)
+  if (deptId) {
+    const dClean = String(deptId).toUpperCase().replace("DEP-", "").replace("-CBC", "");
+    const matched = allVials.find(v => {
+      const vClean = String(v.deptCode || v.deptId).toUpperCase().replace("DEP-", "");
+      return vClean === dClean || dClean.includes(vClean) || vClean.includes(dClean);
+    });
+    if (matched) return matched.barcode || matched.testBarcode;
+  }
+
+  return allVials[0]?.barcode || allVials[0]?.testBarcode || order.barcode;
 }
 
 // Clean Medical Radiology Sheet
@@ -133,16 +195,16 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
   }
 
   return `
-    <div style="margin-top: 12px; margin-bottom: 16px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-      <div style="border-bottom: 1.5px solid #000000; padding: 6px 4px; font-weight: 800; font-size: 9.5pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
+    <div style="margin-top: 10px; margin-bottom: 16px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 800; font-size: 10pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
         <span>Investigation: ${test.name.toUpperCase()} ${test.code ? `(${test.code})` : ""}</span>
         <span style="font-size: 8.5pt; color: #000000; font-weight: 700;">${deptName || "Imaging"}</span>
       </div>
 
-      <div style="padding: 10px 4px 4px 4px; font-size: 9.5pt; line-height: 1.6; color: #000000;">
+      <div style="padding: 10px 0 4px 0; font-size: 9.5pt; line-height: 1.6; color: #000000;">
         ${indication ? `
           <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #cbd5e1;">
-            <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Clinical Indication & Protocol:</b>
+            <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Clinical Indication:</b>
             <span style="color: #000000;">${indication}</span>
           </div>
         ` : `
@@ -168,8 +230,7 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
   `;
 }
 
-// In src/utils/printHelpers.js -> replace renderCustomCbcHematologyReport:
-
+// Specialized CBC Clinical Report
 function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const findVal = (keywords, fallback = "") => {
     const keys = Array.isArray(keywords) ? keywords : [keywords];
@@ -193,41 +254,35 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
     return fallback;
   };
 
-  // 1. PRIMARY PARAMETERS (Read directly from entered values)
   const hb = findVal(["Haemoglobin(Hb)", "Hemoglobin (Hb)", "Hemoglobin", "HGB", "Hb"], "11.8");
   const rawWbc = findVal(["TOTAL WBC COUNT", "Total Leucocyte Count (WBC)", "Total Leucocyte Count", "WBC"], "7.5");
   const numWbc = parseFloat(rawWbc) || 7.5;
   const wbcDisplay = numWbc < 100 ? (numWbc * 1000).toLocaleString() : numWbc.toLocaleString();
 
   const rawLymphPct = findVal(["Lymphocytes", "Lymphocyte", "Lymph%"], "35.6");
-  const rawMidPct = findVal(["Mid%", "Mid", "Monocytes", "Monocyte"], "12.6"); // Reads your dynamic Mid%
-  const rawGranPct = findVal(["Gran%", "Gran", "Neutrophils", "Neutrophil"], "52.3");
+  const rawMidPct = findVal(["Mid%", "Mid", "Monocyte", "Monocytes"], "12.6");
+  const rawGranPct = findVal(["Gran%", "Gran", "Neutrophil", "Neutrophils"], "52.3");
 
   const numLymph = parseFloat(rawLymphPct) || 35.6;
-  const numMid = parseFloat(rawMidPct) || 12.6; // e.g. 12.6%
+  const numMid = parseFloat(rawMidPct) || 12.6;
   const numGran = parseFloat(rawGranPct) || 52.3;
 
-  // 2. EXACT 5-PART DIFFERENTIAL DERIVED FROM EXACT MID% (Sum = Mid%)
   const neut = findVal(["Neutrophils", "Neutrophil"], numGran.toFixed(1));
   const lymph = findVal(["Lymphocytes", "Lymphocyte"], numLymph.toFixed(1));
   
-  // Splits exact Mid% (e.g. 12.6 -> Mono: 8.8%, Eos: 3.2%, Baso: 0.6% = 12.6%)
   const calcMono = (numMid * 0.70).toFixed(1);
   const calcEos = (numMid * 0.25).toFixed(1);
-  const calcBaso = (numMid - parseFloat(calcMono) - parseFloat(calcEos)).toFixed(1);
+  const calcBaso = Math.max(0, (numMid - parseFloat(calcMono) - parseFloat(calcEos))).toFixed(1);
 
   const mono = findVal(["Monocytes", "Monocyte"], calcMono);
   const eos = findVal(["Eosinophils", "Eosinophil"], calcEos);
   const baso = findVal(["Basophil", "Basophils"], calcBaso);
 
-  // Total Circulating Eosinophils (/cumm)
   const calculatedAec = Math.round(((numWbc < 100 ? numWbc * 1000 : numWbc) * parseFloat(eos)) / 100);
-  const aec = findVal(["TOTAL CIR. EOSIONOPHIL COUNT", "Absolute Eosinophil Count", "AEC"], String(calculatedAec || 225));
+  const aec = findVal(["TOTAL CIR. EOSIONOPHIL COUNT", "Absolute Eosinophil Count", "AEC"], String(calculatedAec || 240));
 
-  // ESR (Erythrocyte Sedimentation Rate)
   const esr = findVal(["ESR", "Erythrocyte Sedimentation Rate", "ESR (Westergren Method)"], "12");
 
-  // 3. PLATELETS & INDICES
   const rawPlt = findVal(["TOTAL PLATELET COUNT(PC)", "Total Platelet Count", "Platelet", "PLT"], "59");
   const numPlt = parseFloat(rawPlt) || 59;
   const pltDisplay = numPlt < 1000 ? (numPlt * 1000).toLocaleString() : numPlt.toLocaleString();
@@ -238,7 +293,6 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const plcr = findVal(["P-LCR", "PLCR", "Platelet Large Cell Ratio"], "35.5");
   const plcc = findVal(["P-LCC", "PLCC", "Platelet Large Cell Count"], "21");
 
-  // 4. RBC & INDICES
   const rbc = findVal(["RBC COUNT", "Total Red Blood Cell Count", "RBC"], "4.69");
   const hct = findVal(["HCT/PCV", "Packed Cell Volume", "PCV", "HCT"], "39.4");
   const mcv = findVal(["MCV", "Mean Corpuscular Volume"], "84.0");
@@ -247,7 +301,6 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const rdwsd = findVal(["RDW SD", "RDW-SD"], "38.0");
   const rdwcv = findVal(["RDW CV", "RDW-CV"], "13.3");
 
-  // CLEAN 3-COLUMN CLINICAL REPORT TABLE (NO CARTOON HISTOGRAMS)
   return `
     <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 4px;">
       <thead>
@@ -268,7 +321,7 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 13.0 - 17.0<br>Female: 11.5 - 15.0</td>
         </tr>
 
-        <!-- ESR ROW -->
+        <!-- ESR (Westergren Method) -->
         <tr style="border-bottom: 1px dashed #cbd5e1;">
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt;">ESR (Westergren Method)</td>
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${esr}</td>
@@ -283,7 +336,7 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">4,000 - 11,000</td>
         </tr>
 
-        <!-- SECTION 2: 5-PART DIFFERENTIAL LEUCOCYTE COUNT -->
+        <!-- SECTION 2: 5-PART DIFFERENTIAL -->
         <tr>
           <td colspan="4" style="padding: 4px 4px; font-weight: 800; text-decoration: underline; text-transform: uppercase; font-size: 9.5pt;">
             DIFFERENTIAL LEUCOCYTE COUNT (%)
@@ -332,7 +385,7 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">40 - 450</td>
         </tr>
 
-        <!-- SECTION 3: PLATELETS & INDICES -->
+        <!-- SECTION 3: PLATELETS -->
         <tr>
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL PLATELET COUNT</td>
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${pltDisplay}</td>
@@ -375,7 +428,7 @@ function renderCustomCbcHematologyReport(tests = [], results = {}) {
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">13 - 129</td>
         </tr>
 
-        <!-- SECTION 4: RED BLOOD CELLS & INDICES -->
+        <!-- SECTION 4: RBC -->
         <tr>
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL RED BLOOD CELL COUNT (RBC)</td>
           <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${rbc}</td>
@@ -475,15 +528,13 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     if (isProfile) {
       tableRows += `
-        <tr>
-          <td colspan="4" style="padding: 6px 8px; font-weight: 800; font-size: 8.5pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
+        <tr style="border-top: 1px solid #000000; border-bottom: 1px solid #000000;">
+          <td colspan="4" style="padding: 6px 4px; font-weight: 800; font-size: 10pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
           </td>
         </tr>
       `;
     }
-
-    // Inside buildUnifiedResultsTable in src/utils/printHelpers.js:
 
     params.forEach((p) => {
       let val = "—";
@@ -503,22 +554,12 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         ? test.name
         : (p.name || test.name);
 
-      // ===================================================================
-      // SMART CLINICAL REFERENCE RANGE RESOLVER (GENDER / AGE / MULTI-RANGE)
-      // ===================================================================
       let refRange = "Normal";
-
-      // 1. If custom multiline/gender text is provided:
       if (p.reference_text && p.reference_text.trim() !== "") {
-        // Formats newlines into clean HTML line breaks
         refRange = p.reference_text.trim().replace(/\n/g, "<br>");
-      } 
-      // 2. Or if stored as ref_text:
-      else if (p.ref_text && p.ref_text.trim() !== "") {
+      } else if (p.ref_text && p.ref_text.trim() !== "") {
         refRange = p.ref_text.trim().replace(/\n/g, "<br>");
-      }
-      // 3. Fallback to standard numeric min - max
-      else if (p.param_type === "numeric" && p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "") {
+      } else if (p.param_type === "numeric" && p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "") {
         refRange = `${p.min_range} – ${p.max_range}`;
       } else if (p.param_type === "qualitative") {
         refRange = "Negative";
@@ -543,10 +584,10 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; background: transparent;">
-          <th style="padding: 6px 8px; text-align: left; width: 38%; font-weight: 800; border: none;">Investigation / Parameter</th>
-          <th style="padding: 6px 8px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
-          <th style="padding: 6px 8px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
-          <th style="padding: 6px 8px; text-align: left; width: 26%; font-weight: 800; border: none;">Biological Ref. Range</th>
+          <th style="padding: 6px 4px; text-align: left; width: 44%; font-weight: 800; border: none;">Investigation / Parameter</th>
+          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 20%; font-weight: 800; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
       <tbody>
@@ -558,7 +599,9 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   return standardTable + imagingSheets;
 }
 
-
+// =========================================================================
+// 1. A4 CLINICAL REPORT (EACH DEPARTMENT SHEET PRINTS ITS UNIQUE BARCODE)
+// =========================================================================
 export function printDepartmentA4Report(
   targetDeptId = "ALL", 
   activeOrder, 
@@ -576,9 +619,6 @@ export function printDepartmentA4Report(
     : (departmentGroupedReports || []).filter((g) => g.dept?.id === targetDeptId);
 
   const orderId = activeOrder.orderId || activeOrder.id || "";
-  const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
-  const scannableQrSvg = generateQrSvgString(qrUrl, 50);
-
   const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
 
   const doctorName = 
@@ -589,6 +629,13 @@ export function printDepartmentA4Report(
 
   const pagesHtml = (deptGroupsToPrint || []).map((group, idx) => {
     const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
+
+    // UNIQUE VIAL BARCODE FOR THIS SPECIFIC DEPARTMENT SHEET!
+    const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
+
+    // Page-specific QR code encoding THIS department's unique barcode
+    const pageQrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(deptBarcode)}`;
+    const pageQrSvg = generateQrSvgString(pageQrUrl, 55);
 
     const techUser = staffList.find((u) => u.role === "technologist") || { 
       full_name: "Md. Al-Amin", 
@@ -627,65 +674,65 @@ export function printDepartmentA4Report(
 
     const departmentBannerTitle = (group.dept?.name || "Clinical Pathology").toUpperCase();
 
+    // NO BARCODE ON IMAGING / RADIOLOGY
     const sixthSlotDemographics = isImaging
       ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${group.dept?.name || "Radiology"}</b>`
-      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${activeOrder.barcode || ""}</b>`;
+      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
 
-    // 1. EXACT FIGMA HEADER: 780x132 ratio (Rendered ONLY in Plain Paper Mode)
-    const figmaDigitalHeaderHtml = usePadMode ? "" : `
-      <div style="background: #221430; color: #ffffff; padding: 12px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 48px; max-width: 120px; object-fit: contain;" />` : `
-            <div style="width: 44px; height: 44px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #b91c1c; font-size: 14pt; border: 2px solid #16a34a;">
-              AF
-            </div>
-          `}
-          <div>
-            <div style="font-size: 6.5pt; color: #e2e8f0; letter-spacing: 0.3px; margin-bottom: 1px;">With Al-Fattah on the Journey to Wellness</div>
-          </div>
+    // EXACT FIGMA HEADER (780px x 132px ratio)
+    const figmaHeaderHtml = usePadMode ? "" : `
+      <div style="background: #20122e; color: #ffffff; height: 115px; box-sizing: border-box; padding: 14px 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+          <svg width="44" height="44" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="48" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+            <path d="M 50 8 A 42 42 0 0 0 50 92 A 34 34 0 0 1 50 8 Z" fill="#dc2626" />
+            <path d="M 36 28 L 64 28 L 64 56 C 64 70 50 78 50 78 C 50 78 36 70 36 56 Z" fill="#15803d" />
+            <text x="50" y="58" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" font-family="Arial, sans-serif">AF</text>
+          </svg>
+          <span style="font-size: 6.5pt; color: #e2e8f0; letter-spacing: 0.3px;">With Al-Fattah on the Journey to Wellness</span>
         </div>
         <div style="text-align: right;">
-          <h1 style="font-size: 18pt; font-weight: 900; margin: 0; color: #ffffff; letter-spacing: 1.2px; line-height: 1;">AL FATTAH</h1>
-          <div style="font-size: 8.5pt; font-weight: 600; color: #f8fafc; letter-spacing: 0.8px; margin-top: 2px;">DIAGNOSTIC & CONSULTATION CENTER</div>
+          <div style="font-size: 20pt; font-weight: 900; color: #ffffff; letter-spacing: 1.5px; line-height: 1;">AL FATTAH</div>
+          <div style="font-size: 9pt; font-weight: 700; color: #ffffff; letter-spacing: 0.8px; margin-top: 4px;">DIAGNOSTIC & CONSULTATION CENTER</div>
         </div>
       </div>
     `;
 
-    // 2. PATIENT DEMOGRAPHICS (Clean transparent background with QR embedded for Pad mode)
-    const demographicsHtml = `
-      <div style="background: transparent; border: 1.5px solid #000000; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; font-size: 9.5pt; color: #000000;">
+    // INLINE PATIENT DETAILS (NO BOX BACKGROUND, PRINTS DEPT-SPECIFIC BARCODE)
+    const patientDetailsHtml = `
+      <div style="padding: 12px 8px 12px 8px; border: 1.5px solid #000000; border-radius: 5px; margin-top: 9px; font-size: 9.5pt; color: #000000;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
             <tr>
-              <td style="padding: 3px 6px; width: 38%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-weight: 700; font-size: 10.5pt;">${activeOrder.patient?.name || "Patient"}</b></td>
-              <td style="padding: 3px 6px; width: 30%;"><span style="font-weight: 700;">Age / Gender:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-              <td style="padding: 3px 6px; width: 32%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-weight: 700; font-size: 10pt;">${activeOrder.patient?.id || "N/A"}</b></td>
+              <td style="padding: 8px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 10.5pt; font-weight: 900;">${activeOrder.patient?.name || "Patient"}</b></td>
+              <td style="padding: 8px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 800;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
+              <td style="padding: 8px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 10pt; font-weight: 900;">${activeOrder.patient?.id || "N/A"}</b></td>
             </tr>
             <tr>
-              <td style="padding: 3px 6px;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
-              <td style="padding: 3px 6px;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
-              <td style="padding: 3px 6px;">${sixthSlotDemographics}</td>
+              <td style="padding: 8px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
+              <td style="padding: 8px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
+              <td style="padding: 8px 0;">${sixthSlotDemographics}</td>
             </tr>
           </table>
           ${usePadMode ? `
-            <div style="width: 50px; text-align: center; margin-left: 8px; flex-shrink: 0;">
-              ${generateQrSvgString(qrUrl, 46)}
-              <span style="font-size: 5.5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
+            <div style="width: 55px; text-align: center; margin-left: 8px; flex-shrink: 0;">
+              ${pageQrSvg}
+              <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
             </div>
           ` : ""}
         </div>
       </div>
     `;
 
-    // 3. EXACT FIGMA FOOTER: 780x72 ratio (Rendered ONLY in Plain Paper Mode)
-    const figmaDigitalFooterHtml = usePadMode ? "" : `
-      <div style="border-top: 1px solid #000000; padding-top: 6px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5pt; font-weight: 700; color: #000000;">
+    // EXACT FIGMA FOOTER (780px x 72px ratio)
+    const figmaFooterHtml = usePadMode ? "" : `
+      <div style="height: 48px; box-sizing: border-box; border-top: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; padding: 0 4px; font-size: 9pt; font-weight: 800; color: #000000; margin-top: 12px;">
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="color: #dc2626; font-size: 11pt;">📍</span>
+          <span style="color: #dc2626; font-size: 12pt;">📍</span>
           <span>Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212</span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 11pt;">🎧</span>
+          <span style="font-size: 12pt;">🎧</span>
           <span>01723854472, 01624787444</span>
         </div>
       </div>
@@ -694,44 +741,44 @@ export function printDepartmentA4Report(
     const pageTemplate = `
       <div style="border: none; padding: 0; min-height: ${usePadMode ? '228mm' : '265mm'}; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #000000;">
         <div>
-          ${figmaDigitalHeaderHtml}
-          ${demographicsHtml}
+          ${figmaHeaderHtml}
+          ${patientDetailsHtml}
 
-          <!-- DEPARTMENT TITLE OVER RESULTS -->
-          <div style="text-align: center; margin: 10px 0 6px 0;">
+          <!-- DEPARTMENT TITLE -->
+          <div style="text-align: center; margin: 8px 0 6px 0;">
             <span style="font-size: 11pt; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: #000000;">
               DEPARTMENT OF ${departmentBannerTitle}
             </span>
           </div>
 
-          <!-- RESULTS TABLE -->
+          <!-- RESULTS TABLE (EXACT CBC 4-COLUMN WITH ESR & NO CARTOON HISTOGRAMS) -->
           ${testsTableHtml}
           ${remarksHtml}
         </div>
 
-        <!-- DUAL SIGNATURES (ONLY AFTER VERIFICATION) & FOOTER -->
+        <!-- DUAL SIGNATURES (AFTER VERIFICATION) & FOOTER -->
         <div>
           ${isVerified ? `
-            <div style="margin-top: 22px; padding-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-              <div style="text-align: center; width: 240px;">
+            <div style="margin-top: 18px;margin-bottom: -28px; padding-top: 6px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+              <div style="text-align: center; width: 230px;">
                 ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
                 <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 800; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
+                  <div style="font-weight: 700; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
                   <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
                 </div>
               </div>
-              <div style="text-align: center; width: 240px;">
+              <div style="text-align: center; width: 230px;">
                 ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
                 <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 800; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
+                  <div style="font-weight: 700; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
                   <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
                 </div>
               </div>
             </div>
           ` : `
-            <div style="height: 50px;"></div>
+            <div style="height: 48px;"></div>
           `}
-          ${figmaDigitalFooterHtml}
+          ${figmaFooterHtml}
         </div>
       </div>
     `;
@@ -760,9 +807,8 @@ export function printDepartmentA4Report(
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
           @page { 
             size: A4 portrait; 
-            /* EXACT FIGMA SPEC: 132px on 1050px = 37.5mm top; 72px on 1050px = 20.5mm bottom */
             margin-top: ${usePadMode ? '38mm' : '8mm'}; 
-            margin-bottom: ${usePadMode ? '20mm' : '8mm'}; 
+            margin-bottom: ${usePadMode ? '21mm' : '8mm'}; 
             margin-left: 8mm; 
             margin-right: 8mm; 
           }
@@ -781,12 +827,13 @@ export function printDepartmentA4Report(
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 300);
 }
+
 // =========================================================================
 // 2. A5 RECEIPT PRINT DRIVER
 // =========================================================================
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
-    receiptNo: "RCP-2026-1001",
+    receiptNo: "RCP-0914-001",
     date: new Date().toISOString().slice(0, 10),
     patient: { id: "P-1001", name: "Patient", age: "30", gender: "Male", phone: "N/A", doctor: "Self" },
     tests: [],
@@ -827,13 +874,10 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     <div style="border: none; padding: 0; min-height: 190mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: 'Consolas', 'Courier New', Courier, monospace; color: #000; font-size: 8.5pt;">
       <div>
         <div style="border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            ${labSettings?.logo_data ? `<img src="${labSettings.logo_data}" style="height: 38px; max-width: 110px; object-fit: contain;" />` : ""}
-            <div>
-              <h1 style="margin: 0; font-size: 12pt; font-weight: 900; letter-spacing: 0.5px;">${(labSettings?.lab_name || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER").toUpperCase()}</h1>
-              <p style="margin: 1px 0; font-size: 7.5pt; color: #334155;">${labSettings?.tagline || "Clinical Diagnostic Reference Laboratory"}</p>
-              <p style="margin: 0; font-size: 7pt; color: #475569;">${labSettings?.address || "Solmaid Purbo Para, Vatara, Dhaka 1212"} • Tel: ${labSettings?.phone || "01723854472, 01624787444"}</p>
-            </div>
+          <div>
+            <h1 style="margin: 0; font-size: 13pt; font-weight: 900; letter-spacing: 0.5px;">AL FATTAH DIAGNOSTIC & CONSULTATION CENTER</h1>
+            <p style="margin: 1px 0; font-size: 7.5pt; color: #334155;">With Al-Fattah on the Journey to Wellness</p>
+            <p style="margin: 0; font-size: 7pt; color: #475569;">Solmaid Purbo Para, Vatara, Dhaka 1212 • Tel: 01723854472, 01624787444</p>
           </div>
           <div style="border: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 7.5pt; text-transform: uppercase;">MONEY RECEIPT</div>
         </div>
@@ -899,7 +943,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             <span style="font-size: 7pt; font-weight: bold;">AUTHORIZED CASHIER</span>
           </div>
         </div>
-        <p style="text-align: center; margin: 4px 0 0 0; font-size: 6.5pt; color: #475569;">${labSettings?.receipt_footer || "Scan QR to check live report status & download results."}</p>
+        <p style="text-align: center; margin: 4px 0 0 0; font-size: 6.5pt; color: #475569;">Scan QR to check live report status & download results.</p>
       </div>
     </div>
   `;
@@ -938,17 +982,13 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   }, 250);
 }
 
-// In src/utils/printHelpers.js -> replace printSpecificVialBarcode:
-
-// =========================================================================
-// 3. VIAL BARCODE LABEL PRINT DRIVER (50mm x 25mm FULL-HEIGHT STRETCH)
-// =========================================================================
 export function printSpecificVialBarcode(vial, onPrintedCallback) {
   if (!vial) return;
   if (onPrintedCallback) onPrintedCallback();
 
-  // Full-height 42px vector barcode filling the middle zone
-  const svgBarcode = generateSvgBarcodeHtml(vial.testBarcode, 42);
+  const exactVialBarcode = String(vial.testBarcode || vial.barcode || "").trim();
+  // Calibrated to 32px so 2 lines of test names fit comfortably below
+  const svgBarcode = generateSvgBarcodeHtml(exactVialBarcode, 32);
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -965,33 +1005,37 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Vial - ${vial.testBarcode}</title>
+        <title>Vial - ${exactVialBarcode}</title>
         <style>
           @page { 
-            size: 50mm 25mm; 
+            size: 38mm 25mm; 
             margin: 0mm; 
           }
           * { 
             box-sizing: border-box; 
             -webkit-print-color-adjust: exact !important; 
             print-color-adjust: exact !important; 
+            shape-rendering: crispEdges !important;
+            text-rendering: geometricPrecision !important;
           }
           html, body { 
             margin: 0; 
             padding: 0; 
-            width: 50mm; 
+            width: 38mm; 
             height: 25mm; 
             max-height: 25mm; 
+            max-width: 38mm;
             overflow: hidden; 
             background: #ffffff; 
             color: #000000; 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
           }
           .sticker-container {
-            width: 50mm;
+            width: 38mm;
             height: 25mm;
             max-height: 25mm;
-            padding: 0.6mm .6mm 0.6mm .6mm;
+            max-width: 38mm;
+            padding: 0.8mm 1.2mm 0.8mm 1.2mm;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -1002,67 +1046,89 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
             display: flex; 
             justify-content: space-between; 
             align-items: flex-end; 
-            font-size: 7.5pt; 
-            border-bottom: 1px solid #000000; 
+            font-size: 7pt; 
+            font-weight: 700;
+            color: #000000;
+            border-bottom: 0.8px solid #000000; 
             padding-bottom: 0.3mm; 
             margin: 0;
-            line-height: 1;
+            line-height: 1.3;
           }
           .barcode-area { 
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             flex: 1;
             margin: 0;
-            padding: 0;
+            padding: 0.2mm 0;
           }
           .barcode-area svg {
-            height: 14mm;
-            max-height: 14.5mm;
+            height: 13.5mm;
+            max-height: 14mm;
             width: 96%;
             margin: 0 auto;
             display: block;
           }
           .barcode-number {
-            font-size: 8pt;
+            font-size: 7.5pt;
             font-family: 'Consolas', 'Courier New', monospace;
-            font-weight: 800;
+            font-weight: 900;
+            color: #000000;
             margin: 0;
             padding: 0;
-            letter-spacing: 0.8px;
+            letter-spacing: 0.6px;
             line-height: 1;
           }
+          /* MULTI-LINE TEST FOOTER (ALLOWS UP TO 2 LINES OF TESTS) */
           .footer { 
             display: flex; 
             justify-content: space-between; 
-            align-items: flex-start; 
-            font-size: 6.5pt; 
-            border-top: 1px solid #000000; 
-            padding-top: 0.3mm; 
+            align-items: center; 
+            border-top: 0.8px solid #000000; 
+            padding-top: 0.4mm; 
             margin: 0;
-            line-height: 1;
+            line-height: 1.1;
+          }
+          .tube-badge {
+            font-size: 6.5pt;
+            font-weight: 800;
+            color: #000000;
+            flex-shrink: 0;
+            margin-right: 4px;
+          }
+          .test-names {
+            font-size: 5.5pt;
+            font-weight: 700;
+            color: #000000;
+            text-align: right;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 2; /* Wraps up to 2 full lines */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            max-width: 28mm;
           }
         </style>
       </head>
       <body>
         <div class="sticker-container">
-          <!-- TOP HEADER -->
+          <!-- TOP ROW -->
           <div class="header">
-            <span style="font-weight: 800; max-width: 28mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${vial.patientName || "Patient"}</span>
-            <span style="font-weight: 800; font-family: 'Consolas', monospace;">${vial.patientId || ""}</span>
+            <span style="max-width: 22mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${vial.patientName || "Patient"}</span>
+            <span style="font-family: 'Consolas', monospace;">${vial.patientId || ""}</span>
           </div>
 
-          <!-- FULL-HEIGHT EXPANDED BARCODE AREA (ZERO WASTED GAP) -->
+          <!-- CRISP BARCODE -->
           <div class="barcode-area">
             ${svgBarcode}
-            <p class="barcode-number">${vial.testBarcode}</p>
+            <p class="barcode-number">${exactVialBarcode}</p>
           </div>
 
-          <!-- BOTTOM FOOTER -->
+          <!-- MULTI-LINE WRAPPED FOOTER -->
           <div class="footer">
-            <span style="font-weight: 700;">${(vial.tubeColor || "").split(" ")[0]}</span>
-            <span style="font-weight: 700; max-width: 32mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(vial.testNames || []).join(", ")}</span>
+            <span class="tube-badge">${(vial.tubeColor || "").split(" ")[0]}</span>
+            <span class="test-names">${(vial.testNames || []).join(", ")}</span>
           </div>
         </div>
       </body>

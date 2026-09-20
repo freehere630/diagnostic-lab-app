@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
-
+import { getAllOrderVials } from "../utils/printHelpers";
 export default function Dashboard({
   orders = [],
   departments = [],
@@ -43,14 +43,29 @@ export default function Dashboard({
     setLocalOrders(orders);
   }, [orders]);
 
-  // STRICT TIME SORTING: Latest registration on top
-  const sortedOrders = useMemo(() => {
-    return [...localOrders].sort((a, b) => {
-      const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
-      const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
-      return timeB - timeA;
-    });
-  }, [localOrders]);
+const sortedOrders = useMemo(() => {
+    const q = dashboardSearch.trim().toLowerCase();
+
+    return [...localOrders]
+      .filter((ord) => {
+        if (!q) return true;
+        const orderVials = getAllOrderVials(ord);
+        const allBarcodes = [ord.barcode, ...orderVials.map(v => v.barcode)].filter(Boolean);
+
+        // SEARCH MATCHES PRIMARY BARCODE OR ANY SECONDARY VIAL BARCODE
+        return (
+          allBarcodes.some(b => String(b).toLowerCase().includes(q)) ||
+          (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
+          (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q)) ||
+          (ord.patient?.phone && ord.patient.phone.includes(q))
+        );
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
+        const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
+        return timeB - timeA;
+      });
+  }, [localOrders, dashboardSearch]);
 
   // REPEAT SAMPLE RECOLLECTION FILTER
   const recollectionOrders = useMemo(() => {
