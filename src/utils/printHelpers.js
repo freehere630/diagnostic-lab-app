@@ -875,11 +875,11 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
       <div>
         <div style="border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h1 style="margin: 0; font-size: 13pt; font-weight: 900; letter-spacing: 0.5px;">AL FATTAH DIAGNOSTIC & CONSULTATION CENTER</h1>
+            <h1 style="margin: 0; font-size: 13pt; font-weight: 900; letter-spacing: .5px;">AL FATTAH DIAGNOSTIC & CONSULTATION CENTER</h1>
             <p style="margin: 1px 0; font-size: 7.5pt; color: #334155;">With Al-Fattah on the Journey to Wellness</p>
             <p style="margin: 0; font-size: 7pt; color: #475569;">Solmaid Purbo Para, Vatara, Dhaka 1212 • Tel: 01723854472, 01624787444</p>
           </div>
-          <div style="border: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 7.5pt; text-transform: uppercase;">MONEY RECEIPT</div>
+          <div style="border: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 5pt; text-transform: uppercase;">MONEY RECEIPT</div>
         </div>
 
         <div style="border: 1px dashed #000; padding: 6px 8px; margin-bottom: 10px; font-size: 8pt; background: #fafafa;">
