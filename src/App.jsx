@@ -177,8 +177,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // 3. Paginated Orders Fetch
-  const fetchPaginatedOrders = async () => {
+const fetchPaginatedOrders = async () => {
     if (!currentUser) return;
     setIsLoading(true);
     try {
@@ -190,13 +189,39 @@ export default function App() {
         searchQuery: dashboardSearch
       });
 
+      const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+
       const formatted = (res.orders || []).map((o, idx) => {
-        const matchedTests = (o.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
-        
+        // Hydrate tests from testCatalog so department/tube_color is never lost
+        const matchedTests = (o.order_tests || []).map(ot => {
+          const rawTest = ot.test || ot.tests || {};
+          const testId = ot.test_id || rawTest.id || ot.id;
+          const fromCat = (testCatalog || []).find(t => t.id === testId || (t.code && t.code === rawTest.code)) || {};
+
+          return {
+            ...fromCat,
+            ...rawTest,
+            id: testId,
+            name: rawTest.name || fromCat.name || "Investigation",
+            code: rawTest.code || fromCat.code || "",
+            dept_id: rawTest.dept_id || fromCat.dept_id || rawTest.deptId || fromCat.deptId || "DEP-BIO",
+            deptId: rawTest.dept_id || fromCat.dept_id || rawTest.deptId || fromCat.deptId || "DEP-BIO",
+            tube_color: rawTest.tube_color || fromCat.tube_color || rawTest.tubeColor || fromCat.tubeColor || "Red / Yellow (SST / Plain Clot)",
+            sample_type: rawTest.sample_type || fromCat.sample_type || "Blood"
+          };
+        }).filter(Boolean);
+
         const resolvedDoctor = 
           (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
             ? o.patient.address.replace("Ref: ", "") 
             : (o.patient?.doctor || o.doctor || "Self");
+
+        const localMatch = localOrders.find(lo => (lo.orderId || lo.id) === (o.id || o.orderId));
+        const resolvedVials = (Array.isArray(o.vials) && o.vials.length > 0)
+          ? o.vials
+          : (localMatch?.vials && localMatch.vials.length > 0)
+            ? localMatch.vials
+            : [];
 
         return {
           orderId: o.id || o.orderId,
@@ -215,7 +240,7 @@ export default function App() {
             doctor: resolvedDoctor
           },
           tests: matchedTests.length > 0 ? matchedTests : (o.tests || []),
-          vials: o.vials || [],
+          vials: resolvedVials,
           billing: o.billing || { 
             subTotal: parseFloat(o.subtotal) || 0, 
             discount: parseFloat(o.discount_percent) || 0, 
@@ -285,23 +310,22 @@ export default function App() {
 const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
     
-    // Resolves unique physical vials for each department
-    const resolvedVials = getAllOrderVials(activeOrder);
+    // Pass testCatalog so department IDs and tube colors are accurately resolved
+    const resolvedVials = getAllOrderVials(activeOrder, testCatalog);
     
     return resolvedVials.map((v) => ({
       deptCode: v.deptCode || "GEN",
-      testBarcode: v.barcode || activeOrder.barcode,
+      testBarcode: v.barcode || v.testBarcode || activeOrder.barcode,
       patientId: activeOrder.patient?.id || "P-1001",
       patientName: activeOrder.patient?.name || "Patient",
       tubeColor: v.tubeColor || "Standard",
-      // FIX: ONLY SHOW TESTS BELONGING TO THIS SPECIFIC VIAL!
       testNames: v.testNames && v.testNames.length > 0 
         ? v.testNames 
         : (activeOrder.tests || [])
             .filter(t => (t.dept_id || t.deptId || "").replace("DEP-", "") === v.deptCode)
             .map(t => t.code || t.name)
     }));
-  }, [activeOrder]);
+  }, [activeOrder, testCatalog]);
 
   const departmentGroupedReports = useMemo(() => {
     if (!activeOrder?.tests) return [];

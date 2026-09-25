@@ -449,10 +449,6 @@ export async function getAllOrders() {
   });
 }
 
-// In src/services/api.js -> replace createNewOrder:
-
-// In src/services/api.js -> replace createNewOrder:
-
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
   const patientId = patientData.id && patientData.id.trim() 
     ? patientData.id.trim() 
@@ -460,22 +456,32 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
 
-  // 1. DEPARTMENT-LEVEL PHYSICAL VIAL GROUPING (1 Tube per Department, Excludes Imaging & ECG)
+  // 1. DEPARTMENT-LEVEL PHYSICAL VIAL GROUPING (1 Tube / Sticker per Department)
   const departmentVials = [];
   selectedTests.forEach((t) => {
-    const d = (t.dept_id || t.deptId || "").toUpperCase();
-    const s = (t.sample_type || "").toLowerCase();
-    const c = (t.code || "").toUpperCase();
-    const isImaging = d.includes("RAD") || d.includes("USG") || d.includes("CT") || d.includes("MRI") || d.includes("CARD") ||
-                      s.includes("no specimen") || s.includes("imaging") || s.includes("tracing") || c.includes("ECG") || c.includes("XRAY");
-    if (isImaging) return; // Skip specimen-less tests!
+    let deptId = (t.dept_id || t.deptId || "").toUpperCase();
+    const code = (t.code || "").toUpperCase();
+    const name = (t.name || "").toUpperCase();
 
-    const deptId = t.dept_id || t.deptId || "DEP-GEN";
-    const deptCode = deptId.replace("DEP-", "");
-    const tubeColor = (t.tube_color || "Standard").split(" ")[0]; // "Red", "Purple", "Grey"
+    if (!deptId || deptId === "DEP-GEN") {
+      if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
+      else if (code.includes("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
+      else if (code.includes("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
+      else if (code.includes("ECG")) deptId = "DEP-CARD";
+      else deptId = "DEP-BIO";
+    }
+
+    const deptCode = deptId.replace("DEP-", "").replace("-CBC", "");
+    let tubeColor = (t.tube_color || t.tubeColor || "Standard").trim();
+    if (tubeColor === "Standard") {
+      if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
+      else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD")) tubeColor = "Imaging Requisition";
+      else tubeColor = "Red / Yellow (SST / Plain Clot)";
+    }
+    const tubeShort = tubeColor.split(" ")[0];
     
-    // GROUP BY DEPARTMENT + TUBE COLOR (Every department gets its own vial!)
-    const key = `${deptCode}-${tubeColor}`;
+    // Group by department + tube color
+    const key = `${deptCode}-${tubeShort}`;
 
     if (!departmentVials.some((v) => v.key === key)) {
       departmentVials.push({ 
@@ -502,6 +508,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   // Assign barcodes to each department vial
   departmentVials.forEach((v, i) => {
     v.barcode = barcodeList[i];
+    v.testBarcode = barcodeList[i];
   });
 
   const primaryBarcode = barcodeList[0];
@@ -527,7 +534,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
 
-  // 4. Save Order (Save lastBarcode to database so next order never collides!)
+  // 4. Save Order
   const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
   const finalDiscountPercent = discount || 0;
   const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
@@ -538,7 +545,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const orderRow = {
     id: orderId,
     patient_id: patientId,
-    barcode: lastBarcode, // Stored to guarantee next order starts on the next number!
+    barcode: primaryBarcode,
     order_date: todayDate,
     created_at: nowIso,
     subtotal: subTotal,
@@ -576,7 +583,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       address: `Ref: ${referringDoctor}`
     },
     tests: selectedTests,
-    vials: departmentVials, // Each department has its own barcode
+    vials: departmentVials, // Preserves the distinct vials with their barcodes
     order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
     billing: { subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaid, due: finalDue },
     results: {},
@@ -587,7 +594,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    localStorage.setItem("apex_local_orders", JSON.stringify([completeOrder, ...local]));
+    localStorage.setItem("apex_local_orders", JSON.stringify([completeOrder, ...local.filter(o => o.orderId !== orderId && o.id !== orderId)]));
   } catch (e) {}
 
   return completeOrder;

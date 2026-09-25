@@ -82,14 +82,28 @@ export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = 
   );
 }
 
-// =========================================================================
-// VIAL BARCODE RESOLVER (DYNAMICALLY ASSIGNS UNIQUE VIAL PER DEPARTMENT)
-// =========================================================================
-export function getAllOrderVials(order) {
-  if (!order || !order.tests) return [];
+export function getAllOrderVials(order, catalog = []) {
+  if (!order) return [];
 
-  // If order already has pre-assigned physical vials array, normalize and return it
-  if (Array.isArray(order.vials) && order.vials.length > 0) {
+  // Normalize tests array and hydrate from catalog if fields are missing
+  const rawTests = order.tests && order.tests.length > 0 ? order.tests : [];
+  const tests = rawTests.map(t => {
+    const testId = t.id || t.test_id;
+    const fromCat = (catalog || []).find(c => c.id === testId || (c.code && c.code === t.code)) || {};
+    return {
+      ...fromCat,
+      ...t,
+      id: testId,
+      code: t.code || fromCat.code || "",
+      name: t.name || fromCat.name || "Investigation",
+      dept_id: t.dept_id || t.deptId || fromCat.dept_id || fromCat.deptId || "",
+      tube_color: t.tube_color || t.tubeColor || fromCat.tube_color || fromCat.tubeColor || "",
+      sample_type: t.sample_type || t.sampleType || fromCat.sample_type || fromCat.sampleType || ""
+    };
+  });
+
+  // If order already has pre-assigned distinct physical vials, use them
+  if (Array.isArray(order.vials) && order.vials.length > 1) {
     return order.vials.map(v => ({
       deptId: v.deptId || "DEP-GEN",
       deptCode: v.deptCode || "GEN",
@@ -105,15 +119,48 @@ export function getAllOrderVials(order) {
   const baseNum = parseInt(String(order.barcode || "202600001").replace(/\D/g, ""), 10) || 202600001;
   let counter = 0;
 
-  for (const test of order.tests) {
-    if (isImagingOrRadiologyInvestigation(test, test.dept_id || test.deptId)) {
-      continue;
+  for (const test of tests) {
+    const code = (test.code || "").toUpperCase();
+    const name = (test.name || "").toUpperCase();
+    let deptId = (test.dept_id || test.deptId || "").toUpperCase();
+
+    // Auto-detect Department if missing or generic
+    if (!deptId || deptId === "DEP-GEN") {
+      if (code.includes("CBC") || name.includes("BLOOD COUNT") || name.includes("HEMOGLOBIN")) {
+        deptId = "DEP-HEM";
+      } else if (code.includes("XRAY") || name.includes("X-RAY")) {
+        deptId = "DEP-RAD";
+      } else if (code.includes("USG") || name.includes("ULTRASO")) {
+        deptId = "DEP-USG";
+      } else if (code.includes("CT") || name.includes("CT SCAN")) {
+        deptId = "DEP-CTMRI";
+      } else if (code.includes("ECG") || name.includes("ELECTROCARDIOGRAM")) {
+        deptId = "DEP-CARD";
+      } else if (name.includes("URINE") || name.includes("STOOL")) {
+        deptId = "DEP-PAT";
+      } else {
+        deptId = "DEP-BIO";
+      }
     }
 
-    const deptId = test.dept_id || test.deptId || "DEP-GEN";
-    const deptCode = deptId.replace("DEP-", "");
-    const tubeColor = (test.tube_color || "Standard").split(" ")[0];
-    const key = `${deptCode}-${tubeColor}`; // 1 Unique Vial Per Department!
+    const deptCode = deptId.replace("DEP-", "").replace("-CBC", "");
+
+    // Resolve Specimen Tube / Container Label
+    let tubeColor = (test.tube_color || test.tubeColor || "").trim();
+    if (!tubeColor || tubeColor === "Standard") {
+      if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
+      else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD") || deptCode.includes("CT")) {
+        tubeColor = "Imaging Requisition";
+      } else if (deptCode.includes("PAT") && name.includes("URINE")) {
+        tubeColor = "Sterile Urine Cup";
+      } else {
+        tubeColor = "Red / Yellow (SST / Plain Clot)";
+      }
+    }
+
+    const tubeShort = tubeColor.split(" ")[0];
+    // Key uniquely identifies Department + Tube: Each Department gets its own Vial!
+    const key = `${deptCode}-${tubeShort}`;
 
     if (!vials[key]) {
       const vialBarcode = String(baseNum + counter);
@@ -128,11 +175,23 @@ export function getAllOrderVials(order) {
       };
       counter++;
     }
+
     vials[key].testIds.push(test.id, test.code);
     vials[key].testNames.push(test.code || test.name);
   }
 
-  return Object.values(vials);
+  const result = Object.values(vials);
+  return result.length > 0 ? result : [
+    {
+      deptId: "DEP-GEN",
+      deptCode: "GEN",
+      tubeColor: "Standard",
+      barcode: order.barcode || "202600001",
+      testBarcode: order.barcode || "202600001",
+      testIds: [],
+      testNames: ["General Investigation"]
+    }
+  ];
 }
 
 export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
