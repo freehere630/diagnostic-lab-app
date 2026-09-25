@@ -217,7 +217,7 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
 
             {/* Header Theme Color Presets */}
             <div className="border-t pt-3">
-              <label className="font-bold text-slate-700 uppercase block mb-1.5 flex items-center gap-1.5">
+              <label className="font-bold text-slate-700 uppercase-block mb-1.5 flex items-center gap-1.5">
                 <Palette className="w-3.5 h-3.5 text-purple-600" /> Printed Header Background Color
               </label>
               <div className="flex flex-wrap gap-2 items-center">

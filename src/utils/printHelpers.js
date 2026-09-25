@@ -578,7 +578,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   }
 
   // Standard table logic remains...
-
+}
 export function printDepartmentA4Report(
   targetDeptId = "ALL", 
   activeOrder, 
