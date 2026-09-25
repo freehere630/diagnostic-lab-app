@@ -344,6 +344,10 @@ const departmentalVials = useMemo(() => {
         groupKey = "DEP-HEM-CBC";
         groupName = "Hematology & Coagulation";
         groupIcon = "🩸";
+      } else if (code.includes("URINE") || name.includes("URINE")) {
+        groupKey = "DEP-PAT-URINE";
+        groupName = "Clinical Pathology & Urine Analysis";
+        groupIcon = "🧫";
       }
 
       if (!grouped[groupKey]) {

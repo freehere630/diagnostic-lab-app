@@ -153,7 +153,8 @@ export async function getMasterData() {
       if (!finalDepts.some((d) => d.id === defDept.id)) finalDepts.push(defDept);
     });
 
-    const updatedTests = await ensureSilent5PartCBC(tests || []);
+    let updatedTests = await ensureSilent5PartCBC(tests || []);
+    updatedTests = await ensureSilentUrineRME(updatedTests || []);
 
     return { 
       departments: finalDepts, 
@@ -164,6 +165,7 @@ export async function getMasterData() {
     return { departments: DEFAULT_DEPARTMENTS, tests: [] };
   }
 }
+
 
 // 1-Click Seed Standard Radiology & Imaging Catalog
 export async function seedRadiologyCatalog() {
@@ -887,34 +889,73 @@ export async function deleteStaffUser(userId) {
   await supabase.from("users").delete().eq("id", userId);
 }
 
-// ==========================================
-// 12. HOSPITAL BRANDING & SETTINGS
-// ==========================================
+export const DEFAULT_LAB_SETTINGS = {
+  id: "MAIN_SETTINGS",
+  lab_name: "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER",
+  tagline: "With Al-Fattah on the Journey to Wellness",
+  address: "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212",
+  phone: "01723854472, 01624787444",
+  email: "alfattahdiagnostic@gmail.com",
+  website: "www.alfattahlab.com",
+  logo_data: "",
+  header_bg: "#20122e",
+  header_color: "#ffffff",
+  receipt_footer: "Please scan the QR code to check real-time report status & download results.",
+  report_footer: ""
+};
+
 export async function getLabSettings() {
   try {
-    const { data } = await supabase.from("lab_settings").select("*").eq("id", "MAIN_SETTINGS").maybeSingle();
-    return data || null;
+    const { data, error } = await supabase.from("lab_settings").select("*").eq("id", "MAIN_SETTINGS").maybeSingle();
+    if (!error && data && data.lab_name) {
+      try { localStorage.setItem("apex_lab_settings", JSON.stringify(data)); } catch (e) {}
+      return data;
+    }
   } catch (err) {
-    return null;
+    console.warn("Lab settings cloud fetch notice:", err);
   }
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_lab_settings") || "null");
+    if (local && local.lab_name) return local;
+  } catch (e) {}
+
+  return DEFAULT_LAB_SETTINGS;
 }
 
 export async function saveLabSettings(settingsData) {
-  const { data } = await supabase.from("lab_settings").upsert({
+  const payload = {
     id: "MAIN_SETTINGS",
-    lab_name: settingsData.labName || settingsData.lab_name,
-    tagline: settingsData.tagline,
-    address: settingsData.address,
-    phone: settingsData.phone,
-    email: settingsData.email,
-    website: settingsData.website,
-    logo_data: settingsData.logoData || settingsData.logo_data,
-    receipt_footer: settingsData.receiptFooter || settingsData.receipt_footer,
-    report_footer: settingsData.reportFooter || settingsData.report_footer,
-    report_design: settingsData.reportDesign || settingsData.report_design || {},
-    receipt_design: settingsData.receiptDesign || settingsData.receipt_design || {}
-  }).select().single();
-  return data;
+    lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name,
+    tagline: settingsData.tagline || DEFAULT_LAB_SETTINGS.tagline,
+    address: settingsData.address || DEFAULT_LAB_SETTINGS.address,
+    phone: settingsData.phone || DEFAULT_LAB_SETTINGS.phone,
+    email: settingsData.email || DEFAULT_LAB_SETTINGS.email,
+    website: settingsData.website || DEFAULT_LAB_SETTINGS.website,
+    logo_data: settingsData.logo_data || settingsData.logoData || "",
+    header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
+    header_color: settingsData.header_color || settingsData.headerColor || "#ffffff",
+    receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
+    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer
+  };
+
+  // 1. Guaranteed local persistence
+  try {
+    localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
+  } catch (e) {}
+
+  // 2. Sync to Supabase if table exists
+  try {
+    const { data, error } = await supabase.from("lab_settings").upsert(payload).select().single();
+    if (!error && data) {
+      localStorage.setItem("apex_lab_settings", JSON.stringify(data));
+      return data;
+    }
+  } catch (err) {
+    console.warn("Cloud save notice for lab settings:", err.message);
+  }
+
+  return payload;
 }
 export async function getNextSequentialBarcode(count = 1) {
   const yearPrefix = String(new Date().getFullYear()); // "2026"
@@ -966,4 +1007,130 @@ export async function getNextSequentialBarcode(count = 1) {
   } catch (e) {}
 
   return count === 1 ? generatedBarcodes[0] : generatedBarcodes;
+}
+// Add near top of src/services/api.js:
+
+export const MASTER_URINE_PARAMETERS = [
+  // 1. Physical Examination
+  { name: "Color", unit: "", min: null, max: null, type: "text", defaultRef: "Pale Yellow / Straw" },
+  { name: "Appearance / Clarity", unit: "", min: null, max: null, type: "text", defaultRef: "Clear" },
+  { name: "Specific Gravity", unit: "", min: 1.005, max: 1.030, type: "numeric", defaultRef: "1.005 – 1.030" },
+  { name: "Reaction / pH", unit: "", min: 5.0, max: 8.0, type: "text", defaultRef: "Acidic (5.5 – 7.0)" },
+  { name: "Sediment", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+
+  // 2. Chemical / Dipstick Examination
+  { name: "Albumin / Protein", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
+  { name: "Sugar / Glucose", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
+  { name: "Ketone Bodies", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative / Nil" },
+  { name: "Bilirubin", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Urobilinogen", unit: "", min: null, max: null, type: "text", defaultRef: "Normal (< 1 mg/dL)" },
+  { name: "Nitrite", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Leukocyte Esterase", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Bile Salt", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Bile Pigment", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+
+  // 3. Microscopic Examination
+  { name: "Pus Cells (WBC)", unit: "/HPF", min: 0, max: 4, type: "text", defaultRef: "0 – 4 /HPF" },
+  { name: "Epithelial Cells", unit: "/HPF", min: 1, max: 5, type: "text", defaultRef: "1 – 5 /HPF" },
+  { name: "Red Blood Cells (RBC)", unit: "/HPF", min: 0, max: 2, type: "text", defaultRef: "Nil (0 – 2 /HPF)" },
+  { name: "Casts", unit: "/LPF", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Crystals", unit: "/HPF", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Calcium Oxalate", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Amorphous Urates / Phosphates", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Bacteria", unit: "", min: null, max: null, type: "text", defaultRef: "Nil / Not Found" },
+  { name: "Yeast Cells / Fungi", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Trichomonas Vaginalis", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" }
+];
+
+// Silent auto-seeder for Urine R/M/E
+async function ensureSilentUrineRME(existingTests = []) {
+  const urineTestId = "T-URINE-RME";
+  const existingUrine = existingTests.find(
+    (t) =>
+      t.id === urineTestId ||
+      (t.code || "").toUpperCase() === "URINE-RME" ||
+      (t.name || "").toLowerCase().includes("urine r/m/e") ||
+      (t.name || "").toLowerCase().includes("urine routine")
+  );
+
+  const existingParams = existingUrine ? (existingUrine.test_parameters || existingUrine.parameters || []) : [];
+
+  if (existingUrine && existingParams.length >= 18) {
+    return existingTests;
+  }
+
+  try {
+    await supabase.from("departments").upsert({
+      id: "DEP-PAT",
+      name: "Clinical Pathology & Urine",
+      icon: "🧫"
+    });
+
+    const targetId = existingUrine?.id || urineTestId;
+
+    await supabase.from("tests").upsert({
+      id: targetId,
+      code: "URINE-RME",
+      name: "Urine Routine & Microscopic Examination (R/M/E)",
+      dept_id: "DEP-PAT",
+      price: 250,
+      sample_type: "Clean Catch Midstream Urine",
+      tube_color: "Sterile Urine Cup",
+      is_profile: true,
+      is_available: true
+    });
+
+    if (existingParams.length < 18) {
+      await supabase.from("test_parameters").delete().eq("test_id", targetId);
+    }
+
+    const paramRows = MASTER_URINE_PARAMETERS.map((p, idx) => ({
+      id: `P-URN-${String(idx + 1).padStart(2, "0")}`,
+      test_id: targetId,
+      name: p.name,
+      param_type: p.type === "qualitative" ? "qualitative" : "text",
+      unit: p.unit,
+      min_range: p.min,
+      max_range: p.max,
+      reference_text: p.defaultRef
+    }));
+
+    await supabase.from("test_parameters").insert(paramRows);
+
+    const { data: updatedUrine } = await supabase
+      .from("tests")
+      .select("*, test_parameters(*)")
+      .eq("id", targetId)
+      .single();
+
+    if (updatedUrine) {
+      return [updatedUrine, ...existingTests.filter((t) => t.id !== targetId)];
+    }
+  } catch (err) {
+    console.warn("Silent Urine RME verification notice:", err.message);
+  }
+
+  const inMemoryUrine = {
+    id: urineTestId,
+    code: "URINE-RME",
+    name: "Urine Routine & Microscopic Examination (R/M/E)",
+    dept_id: "DEP-PAT",
+    price: 250,
+    sample_type: "Clean Catch Midstream Urine",
+    tube_color: "Sterile Urine Cup",
+    is_profile: true,
+    is_available: true,
+    test_parameters: MASTER_URINE_PARAMETERS.map((p, idx) => ({
+      id: `P-URN-${String(idx + 1).padStart(2, "0")}`,
+      test_id: urineTestId,
+      name: p.name,
+      param_type: p.type,
+      unit: p.unit,
+      min_range: p.min,
+      max_range: p.max,
+      reference_text: p.defaultRef
+    }))
+  };
+
+  return [inMemoryUrine, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== "URINE-RME")];
 }
