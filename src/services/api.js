@@ -623,16 +623,29 @@ export async function settleOrderDue(orderId, collectedAmount) {
 
 // ==========================================
 // 8. TEST RESULT ENTRY & VERIFICATION
-// ==========================================
 export async function saveTestResult(orderId, parameterId, resultValue, statusFlag = "ENTERED") {
+  if (!orderId || !parameterId || String(parameterId).trim() === "" || parameterId === "undefined") {
+    console.warn("Skipping saveTestResult due to invalid parameter ID:", { orderId, parameterId });
+    return null;
+  }
+
+  // Sanitize: Never save literal "undefined" or "null" string to database
+  const cleanValue = (
+    resultValue === undefined || 
+    resultValue === null || 
+    String(resultValue).trim() === "undefined" || 
+    String(resultValue).trim() === "null"
+  ) ? "" : String(resultValue).trim();
+
   const { data, error } = await supabase
     .from("results")
     .upsert({ 
       order_id: orderId, 
-      parameter_id: parameterId, 
-      result_value: String(resultValue).trim(), 
+      parameter_id: String(parameterId).trim(), 
+      result_value: cleanValue, 
       status_flag: statusFlag 
     }, { onConflict: "order_id,parameter_id" });
+
   if (error) throw error;
   return data;
 }

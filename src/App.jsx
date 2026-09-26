@@ -426,14 +426,40 @@ const departmentalVials = useMemo(() => {
     }
   };
 
-  const handleResultInput = async (paramId, val) => {
+const handleResultInput = async (paramId, val) => {
     if (!activeOrder || activeOrder.isLocked) return;
+    if (!paramId || String(paramId).trim() === "" || paramId === "undefined") {
+      console.warn("handleResultInput aborted: invalid paramId", paramId);
+      return;
+    }
+
+    // Clean value before updating state
+    const cleanVal = (
+      val === undefined || 
+      val === null || 
+      String(val).trim() === "undefined" || 
+      String(val).trim() === "null"
+    ) ? "" : String(val).trim();
+
     const previousOrders = [...orders];
-    setOrders((prev) => prev.map((o) => (o.orderId === activeOrder.orderId ? { ...o, results: { ...o.results, [paramId]: { value: val } } } : o)));
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.orderId === activeOrder.orderId
+          ? { 
+              ...o, 
+              results: { 
+                ...o.results, 
+                [paramId]: { value: cleanVal } 
+              } 
+            }
+          : o
+      )
+    );
+
     setSaveStatus({ state: "saving", message: "Saving result to cloud..." });
 
     try {
-      await saveTestResult(activeOrder.orderId, paramId, val, "ENTERED");
+      await saveTestResult(activeOrder.orderId, paramId, cleanVal, "ENTERED");
       setSaveStatus({ state: "saved", message: "Result saved" });
       setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 2000);
     } catch (e) {
