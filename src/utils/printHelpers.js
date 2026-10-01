@@ -757,14 +757,14 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         refRange = "Negative";
       }
 
-      const valStyle = "font-family: 'Inter', -apple-system, sans-serif; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 10pt; color: #000000;";
+      const valStyle = "font-family: 'Inter', -apple-system, sans-serif; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 8pt; color: #000000;";
 
       tableRows += `
         <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 5px 4px; font-size: 9.5pt; color: #000000; font-weight: 600; vertical-align: top;">${displayName}</td>
+          <td style="padding: 5px 4px; font-size: 8pt; color: #000000; font-weight: 600; vertical-align: top;">${displayName}</td>
           <td style="padding: 5px 4px; ${valStyle}; vertical-align: top;">${val}</td>
-          <td style="padding: 5px 4px; font-size: 9pt; color: #000000; vertical-align: top;">${p.unit || test.unit || "—"}</td>
-          <td style="padding: 5px 4px; font-size: 8.5pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.4; vertical-align: top;">${refRange}</td>
+          <td style="padding: 5px 4px; font-size: 8pt; color: #000000; vertical-align: top;">${p.unit || test.unit || "—"}</td>
+          <td style="padding: 5px 4px; font-size: 8pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.4; vertical-align: top;">${refRange}</td>
         </tr>
       `;
     });
@@ -907,7 +907,7 @@ export function printDepartmentA4Report(
               <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 10pt; font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
             </tr>
             <tr>
-              <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
+              <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600;">${doctorName}</b></td>
               <td style="padding: 4px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
               <td style="padding: 4px 0;">${sixthSlotDemographics}</td>
             </tr>
@@ -921,7 +921,7 @@ export function printDepartmentA4Report(
     `;
 
     const figmaFooterHtml = usePadMode ? "" : `
-      <div style="min-height: 38px; box-sizing: border-box; border-top: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 0 4px; font-size: 8.5pt; font-weight: 800; color: #000000; margin-top: 8px;">
+      <div style="max-height: 38px; box-sizing: border-box; border-top: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 0 4px; font-size: 8.5pt; font-weight: 800; color: #000000; margin-top: 8px;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="color: #dc2626; font-size: 11pt;">📍</span>
           <span>${curAddress}</span>
@@ -971,9 +971,7 @@ export function printDepartmentA4Report(
             <div style="height: 38px;"></div>
           `}
           
-          <div style="text-align: center; font-size: 6.5pt; color: #64748b; margin-top: 8px;">
-            ${curReportFooter}
-          </div>
+          
 
           ${figmaFooterHtml}
         </div>
@@ -1225,6 +1223,7 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
           html, body { 
             margin: 0; 
             padding: 0; 
+            padding-left: .65mm;
             width: 38mm; 
             height: 25mm; 
             max-height: 25mm; 
@@ -1251,7 +1250,7 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
             justify-content: space-between; 
             align-items: flex-end; 
             font-size: 7pt; 
-            font-weight: 700;
+            font-weight: 500;
             color: #000000;
             border-bottom: 0.8px solid #000000; 
             padding-bottom: 0.3mm; 
@@ -1295,14 +1294,14 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
           }
           .tube-badge {
             font-size: 6.5pt;
-            font-weight: 800;
+            font-weight: 500;
             color: #000000;
             flex-shrink: 0;
             margin-right: 4px;
           }
           .test-names {
             font-size: 5.5pt;
-            font-weight: 700;
+            font-weight: 500;
             color: #000000;
             text-align: right;
             word-break: break-word;
