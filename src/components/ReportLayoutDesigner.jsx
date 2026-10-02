@@ -1,4 +1,3 @@
-// src/components/ReportLayoutDesigner.jsx
 import React, { useRef, useState, useEffect } from "react";
 import {
   Type, Image as ImageIcon, Building2, Minus, Square, Bold, Italic, Underline,
@@ -49,7 +48,7 @@ export default function ReportLayoutDesigner({ layout, onChange, settings }) {
   const [zone, setZone] = useState("header");
   const [selId, setSelId] = useState(null);
   const [editId, setEditId] = useState(null);
-  const [zoom, setZoom] = useState(0.9);
+  const [zoom, setZoom] = useState(1);
   const past = useRef([]);
   const future = useRef([]);
   const drag = useRef(null);
@@ -208,54 +207,106 @@ export default function ReportLayoutDesigner({ layout, onChange, settings }) {
     if (!w) return;
     const merged = { ...settings, report_layout: currentLayout };
     w.document.write(
-      `<!doctype html><html><head><title>Letterhead test print</title><style>@page{size:2,480px 3508px;margin:0}html,body{margin:0}body{width:2,480px;height:3508px;display:flex;flex-direction:column;justify-content:space-between;font-family:Arial,sans-serif}.mid{padding:20px 28px;color:#888;font-size:13px}</style></head><body>${buildReportHeaderHtml(merged)}<div class="mid">[ Patient details and results appear here ]</div>${buildReportFooterHtml(merged)}</body></html>`
+      `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>A4 Letterhead Test Print</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 210mm;
+      min-height: 297mm;
+      background: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 297mm;
+    }
+    .mid {
+      flex: 1;
+      margin: 20px 28px;
+      padding: 24px;
+      border: 1.5px dashed #cbd5e1;
+      border-radius: 8px;
+      color: #94a3b8;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  ${buildReportHeaderHtml(merged)}
+  <div class="mid">[ Patient Demographics, Clinical Investigation Results Table & Dual Signatures appear here ]</div>
+  ${buildReportFooterHtml(merged)}
+</body>
+</html>`
     );
     w.document.close();
-    setTimeout(() => w.print(), 400);
+    setTimeout(() => {
+      w.focus();
+      w.print();
+    }, 350);
   };
 
-const renderEl = (el, active) => {
+  const renderEl = (el, active) => {
     const selected = active && el.id === selId;
     const editing = active && el.id === editId;
     return (
-    <div
-    key={el.id}
-    style={{
-    ...elementStyle(el),
-    cursor: active ? (editing ? "text" : "move") : "inherit",
-    outline: selected ? "1.5px solid #2563eb" : undefined,
-    userSelect: editing ? "text" : "none",
-    touchAction: "none",
-    }}
-    className={active && !selected ? "hover:ring-1 hover:ring-blue-400" : ""}
-    onPointerDown={active && !editing ? (e) => startDrag(e, el, "move") : undefined}
-    onDoubleClick={active && el.type === "text" ? () => setEditId(el.id) : undefined}
-    >
-    {editing ? (
-    <div
-    contentEditable suppressContentEditableWarning spellCheck={false}
-    ref={(n) => { if (n && document.activeElement !== n) n.focus(); }}
-    onBlur={(e) => { patchEl(el.id, { text: e.currentTarget.innerText }); setEditId(null); }}
-    onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") e.currentTarget.blur(); }}
-    style={{ outline: "none", minHeight: "100%", whiteSpace: "pre-wrap" }}
-    >
-    {el.text}
-    </div>
-    ) : (
-    <div
-    style={{ width: "100%", height: "100%", pointerEvents: "none" }}
-    dangerouslySetInnerHTML={{ __html: elementInnerHtml(el, settings) }}
-    />
-    )}
-    {selected && !editing && (
-    <span
-    onPointerDown={(e) => startDrag(e, el, "resize")}
-    style={{ position: "absolute", right: -5, bottom: -5, width: 10, height: 10, background: "#2563eb", border: "1px solid #fff", cursor: "nwse-resize" }}
-    />
-    )}
-    </div>
+      <div
+        key={el.id}
+        style={{
+          ...elementStyle(el),
+          cursor: active ? (editing ? "text" : "move") : "inherit",
+          outline: selected ? "1.5px solid #2563eb" : undefined,
+          userSelect: editing ? "text" : "none",
+          touchAction: "none",
+        }}
+        className={active && !selected ? "hover:ring-1 hover:ring-blue-400" : ""}
+        onPointerDown={active && !editing ? (e) => startDrag(e, el, "move") : undefined}
+        onDoubleClick={active && el.type === "text" ? () => setEditId(el.id) : undefined}
+      >
+        {editing ? (
+          <div
+            contentEditable suppressContentEditableWarning spellCheck={false}
+            ref={(n) => { if (n && document.activeElement !== n) n.focus(); }}
+            onBlur={(e) => { patchEl(el.id, { text: e.currentTarget.innerText }); setEditId(null); }}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") e.currentTarget.blur(); }}
+            style={{ outline: "none", minHeight: "100%", whiteSpace: "pre-wrap" }}
+          >
+            {el.text}
+          </div>
+        ) : (
+          <div
+            style={{ width: "100%", height: "100%", pointerEvents: "none" }}
+            dangerouslySetInnerHTML={{ __html: elementInnerHtml(el, settings) }}
+          />
+        )}
+        {selected && !editing && (
+          <span
+            onPointerDown={(e) => startDrag(e, el, "resize")}
+            style={{ position: "absolute", right: -5, bottom: -5, width: 10, height: 10, background: "#2563eb", border: "1px solid #fff", cursor: "nwse-resize" }}
+          />
+        )}
+      </div>
     );
-};
+  };
 
   const renderZone = (kind) => {
     const z = currentLayout[kind];
@@ -290,7 +341,7 @@ const renderEl = (el, active) => {
   return (
     <div className="space-y-3 text-xs text-slate-800">
       <div className="bg-white border border-slate-200 rounded-2xl p-3 space-y-2.5 shadow-sm">
-        {/* Top Action Ribbon */}
+        {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-1.5">
           <Btn title="Undo (Ctrl+Z)" onClick={undo}><Undo2 className="w-4 h-4" /></Btn>
           <Btn title="Redo (Ctrl+Y)" onClick={redo}><Redo2 className="w-4 h-4" /></Btn>
@@ -320,16 +371,15 @@ const renderEl = (el, active) => {
           <span className="flex-1" />
           <Btn title="Zoom out" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))}><ZoomOut className="w-4 h-4" /></Btn>
           <span className="w-10 text-center font-mono font-bold">{Math.round(zoom * 100)}%</span>
-          <Btn title="Zoom in" onClick={() => setZoom((z) => Math.min(1.3, +(z + 0.1).toFixed(2)))}><ZoomIn className="w-4 h-4" /></Btn>
-          <Btn title="Print a test page" onClick={testPrint}><Printer className="w-4 h-4" /> Test print</Btn>
+          <Btn title="Zoom in" onClick={() => setZoom((z) => Math.min(1.5, +(z + 0.1).toFixed(2)))}><ZoomIn className="w-4 h-4" /></Btn>
+          <Btn title="Print an exact A4 test page" onClick={testPrint}><Printer className="w-4 h-4" /> A4 Test Print</Btn>
         </div>
 
-        {/* Formatting row */}
+        {/* Selected Element Controls */}
         <div className="flex flex-wrap items-center gap-2 min-h-[32px] border-t pt-2.5">
           {!sel ? (
             <span className="text-slate-500">
-              💡 Click an item to format it. Drag to move, use the blue corner square to resize, double-click text to edit,
-              arrow keys to nudge. Dynamic fields like <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-blue-700">{"{{phone}}"}</code> automatically fill with Hospital Details.
+              💡 Exact A4 canvas (794px × 1123px). Drag to move, use the blue corner square to resize, double-click text to edit.
             </span>
           ) : (
             <>
@@ -375,7 +425,7 @@ const renderEl = (el, active) => {
           )}
         </div>
 
-        {/* Section/Zone Settings */}
+        {/* Zone Controls */}
         <div className="flex flex-wrap items-center gap-2 border-t pt-2.5">
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 font-bold">
             {["header", "footer"].map((k) => (
@@ -415,9 +465,9 @@ const renderEl = (el, active) => {
         </div>
       </div>
 
-      {/* Interactive Page Canvas */}
-      <div className="bg-slate-200 rounded-2xl border border-slate-300 p-4 overflow-auto shadow-inner" style={{ maxHeight: "75vh" }}>
-        <div style={{ width: REPORT_PAGE.width * zoom, height: REPORT_PAGE.height * zoom, margin: "0 auto" }}>
+      {/* A4 Canvas Area */}
+      <div className="bg-slate-200 rounded-2xl border border-slate-300 p-4 overflow-auto shadow-inner flex justify-center" style={{ maxHeight: "78vh" }}>
+        <div style={{ width: REPORT_PAGE.width * zoom, height: REPORT_PAGE.height * zoom, margin: "0 auto", flexShrink: 0 }}>
           <div
             ref={canvasRef} tabIndex={0}
             onKeyDown={onKeyDown}

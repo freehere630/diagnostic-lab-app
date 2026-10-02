@@ -1,5 +1,5 @@
-// src/utils/reportLayout.js
-export const REPORT_PAGE = { width: 2480, height: 3508 };
+// Exact A4 dimensions in CSS pixels at standard 96 DPI (210mm x 297mm)
+export const REPORT_PAGE = { width: 794, height: 1123 };
 
 export const FIELD_TOKENS = [
   { token: "{{lab_name}}", key: "lab_name", label: "Lab name" },
@@ -11,6 +11,7 @@ export const FIELD_TOKENS = [
 ];
 
 const SANS = "Arial, Helvetica, sans-serif";
+
 export const newId = () => "el-" + Math.random().toString(36).slice(2, 9);
 
 const text = (id, x, y, w, h, t, o = {}) => ({
@@ -35,11 +36,11 @@ export const DEFAULT_REPORT_LAYOUT = {
   version: 1,
   header: {
     height: 132,
-    bg: null, // null = follow header_bg in settings
+    bg: null,
     elements: [
       { id: "h-logo", type: "logo", x: 24, y: 22, w: 62, h: 62 },
-      text("h-tagline", 6, 90, 200, 14, "{{tagline}}", { fontSize: 9, align: "center", color: "#ffffff" }),
-      text("h-name", 250, 30, 505, 72, "{{lab_name}}", { fontSize: 26, bold: true, align: "right", color: "#ffffff" }),
+      text("h-tagline", 6, 90, 205, 14, "{{tagline}}", { fontSize: 8.5, align: "center", color: "#ffffff" }),
+      text("h-name", 220, 26, 545, 78, "{{lab_name}}", { fontSize: 24, bold: true, align: "right", color: "#ffffff" }),
     ],
   },
   footer: {
@@ -47,8 +48,8 @@ export const DEFAULT_REPORT_LAYOUT = {
     bg: "#ffffff",
     borderTop: "#222222",
     elements: [
-      text("f-address", 40, 25, 470, 22, "📍 {{address}}", { bold: true }),
-      text("f-phone", 520, 25, 220, 22, "🎧 {{phone}}", { bold: true, align: "right" }),
+      text("f-address", 24, 25, 480, 22, "📍 {{address}}", { bold: true }),
+      text("f-phone", 514, 25, 255, 22, "🎧 {{phone}}", { bold: true, align: "right" }),
     ],
   },
 };
@@ -87,9 +88,26 @@ export function getReportLayout(settings) {
       saved = null;
     }
   }
-  return saved?.header?.elements && saved?.footer?.elements ? saved : DEFAULT_REPORT_LAYOUT;
-}
 
+  // 1. If valid layout is present in settings object
+  if (saved?.header?.elements && saved?.footer?.elements) {
+    return saved;
+  }
+
+  // 2. Fallback to dedicated local storage key
+  try {
+    const rawLocal = localStorage.getItem("apex_report_layout");
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal);
+      if (parsed?.header?.elements && parsed?.footer?.elements) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
+  // 3. Fallback to default A4 layout
+  return DEFAULT_REPORT_LAYOUT;
+}
 export function elementStyle(el) {
   const base = {
     position: "absolute",
@@ -129,7 +147,6 @@ const styleToCss = (s) =>
     .join(";");
 
 const FALLBACK_LOGO = `<svg viewBox="0 0 100 100" width="100%" height="100%"><circle cx="50" cy="50" r="48" fill="#fff" stroke="#16a34a" stroke-width="2"/><path d="M 50 8 A 42 42 0 0 0 50 92 A 34 34 0 0 1 50 8 Z" fill="#dc2626"/><path d="M 36 28 L 64 28 L 64 56 C 64 70 50 78 50 78 C 50 78 36 70 36 56 Z" fill="#15803d"/><text x="50" y="58" font-size="28" font-weight="900" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif">AF</text></svg>`;
-
 const IMG_STYLE = "width:100%;height:100%;object-fit:contain;display:block";
 
 export function elementInnerHtml(el, settings) {

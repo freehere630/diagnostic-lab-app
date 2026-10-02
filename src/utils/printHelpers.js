@@ -39,6 +39,184 @@ function encodeCode128C(numericText) {
   return patternStr;
 }
 
+export function renderDepartmentReportHtml({
+  group,
+  activeOrder,
+  staffList = [],
+  labSettings = {},
+  usePadMode = false,
+  isPreview = false
+}) {
+  if (!activeOrder || !group) return "";
+
+  const orderId = activeOrder.orderId || activeOrder.id || "";
+  const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
+  const doctorName =
+    activeOrder.doctor ||
+    activeOrder.patient?.doctor ||
+    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ")
+      ? activeOrder.patient.address.replace("Ref: ", "")
+      : null) ||
+    "Self";
+
+  const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
+  const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
+  const pageQrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(deptBarcode)}`;
+  const pageQrSvg = generateQrSvgString(pageQrUrl, 52);
+
+  const techUser = staffList.find((u) => u.role === "technologist") || {
+    full_name: "Md. Al-Amin",
+    designation: isImaging
+      ? "Senior Medical Radiographer / Imaging Technologist"
+      : "BSc in Medical Technology - Senior Technologist",
+    signature_data: ""
+  };
+  const verifierUser = staffList.find(
+    (u) => u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
+  ) || {
+    full_name: "Dr. S. Rahman",
+    designation: isImaging
+      ? "MBBS, MD / FCPS - Consultant Radiologist & Physician"
+      : "MBBS, MD (Pathology) - Consultant Biochemist & Lab Incharge",
+    signature_data: ""
+  };
+
+  const renderSignatureHtml = (sigData, fallbackName) => {
+    if (!isVerified) return `<div style="height: 38px;"></div>`;
+    if (sigData && sigData.startsWith("data:image")) {
+      return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
+    }
+    return `<div style="font-family: 'Inter', -apple-system, sans-serif; font-size: 11pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center;">${sigData || fallbackName}</div>`;
+  };
+
+  const testsTableHtml = buildUnifiedResultsTable(
+    group.tests || [],
+    activeOrder.results || {},
+    group.dept?.id,
+    group.dept?.name
+  );
+  const remarksText = activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim()
+    ? activeOrder.verifierRemarks
+    : "Clinically correlated and verified with quality control standards.";
+
+  const remarksHtml = isImaging
+    ? ""
+    : `
+      <div style="margin-top: 12px; margin-left: 8mm; margin-right: 8mm; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', sans-serif;">
+        <span style="font-weight: 800; text-transform: uppercase; color: #000000; font-size: 9pt;">Pathologist Remarks:</span>
+        <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
+      </div>
+    `;
+
+  const rawDeptName = group.dept?.name || "Clinical Pathology";
+  const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
+
+  const sixthSlotDemographics = isImaging
+    ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
+    : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
+
+  let headerHtml = "";
+  if (usePadMode) {
+    if (isPreview) {
+      headerHtml = `
+        <div style="height: 38mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
+          <div>
+            <span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${(labSettings?.lab_name || "AL FATTAH DIAGNOSTIC").toUpperCase()}</span>
+            <p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: 38mm Margin Reserved — Skipped in Physical Print ]</p>
+          </div>
+          <span style="background: #e2e8f0; color: #334155; font-weight: 800; font-size: 7pt; padding: 3px 8px; border-radius: 4px; letter-spacing: 0.5px;">PAD MODE</span>
+        </div>
+      `;
+    } else {
+      headerHtml = "";
+    }
+  } else {
+    headerHtml = buildReportHeaderHtml(labSettings);
+  }
+
+  const patientDetailsHtml = `
+    <div style="padding: 10px 8px; border: 1.5px solid #000000; border-radius: 5px; margin: 6px 8mm 0px 8mm; font-size: 9.5pt; color: #000000;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
+          <tr>
+            <td style="padding: 4px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 10pt; font-weight: 700;">${activeOrder.patient?.name || "Patient"}</b></td>
+            <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
+            <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 9pt; font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600;">${doctorName}</b></td>
+            <td style="padding: 4px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
+            <td style="padding: 4px 0;">${sixthSlotDemographics}</td>
+          </tr>
+        </table>
+        <div style="width: 52px; text-align: center; margin-left: 8px; flex-shrink: 0;">
+          ${pageQrSvg}
+          <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  let footerHtml = "";
+  if (usePadMode) {
+    if (isPreview) {
+      footerHtml = `
+        <div style="height: 21mm; margin-top: 6px; border-top: 1.5px dashed #cbd5e1; background: #f8fafc; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 7.5pt; box-sizing: border-box;">
+          [ Pre-Printed Pad Footer: 21mm Margin Reserved — Skipped in Physical Print ]
+        </div>
+      `;
+    } else {
+      footerHtml = "";
+    }
+  } else {
+    footerHtml = buildReportFooterHtml(labSettings);
+  }
+
+  const minHeightCss = isPreview
+    ? '297mm'
+    : (usePadMode ? '237mm' : '296mm');
+
+  return `
+    <div style="padding: 0; margin: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${minHeightCss}; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; background: #ffffff; color: #000000; width: 100%;">
+      <div style="flex-grow: 1;">
+        ${headerHtml}
+        ${patientDetailsHtml}
+        <div style="text-align: center; margin: 10px 0 6px 0;">
+          <span style="font-size: 11pt; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: #000000;">
+            DEPARTMENT OF ${cleanDeptName}
+          </span>
+        </div>
+        ${testsTableHtml}
+        ${remarksHtml}
+      </div>
+      <div style="margin-top: auto; flex-shrink: 0;">
+        ${isVerified ? `
+          <div style="margin: ${usePadMode ? '16px 8mm 6px 8mm' : '22px 8mm 10px 8mm'}; padding-top: 4px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+            <div style="text-align: center; width: 230px;">
+              ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
+              <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
+                <div style="font-weight: 700; font-size: 9pt; color: #000000;">${techUser.full_name}</div>
+                <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
+              </div>
+            </div>
+            <div style="text-align: center; width: 230px;">
+              ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
+              <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
+                <div style="font-weight: 700; font-size: 9pt; color: #000000;">${verifierUser.full_name}</div>
+                <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
+              </div>
+            </div>
+          </div>
+        ` : `
+          <div style="height: 38px;"></div>
+        `}
+        ${footerHtml}
+      </div>
+    </div>
+  `;
+}
+
+
 export function generateSvgBarcodeHtml(codeText, height = 32) {
   const pattern = encodeCode128C(codeText || "2026000001");
   let x = 0;
@@ -251,7 +429,7 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
 
   return `
     <div style="margin-top: 10px; margin-bottom: 16px; font-family: 'Inter', -apple-system, sans-serif;">
-      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 800; font-size: 10pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
+      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 800; font-size: 9pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
         <span>Investigation: ${test.name.toUpperCase()} ${test.code ? `(${test.code})` : ""}</span>
         <span style="font-size: 8.5pt; color: #000000; font-weight: 700;">${deptName || "Imaging"}</span>
       </div>
@@ -277,7 +455,7 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
         ${impression ? `
           <div style="margin-top: 14px; padding: 6px 0 0 0; border-top: 1px solid #cbd5e1;">
             <b style="color: #000000; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Radiological Impression:</b>
-            <div style="font-size: 10pt; color: #000000; line-height: 1.5; font-weight: 800;">${impression}</div>
+            <div style="font-size: 9pt; color: #000000; line-height: 1.5; font-weight: 800;">${impression}</div>
           </div>
         ` : ""}
       </div>
@@ -357,151 +535,151 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const rdwcv = findVal(["RDW CV", "RDW-CV"], "13.3");
 
   return `
-    <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 4px;">
+    <table style="width: 92%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 4px; margin-right: 8mm; margin-left: 8mm;">
       <thead>
-        <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt;">
-          <th style="padding: 6px 4px; text-align: left; width: 44%; font-weight: 800; border: none;">Investigation / Parameter</th>
-          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
-          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
-          <th style="padding: 6px 4px; text-align: left; width: 20%; font-weight: 800; border: none;">Biological Ref. Range</th>
+        <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; ">
+          <th style="padding: 6px 4px; text-align: left; width: 44%; font-weight: 700; border: none;">Investigation / Parameter</th>
+          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 700; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 20%; font-weight: 700; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt;">Haemoglobin (Hb)</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${hb}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 9pt;">Haemoglobin (Hb)</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${hb}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">g/dL</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 13.0 - 17.0<br>Female: 11.5 - 15.0</td>
         </tr>
         <tr style="border-bottom: 1px dashed #cbd5e1;">
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt;">ESR (Westergren Method)</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${esr}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 9pt;">ESR (Westergren Method)</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${esr}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">mm/1st hr</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 0 - 10<br>Female: 0 - 20</td>
         </tr>
         <tr>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL LEUCOCYTE COUNT (WBC)</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${wbcDisplay}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 9pt; text-transform: uppercase;">TOTAL LEUCOCYTE COUNT (WBC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${wbcDisplay}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">4,000 - 11,000</td>
         </tr>
         <tr>
-          <td colspan="4" style="padding: 4px 4px; font-weight: 800; text-decoration: underline; text-transform: uppercase; font-size: 9.5pt;">
+          <td colspan="4" style="padding: 4px 4px; font-weight: 700; text-decoration: underline; text-transform: uppercase; font-size: 9.5pt;">
             DIFFERENTIAL LEUCOCYTE COUNT (%)
           </td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Neutrophils</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${neut}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-size: 9pt; font-variant-numeric: tabular-nums;">${neut}</td>
+          <td style="padding: 2.5px 4px; font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">40 - 75</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Lymphocytes</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${lymph}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-size: 9pt; font-variant-numeric: tabular-nums;">${lymph}</td>
+          <td style="padding: 2.5px 4px; font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">20 - 45</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Monocytes</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${mono}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-size: 9pt; font-variant-numeric: tabular-nums;">${mono}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">2 - 10</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Eosinophils</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${eos}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-size: 9pt; font-variant-numeric: tabular-nums;">${eos}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">1 - 6</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Basophils</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-size: 10pt; font-variant-numeric: tabular-nums;">${baso}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-size: 9pt; font-variant-numeric: tabular-nums;">${baso}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">0 - 1</td>
         </tr>
         <tr style="border-bottom: 1px dashed #cbd5e1;">
-          <td style="padding: 3.5px 4px; font-weight: 800; text-transform: uppercase;">Total Circulating Eosinophils (AEC)</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${aec}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; text-transform: uppercase;">Total Circulating Eosinophils (AEC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${aec}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">40 - 450</td>
         </tr>
         <tr>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL PLATELET COUNT</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${pltDisplay}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 9pt; text-transform: uppercase;">TOTAL PLATELET COUNT</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${pltDisplay}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">/cumm</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">1,50,000 - 4,50,000</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Platelet Volume (MPV)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mpv}</td>
-          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${mpv}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">fL</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">7.0 - 11.5</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Distribution Width (PDW)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${pdw}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${pdw}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">10 - 18</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Plateletcrit (PCT)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${pct}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${pct}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">0.10 - 0.28</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Large Cell Ratio (P-LCR)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${plcr}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${plcr}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">9.0 - 45.0</td>
         </tr>
         <tr style="border-bottom: 1px dashed #cbd5e1;">
           <td style="padding: 2.5px 4px; padding-left: 14px;">Platelet Large Cell Count (P-LCC)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${plcc}</td>
-          <td style="padding: 2.5px 4px;">10^9/L</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${plcc}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">10^9/L</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">13 - 129</td>
         </tr>
         <tr>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10pt; text-transform: uppercase;">TOTAL RED BLOOD CELL COUNT (RBC)</td>
-          <td style="padding: 3.5px 4px; font-weight: 800; font-size: 10.5pt; font-variant-numeric: tabular-nums;">${rbc}</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 9pt; text-transform: uppercase;">TOTAL RED BLOOD CELL COUNT (RBC)</td>
+          <td style="padding: 3.5px 4px; font-weight: 700; font-size: 10pt; font-variant-numeric: tabular-nums;">${rbc}</td>
           <td style="padding: 3.5px 4px; font-weight: 700;">10^12/L</td>
           <td style="padding: 3.5px 4px; font-size: 8.5pt;">Male: 4.5 - 6.0<br>Female: 3.8 - 5.2</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Packed Cell Volume (PCV / Hematocrit)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${hct}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${hct}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">Male: 40 - 54<br>Female: 36 - 47</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Volume (MCV)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mcv}</td>
-          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${mcv}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">fL</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">78 - 98</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Hemoglobin (MCH)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mch}</td>
-          <td style="padding: 2.5px 4px;">pg</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${mch}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">pg</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">27 - 32</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">Mean Corpuscular Hb Concentration (MCHC)</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${mchc}</td>
-          <td style="padding: 2.5px 4px;">g/dL</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${mchc}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">g/dL</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">31 - 36</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">RDW-SD</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${rdwsd}</td>
-          <td style="padding: 2.5px 4px;">fL</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${rdwsd}</td>
+          <td style="padding: 2.5px 4px; font-weight: 700;">fL</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">35.0 - 56.0</td>
         </tr>
         <tr>
           <td style="padding: 2.5px 4px; padding-left: 14px;">RDW-CV</td>
-          <td style="padding: 2.5px 4px; font-weight: 800; font-variant-numeric: tabular-nums;">${rdwcv}</td>
-          <td style="padding: 2.5px 4px;">%</td>
+          <td style="padding: 2.5px 4px; font-weight: 700; font-variant-numeric: tabular-nums;">${rdwcv}</td>
+          <td style="padding: 2.5px 4px;font-weight: 700;">%</td>
           <td style="padding: 2.5px 4px; font-size: 8.5pt;">11.5 - 15.0</td>
         </tr>
       </tbody>
@@ -556,12 +734,12 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
   const amorphous = findVal(["Amorphous"], "Nil");
   const bacteria = findVal(["Bacteria"], "Nil");
 
-  const rowStyle = "padding: 3.5px 6px; font-size: 9pt; border-bottom: 1px solid #f1f5f9;";
-  const valStyle = "padding: 3.5px 6px; font-size: 9.5pt; font-weight: 800; color: #000; border-bottom: 1px solid #f1f5f9;";
+  const rowStyle = "padding: 3.5px 6px; font-size: 9pt; border-bottom: 1px solid #f1f5f9; ";
+  const valStyle = "padding: 3.5px 6px; font-size: 9.5pt; font-weight: 700; color: #000; border-bottom: 1px solid #f1f5f9;";
   const refStyle = "padding: 3.5px 6px; font-size: 8pt; color: #555; border-bottom: 1px solid #f1f5f9;";
 
   return `
-    <div style="margin-top: 4px; font-family: 'Inter', -apple-system, sans-serif; color: #000;">
+    <div style="margin-top: 4px; font-family: 'Inter', -apple-system, sans-serif; color: #000;margin-left: 8mm; margin-right: 8mm;">
       <div style="display: grid; grid-template-columns: 1fr 1.25fr; gap: 12px; margin-bottom: 10px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
           <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 4px 6px; font-weight: 900; font-size: 8.5pt; text-transform: uppercase;">
@@ -697,7 +875,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     if (isProfile) {
       tableRows += `
         <tr style="border-top: 1px solid #000000; border-bottom: 1px solid #000000;">
-          <td colspan="4" style="padding: 6px 4px; font-weight: 800; font-size: 10pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
+          <td colspan="4" style="padding: 6px 4px; font-weight: 800; font-size: 9pt; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
           </td>
         </tr>
@@ -791,171 +969,32 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   return standardTable + imagingSheets;
 }
 
-// 1. A4 CLINICAL REPORT PRINT DRIVER
 export function printDepartmentA4Report(
-  targetDeptId = "ALL", 
-  activeOrder, 
-  departmentGroupedReports, 
-  staffList = [], 
-  labSettings = {}, 
+  targetDeptId = "ALL",
+  activeOrder,
+  departmentGroupedReports,
+  staffList = [],
+  labSettings = {},
   onPrintedCallback,
   usePadMode = false
 ) {
   if (!activeOrder) return;
   if (onPrintedCallback) onPrintedCallback();
 
-  const curLabName = (labSettings?.lab_name || labSettings?.labName || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER").toUpperCase();
-  const curTagline = labSettings?.tagline || "With Al-Fattah on the Journey to Wellness";
-  const curAddress = labSettings?.address || "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212";
-  const curPhone = labSettings?.phone || "01723854472, 01624787444";
-  const curLogo = labSettings?.logo_data || labSettings?.logoData || "";
-  const curHeaderBg = labSettings?.header_bg || labSettings?.headerBg || "#20122e";
-  const curHeaderColor = labSettings?.header_color || labSettings?.headerColor || "#ffffff";
-  const curReportFooter = labSettings?.report_footer || labSettings?.reportFooter || "";
-
   const deptGroupsToPrint = targetDeptId === "ALL"
     ? departmentGroupedReports
     : (departmentGroupedReports || []).filter((g) => g.dept?.id === targetDeptId);
 
-  const orderId = activeOrder.orderId || activeOrder.id || "";
-  const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
-
-  const doctorName = 
-    activeOrder.doctor || 
-    activeOrder.patient?.doctor || 
-    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) || 
-    "Self";
-
+  // Generates HTML pages using the exact same generator function as on-screen preview
   const pagesHtml = (deptGroupsToPrint || []).map((group, idx) => {
-    const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
-    const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
-
-    const pageQrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(deptBarcode)}`;
-    const pageQrSvg = generateQrSvgString(pageQrUrl, 52);
-
-    const techUser = staffList.find((u) => u.role === "technologist") || { 
-      full_name: "Md. Al-Amin", 
-      designation: isImaging ? "Senior Medical Radiographer / Imaging Technologist" : "BSc in Medical Technology - Senior Technologist", 
-      signature_data: "" 
-    };
-
-    const verifierUser = staffList.find((u) => 
-      u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
-    ) || { 
-      full_name: "Dr. S. Rahman", 
-      designation: isImaging ? "MBBS, MD / FCPS - Consultant Radiologist & Physician" : "MBBS, MD (Pathology) - Consultant Biochemist & Lab Incharge", 
-      signature_data: "" 
-    };
-
-    const renderSignatureHtml = (sigData, fallbackName) => {
-      if (!isVerified) return `<div style="height: 38px;"></div>`;
-      if (sigData && sigData.startsWith("data:image")) {
-        return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
-      }
-      return `<div style="font-family: 'Inter', -apple-system, sans-serif; font-size: 11pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center;">${sigData || fallbackName}</div>`;
-    };
-
-    const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
-
-    const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
-      ? activeOrder.verifierRemarks
-      : "Clinically correlated and verified with quality control standards.";
-
-    const remarksHtml = isImaging ? "" : `
-      <div style="margin-top: 12px; margin-left: 8mm; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', sans-serif;">
-        <span style="font-weight: 800; text-transform: uppercase; color: #000000; font-size: 9pt;">Pathologist Remarks:</span> 
-        <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
-      </div>
-    `;
-
-    const rawDeptName = group.dept?.name || "Clinical Pathology";
-    const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
-
-    const sixthSlotDemographics = isImaging
-      ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
-      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
-
-    const logoBlockHtml = curLogo
-      ? `<img src="${curLogo}" style="height: 52px; max-width: 90px; object-fit: contain; display: block; margin: 0 auto 2px auto;" />`
-      : `<svg width="44" height="44" viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="48" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
-          <path d="M 50 8 A 42 42 0 0 0 50 92 A 34 34 0 0 1 50 8 Z" fill="#dc2626" />
-          <path d="M 36 28 L 64 28 L 64 56 C 64 70 50 78 50 78 C 50 78 36 70 36 56 Z" fill="#15803d" />
-          <text x="50" y="58" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" font-family="Arial, sans-serif">AF</text>
-        </svg>`;
-
-    const figmaHeaderHtml = usePadMode ? "" : buildReportHeaderHtml(labSettings);
-
-    const patientDetailsHtml = `
-      <div style="padding: 10px 8px; border: 1.5px solid #000000; border-radius: 5px; margin: 6px 8mm 0px 8mm; font-size: 9.5pt; color: #000000;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
-            <tr>
-              <td style="padding: 4px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 10.5pt; font-weight: 700;">${activeOrder.patient?.name || "Patient"}</b></td>
-              <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-              <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 10pt; font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
-            </tr>
-            <tr>
-              <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600;">${doctorName}</b></td>
-              <td style="padding: 4px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
-              <td style="padding: 4px 0;">${sixthSlotDemographics}</td>
-            </tr>
-          </table>
-          <div style="width: 52px; text-align: center; margin-left: 8px; flex-shrink: 0;">
-            ${pageQrSvg}
-            <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
-          </div>
-        </div>
-      </div>
-    `;
-
-    const figmaFooterHtml = usePadMode ? "" : buildReportFooterHtml(labSettings);
-
-    const pageTemplate = `
-      <div style="padding: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${usePadMode ? '210mm' : '297mm'}; font-family: 'Inter', sans-serif; background: #ffffff; color: #000000;">
-        <div>
-          ${figmaHeaderHtml}
-          ${patientDetailsHtml}
-
-          <div style="text-align: center; margin: 10px 0 6px 0;">
-            <span style="font-size: 11pt; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: #000000;">
-              DEPARTMENT OF ${cleanDeptName}
-            </span>
-          </div>
-
-          ${testsTableHtml}
-          ${remarksHtml}
-        </div>
-
-        <div>
-          ${isVerified ? `
-            <div style="margin: 24px 8mm 10px 8mm; padding-top: 4px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-              <div style="text-align: center; width: 230px;">
-                ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
-                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 700; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
-                  <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
-                </div>
-              </div>
-              <div style="text-align: center; width: 230px;">
-                ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
-                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 700; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
-                  <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
-                </div>
-              </div>
-            </div>
-          ` : `
-            <div style="height: 38px;"></div>
-          `}
-          
-          
-
-          ${figmaFooterHtml}
-        </div>
-      </div>
-    `;
-
+    const pageTemplate = renderDepartmentReportHtml({
+      group,
+      activeOrder,
+      staffList,
+      labSettings,
+      usePadMode,
+      isPreview: false
+    });
     const isLastPage = idx === deptGroupsToPrint.length - 1;
     return `<div style="${isLastPage ? "" : "page-break-after: always;"}">${pageTemplate}</div>`;
   }).join("");
@@ -979,15 +1018,26 @@ export function printDepartmentA4Report(
         <title>Report - ${activeOrder.barcode || activeOrder.orderId}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-          @page { 
-            size: A4 portrait; 
-            margin-top: ${usePadMode ? '38mm' : '0mm'}; 
-            margin-bottom: ${usePadMode ? '21mm' : '0mm'}; 
-            margin-left: 0mm; 
-            margin-right: 0mm; 
+          @page {
+            size: A4 portrait;
+            margin-top: ${usePadMode ? '38mm' : '0mm'};
+            margin-bottom: ${usePadMode ? '21mm' : '0mm'};
+            margin-left: 0mm;
+            margin-right: 0mm;
           }
-          * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; color: #000000; background: #fff; }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 210mm;
+            font-family: 'Inter', -apple-system, sans-serif;
+            color: #000000;
+            background: #ffffff;
+          }
         </style>
       </head>
       <body>${pagesHtml}</body>
@@ -1001,7 +1051,6 @@ export function printDepartmentA4Report(
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 350);
 }
-
 // 2. A5 RECEIPT PRINT DRIVER
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {

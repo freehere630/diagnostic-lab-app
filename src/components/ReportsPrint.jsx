@@ -1,24 +1,14 @@
-// src/components/ReportsPrint.jsx
 import React, { useState } from "react";
-import { 
-  Printer, ShieldCheck, DollarSign, AlertCircle, CheckCircle2, 
-  MessageSquare, FileText, Layers, Lock 
+import {
+  Printer, ShieldCheck, DollarSign, AlertCircle, CheckCircle2,
+  MessageSquare, FileText, Layers, Lock
 } from "lucide-react";
-import { 
-  generateQrSvgLocal, 
-  buildUnifiedResultsTable, 
-  isImagingOrRadiologyInvestigation,
-  getDepartmentVialBarcode 
-} from "../utils/printHelpers";
-import { 
-  buildReportHeaderHtml, 
-  buildReportFooterHtml 
-} from "../utils/reportLayout";
+import { renderDepartmentReportHtml } from "../utils/printHelpers";
 
-export default function ReportsPrint({ 
-  activeOrder, 
+export default function ReportsPrint({
+  activeOrder,
   currentUser,
-  departmentGroupedReports = [], 
+  departmentGroupedReports = [],
   handlePrintDepartmentA4Report,
   staffList = [],
   labSettings = {},
@@ -26,7 +16,6 @@ export default function ReportsPrint({
   handleSettleDue,
   handleRemarksChange
 }) {
-  // Pad Mode Memory (Remembers user choice between plain paper & physical letterhead)
   const [usePadMode, setUsePadMode] = useState(() => {
     return localStorage.getItem("apex_use_pad_mode") === "true";
   });
@@ -45,167 +34,20 @@ export default function ReportsPrint({
     );
   }
 
-  const orderId = activeOrder.orderId || activeOrder.id || "";
-  const qrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(activeOrder.barcode || "")}`;
-
   const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
-
-  // Receptionist permission lock: cannot print unverified reports
   const userRole = (currentUser?.role || "").toLowerCase();
   const isReceptionist = userRole === "receptionist";
   const canPrint = !isReceptionist || isVerified;
-
-  const doctorName = 
-    activeOrder.doctor || 
-    activeOrder.patient?.doctor || 
-    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) || 
+  const doctorName =
+    activeOrder.doctor ||
+    activeOrder.patient?.doctor ||
+    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) ||
     "Self";
-
-  // LIVE ON-SCREEN REPORT PREVIEW (MATCHES THE PRINTED REPORT EXACTLY)
-  const getCompiledReportPreview = (group) => {
-    const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
-
-    // Resolve Technologist & Verifier
-    const techUser = staffList.find(u => u.role === "technologist") || {
-      full_name: "Md. Al-Amin",
-      designation: isImaging ? "Senior Medical Radiographer / Imaging Technologist" : "BSc in Medical Technology - Senior Technologist",
-      signature_data: ""
-    };
-
-    const verifierUser = staffList.find(u => 
-      u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
-    ) || {
-      full_name: "Dr. S. Rahman",
-      designation: isImaging ? "MBBS, MD / FCPS - Consultant Radiologist & Physician" : "MBBS, MD (Pathology) - Consultant Biochemist & Lab Incharge",
-      signature_data: ""
-    };
-
-    // Conditional Signatures (Blank before verification)
-    const renderSignatureHtml = (sigData, fallbackName) => {
-      if (!isVerified) return `<div style="height: 38px;"></div>`;
-      if (sigData && sigData.startsWith("data:image")) {
-        return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
-      }
-      return `<div style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center; letter-spacing: 0.5px;">${sigData || fallbackName}</div>`;
-    };
-
-    const testsTableHtml = buildUnifiedResultsTable(group.tests || [], activeOrder.results || {}, group.dept?.id, group.dept?.name);
-
-    const remarksText = (activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim())
-      ? activeOrder.verifierRemarks
-      : "Clinically correlated and verified with quality control standards.";
-
-    const remarksHtml = isImaging ? "" : `
-      <div style="margin-top: 14px; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <span style="font-weight: 800; text-transform: uppercase; color: #000000; font-size: 9pt; letter-spacing: 0.5px;">Pathologist Remarks:</span> 
-        <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
-      </div>
-    `;
-
-    const departmentBannerTitle = (group.dept?.name || "Clinical Pathology").toUpperCase();
-
-    // Resolve this specific department's sequential vial barcode
-    const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
-
-    const sixthSlotDemographics = isImaging
-      ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${group.dept?.name || "Radiology"}</b>`
-      : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
-
-    // 1. DYNAMIC HEADER: Uses your Word-Style Layout Designer output (or pad mode banner)
-    const figmaDigitalHeaderHtml = usePadMode ? `
-      <div style="background: #20122e; color: #ffffff; padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 4px;">
-        <div>
-          <span style="font-size: 11pt; font-weight: 900; letter-spacing: 0.5px;">AL FATTAH DIAGNOSTIC & CONSULTATION CENTER</span>
-          <p style="font-size: 7.5pt; margin: 2px 0 0 0; color: #c7d2fe;">[Pre-Printed Header: 38mm margin reserved — Skipped on physical pad]</p>
-        </div>
-        <span style="font-size: 8pt; font-weight: bold; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 4px;">PAD MODE</span>
-      </div>
-    ` : buildReportHeaderHtml(labSettings);
-
-    // 2. INLINE PATIENT DETAILS
-    const demographicsHtml = `
-      <div style="padding: 12px 8px 12px 8px; border: 1.5px solid #000000; border-radius: 5px; margin-top: 8px; margin-bottom: 8px; font-size: 9.5pt; color: #000000;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
-            <tr>
-              <td style="padding: 6px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 10.5pt; font-weight: 900;">${activeOrder.patient?.name || "Patient"}</b></td>
-              <td style="padding: 6px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 800;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-              <td style="padding: 6px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 10pt; font-weight: 900;">${activeOrder.patient?.id || "N/A"}</b></td>
-            </tr>
-            <tr>
-              <td style="padding: 6px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 800;">${doctorName}</b></td>
-              <td style="padding: 6px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
-              <td style="padding: 6px 0;">${sixthSlotDemographics}</td>
-            </tr>
-          </table>
-          ${usePadMode ? `
-            <div style="width: 55px; text-align: center; margin-left: 8px; flex-shrink: 0;">
-              ${generateQrSvgLocal(qrUrl, 55)}
-              <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">Verify</span>
-            </div>
-          ` : ""}
-        </div>
-      </div>
-    `;
-
-    // 3. DYNAMIC FOOTER: Uses your Word-Style Layout Designer output (or pad mode placeholder)
-    const figmaDigitalFooterHtml = usePadMode ? `
-      <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #cbd5e1; text-align: center; color: #475569; font-size: 7.5pt;">
-        [Pre-Printed Footer: Solmaid Purbo Para, Vatara, Dhaka • 01723854472, 01624787444]
-      </div>
-    ` : buildReportFooterHtml(labSettings);
-
-    return `
-      <div style="border: none; padding: 4px; min-height: ${usePadMode ? '220mm' : '265mm'}; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #000000;">
-        <div>
-          ${figmaDigitalHeaderHtml}
-          ${demographicsHtml}
-
-          <!-- SIZED-UP DEPARTMENT TITLE -->
-          <div style="text-align: center; margin: 10px 0 6px 0;">
-            <span style="font-size: 11pt; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: #000000;">
-              DEPARTMENT OF ${departmentBannerTitle}
-            </span>
-          </div>
-
-          <!-- RESULTS TABLE -->
-          ${testsTableHtml}
-          ${remarksHtml}
-        </div>
-
-        <!-- DUAL SIGNATURES & DYNAMIC FOOTER -->
-        <div>
-          ${isVerified ? `
-            <div style="margin-top: 22px; padding-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-              <div style="text-align: center; width: 240px;">
-                ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
-                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 900; font-size: 10pt; color: #000000;">${techUser.full_name}</div>
-                  <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
-                </div>
-              </div>
-              <div style="text-align: center; width: 240px;">
-                ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
-                <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
-                  <div style="font-weight: 900; font-size: 10pt; color: #000000;">${verifierUser.full_name}</div>
-                  <div style="font-size: 8pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
-                </div>
-              </div>
-            </div>
-          ` : `
-            <div style="height: 50px;"></div>
-          `}
-          ${figmaDigitalFooterHtml}
-        </div>
-      </div>
-    `;
-  };
 
   const hasOutstandingDue = (activeOrder.billing?.due || 0) > 0;
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 font-sans text-slate-900">
-      
       {/* 1. DUE BALANCE BANNER */}
       {hasOutstandingDue && (
         <div className="bg-rose-50 border-2 border-rose-400 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm animate-pulse">
@@ -222,7 +64,6 @@ export default function ReportsPrint({
               </p>
             </div>
           </div>
-
           <button
             onClick={() => {
               const due = activeOrder.billing?.due;
@@ -237,7 +78,7 @@ export default function ReportsPrint({
         </div>
       )}
 
-      {/* 2. TOP HUB BAR WITH PERMISSION LOCK & 1-CLICK PAD TOGGLE */}
+      {/* 2. CONTROLS HEADER */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -257,10 +98,7 @@ export default function ReportsPrint({
           </p>
         </div>
 
-        {/* CONTROLS: PAD MODE TOGGLE & CONDITIONAL PRINT */}
         <div className="flex flex-wrap items-center gap-2.5">
-          
-          {/* 1-CLICK PAD MODE SELECTOR */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-300 text-xs font-bold">
             <button
               type="button"
@@ -291,7 +129,6 @@ export default function ReportsPrint({
             </button>
           )}
 
-          {/* PRINT BUTTON: LOCKED FOR RECEPTIONIST BEFORE VERIFICATION */}
           {canPrint ? (
             <button
               onClick={() => handlePrintDepartmentA4Report("ALL", usePadMode)}
@@ -300,7 +137,7 @@ export default function ReportsPrint({
               <Printer className="w-4 h-4" /> Print All (A4)
             </button>
           ) : (
-            <div 
+            <div
               className="px-3.5 py-2 bg-slate-100 border border-slate-300 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-not-allowed shadow-inner"
               title="Receptionists can only print reports once verified by the Doctor/Pathologist."
             >
@@ -310,7 +147,7 @@ export default function ReportsPrint({
         </div>
       </div>
 
-      {/* 3. PATHOLOGIST REMARKS */}
+      {/* 3. PATHOLOGIST REMARKS INPUT */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs">
         <label className="font-bold text-slate-800 uppercase flex items-center gap-1.5">
           <MessageSquare className="w-4 h-4 text-blue-600" />
@@ -328,12 +165,11 @@ export default function ReportsPrint({
         </div>
       </div>
 
-      {/* 4. DEPARTMENT REPORT CARDS */}
+      {/* 4. DEPARTMENT ACTION BAR */}
       <div className="space-y-4">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-          Departmental Report Sheets ({usePadMode ? "Al-Fattah Pad Mode: Pre-printed header/footer skipped" : "Plain Paper Mode: Custom letterhead layout enabled"})
+          Departmental Report Sheets ({usePadMode ? "Pad Mode: 38mm top / 21mm bottom margin guides active" : "Plain Paper Mode: Full letterhead & footer active"})
         </h3>
-
         {departmentGroupedReports.map((group) => (
           <div key={group.dept.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-200 transition">
             <div className="space-y-1">
@@ -348,7 +184,6 @@ export default function ReportsPrint({
                 Includes: <b>{group.tests.map((t) => t.name).join(" • ")}</b>
               </p>
             </div>
-
             {canPrint ? (
               <button
                 onClick={() => handlePrintDepartmentA4Report(group.dept.id, usePadMode)}
@@ -365,14 +200,28 @@ export default function ReportsPrint({
         ))}
       </div>
 
-      {/* 5. LIVE ON-SCREEN PREVIEWS (RENDERS YOUR CUSTOM WORD-STYLE LAYOUT) */}
-      <div className="space-y-6">
+      {/* 5. LINKED WYSIWYG REPORT PREVIEWS */}
+      <div className="space-y-8">
         {departmentGroupedReports.map((group) => (
-          <div 
+          <div
             key={group.dept.id}
-            className="bg-white p-6 sm:p-10 rounded-2xl border border-slate-200 shadow-lg text-slate-900 w-full overflow-x-auto"
+            className="bg-slate-200/80 p-4 sm:p-8 rounded-2xl border border-slate-300 shadow-inner flex justify-center overflow-x-auto"
           >
-            <div dangerouslySetInnerHTML={{ __html: getCompiledReportPreview(group) }} />
+            {/* Exactly simulated 210mm A4 page rendered with the identical print generator */}
+            <div
+              className="bg-white shadow-2xl rounded-none text-slate-900 w-full"
+              style={{ maxWidth: "210mm", minHeight: "297mm" }}
+              dangerouslySetInnerHTML={{
+                __html: renderDepartmentReportHtml({
+                  group,
+                  activeOrder,
+                  staffList,
+                  labSettings,
+                  usePadMode,
+                  isPreview: true
+                })
+              }}
+            />
           </div>
         ))}
       </div>

@@ -1,41 +1,42 @@
 import React, { useState, useMemo } from "react";
-import { Search, Clock, Layers, CheckCircle2, AlertCircle } from "lucide-react";
+import { Search, Clock, Layers, CheckCircle2, AlertCircle, AlertTriangle } from "lucide-react";
 import { getDepartmentVialBarcode, getAllOrderVials } from "../utils/printHelpers";
 
 export default function Worklists({ orders = [], departments = [], setSelectedOrderId, setActiveTab }) {
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [worklistSearch, setWorklistSearch] = useState("");
 
-  // SORT & FILTER: PENDING FIRST, EVERY VIAL BARCODE SEARCHABLE
   const sortedAndFiltered = useMemo(() => {
     return orders
       .filter((ord) => {
         const matchDept =
           deptFilter === "ALL" ||
           (ord.tests && ord.tests.some((t) => (t.dept_id || t.deptId) === deptFilter));
-
         const q = worklistSearch.trim().toLowerCase();
         const orderVials = getAllOrderVials(ord);
-        const allBarcodes = [ord.barcode, ...orderVials.map(v => v.barcode)].filter(Boolean);
-
-        // SEARCH MATCHES PRIMARY BARCODE OR ANY SECONDARY VIAL BARCODE
+        const allBarcodes = [ord.barcode, ...orderVials.map((v) => v.barcode)].filter(Boolean);
         const matchSearch =
           !q ||
-          allBarcodes.some(b => String(b).toLowerCase().includes(q)) ||
+          allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
           (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
           (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q));
-
         return matchDept && matchSearch;
       })
       .sort((a, b) => {
+        const statusA = (a.sample_status || a.sampleStatus || "").toLowerCase();
+        const statusB = (b.sample_status || b.sampleStatus || "").toLowerCase();
+        const isRepeatA = statusA.includes("repeat") && !statusA.includes("recollected");
+        const isRepeatB = statusB.includes("repeat") && !statusB.includes("recollected");
+
+        // Urgent repeat recollections on top
+        if (isRepeatA && !isRepeatB) return -1;
+        if (!isRepeatA && isRepeatB) return 1;
+
         const isPendingA = (a.qcStatus || a.qc_status) !== "Verified" && !a.isLocked;
         const isPendingB = (b.qcStatus || b.qc_status) !== "Verified" && !b.isLocked;
-
-        // 1. PENDING SAMPLES COME FIRST
         if (isPendingA && !isPendingB) return -1;
         if (!isPendingA && isPendingB) return 1;
 
-        // 2. NEWEST TIMESTAMP ON TOP WITHIN SAME STATUS
         const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
         const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
         return timeB - timeA;
@@ -60,8 +61,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
 
   return (
     <div className="space-y-6 w-full font-sans text-slate-800">
-      
-      {/* Top Filter Bar */}
+      {/* HEADER BAR */}
       <div className="bg-white p-4 rounded-2xl border flex flex-wrap gap-3 items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
@@ -97,7 +97,6 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
               <option key={d.id} value={d.id}>{d.icon} {d.name}</option>
             ))}
           </select>
-
           <div className="relative w-64">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
@@ -111,7 +110,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
         </div>
       </div>
 
-      {/* Worklists Table */}
+      {/* TABLE */}
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
         <table className="w-full text-left text-xs">
           <thead>
@@ -134,12 +133,20 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
             ) : (
               sortedAndFiltered.map((o) => {
                 const isPending = (o.qcStatus || o.qc_status) !== "Verified" && !o.isLocked;
+                const statusStr = (o.sample_status || o.sampleStatus || "").toLowerCase();
+                const isRepeat = statusStr.includes("repeat") && !statusStr.includes("recollected");
                 const orderVials = getAllOrderVials(o);
 
                 return (
-                  <tr 
-                    key={o.orderId} 
-                    className={`transition ${isPending ? "bg-amber-50/30 hover:bg-amber-100/50" : "hover:bg-slate-50 opacity-80"}`}
+                  <tr
+                    key={o.orderId || o.id}
+                    className={`transition ${
+                      isRepeat
+                        ? "bg-rose-50/60 hover:bg-rose-100/60"
+                        : isPending
+                        ? "bg-amber-50/30 hover:bg-amber-100/50"
+                        : "hover:bg-slate-50 opacity-80"
+                    }`}
                   >
                     <td className="py-3 px-4 font-mono text-slate-600">
                       <span className="flex items-center gap-1 font-bold text-slate-800">
@@ -149,7 +156,6 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                       <span className="text-[10px] text-slate-400 block">{o.date}</span>
                     </td>
 
-                    {/* SHOWS ALL ASSIGNED VIAL BARCODES WITH TUBE COLORS */}
                     <td className="py-3 px-4 font-mono font-bold text-xs">
                       {deptFilter === "ALL" ? (
                         <div className="flex flex-wrap gap-1.5 max-w-xs">
@@ -185,30 +191,49 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                       </div>
                     </td>
 
+                    {/* QC STATUS COLUMN WITH REPEAT DETECTION */}
                     <td className="py-3 px-4">
-                      <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] ${
-                        o.qcStatus === "Verified" 
-                          ? "bg-emerald-100 text-emerald-800" 
-                          : "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold"
-                      }`}>
-                        {o.qcStatus}
-                      </span>
+                      {isRepeat ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 w-fit">
+                          <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Required
+                        </span>
+                      ) : (
+                        <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] ${
+                          o.qcStatus === "Verified"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold"
+                        }`}>
+                          {o.qcStatus || "Pending"}
+                        </span>
+                      )}
                     </td>
 
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => { 
-                          setSelectedOrderId(o.orderId); 
-                          setActiveTab("verifier"); 
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition shadow-sm ${
-                          isPending 
-                            ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20" 
-                            : "bg-slate-900 hover:bg-slate-800 text-white"
-                        }`}
-                      >
-                        {isPending ? "Enter Results ➔" : "Review / Edit ➔"}
-                      </button>
+                      {isRepeat ? (
+                        <button
+                          onClick={() => {
+                            setSelectedOrderId(o.orderId || o.id);
+                            setActiveTab("verifier");
+                          }}
+                          className="px-3 py-1.5 rounded-lg font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-1 ml-auto transition active:scale-95"
+                        >
+                          <AlertTriangle className="w-3 h-3" /> Recollect Sample ➔
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setSelectedOrderId(o.orderId || o.id);
+                            setActiveTab("verifier");
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-xs transition shadow-sm ${
+                            isPending
+                              ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20"
+                              : "bg-slate-900 hover:bg-slate-800 text-white"
+                          }`}
+                        >
+                          {isPending ? "Enter Results ➔" : "Review / Edit ➔"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -217,7 +242,6 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
           </tbody>
         </table>
       </div>
-
     </div>
   );
 }

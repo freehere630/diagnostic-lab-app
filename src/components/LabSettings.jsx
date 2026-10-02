@@ -13,22 +13,24 @@ export default function LabSettings({ labSettings, handleSaveSettings, isLoading
   const [formData, setFormData] = useState(DEFAULT_LAB_SETTINGS);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
     if (labSettings) {
-      setFormData({
-        lab_name: labSettings.lab_name || labSettings.labName || DEFAULT_LAB_SETTINGS.lab_name,
-        tagline: labSettings.tagline || DEFAULT_LAB_SETTINGS.tagline,
-        address: labSettings.address || DEFAULT_LAB_SETTINGS.address,
-        phone: labSettings.phone || DEFAULT_LAB_SETTINGS.phone,
-        email: labSettings.email || DEFAULT_LAB_SETTINGS.email,
-        website: labSettings.website || DEFAULT_LAB_SETTINGS.website,
-        logo_data: labSettings.logo_data || labSettings.logoData || "",
-        header_bg: labSettings.header_bg || labSettings.headerBg || "#20122e",
-        header_color: labSettings.header_color || labSettings.headerColor || "#ffffff",
-        receipt_footer: labSettings.receipt_footer || labSettings.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
-        report_footer: labSettings.report_footer || labSettings.reportFooter || DEFAULT_LAB_SETTINGS.report_footer,
-        report_layout: getReportLayout(labSettings)
-      });
+      const resolvedLayout = getReportLayout(labSettings);
+      setFormData((prev) => ({
+        ...prev,
+        lab_name: labSettings.lab_name || labSettings.labName || prev.lab_name || DEFAULT_LAB_SETTINGS.lab_name,
+        tagline: labSettings.tagline || prev.tagline || DEFAULT_LAB_SETTINGS.tagline,
+        address: labSettings.address || prev.address || DEFAULT_LAB_SETTINGS.address,
+        phone: labSettings.phone || prev.phone || DEFAULT_LAB_SETTINGS.phone,
+        email: labSettings.email || prev.email || DEFAULT_LAB_SETTINGS.email,
+        website: labSettings.website || prev.website || DEFAULT_LAB_SETTINGS.website,
+        logo_data: labSettings.logo_data || labSettings.logoData || prev.logo_data || "",
+        header_bg: labSettings.header_bg || labSettings.headerBg || prev.header_bg || "#20122e",
+        header_color: labSettings.header_color || labSettings.headerColor || prev.header_color || "#ffffff",
+        receipt_footer: labSettings.receipt_footer || labSettings.receiptFooter || prev.receipt_footer || DEFAULT_LAB_SETTINGS.receipt_footer,
+        report_footer: labSettings.report_footer || labSettings.reportFooter || prev.report_footer || DEFAULT_LAB_SETTINGS.report_footer,
+        report_layout: resolvedLayout || prev.report_layout || DEFAULT_REPORT_LAYOUT
+      }));
     }
   }, [labSettings]);
 

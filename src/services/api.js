@@ -670,57 +670,89 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
 // ==========================================
 export async function requestSampleRecollection(orderId, reason = "Hemolyzed Specimen", remarks = "") {
   const fullRemarks = `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim();
-  const { data, error } = await supabase
-    .from("orders")
-    .update({
-      sample_status: "Repeat Collection Required",
-      qc_status: "Pending",
-      verifier_remarks: fullRemarks
-    })
-    .eq("id", orderId);
+  const targetId = String(orderId || "").trim();
 
-  if (error) throw error;
+  // 1. Supabase Cloud update with safe fallback
+  try {
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        sample_status: "Repeat Collection Required",
+        qc_status: "Pending",
+        verifier_remarks: fullRemarks
+      })
+      .eq("id", targetId);
 
+    if (error) {
+      console.warn("Supabase error on reject, retrying with remarks only:", error.message);
+      await supabase.from("orders").update({ verifier_remarks: fullRemarks }).eq("id", targetId);
+    }
+  } catch (err) {
+    console.warn("Supabase cloud notice on reject:", err);
+  }
+
+  // 2. Always update local storage immediately
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const updated = local.map((o) =>
-      (o.id === orderId || o.orderId === orderId)
-        ? { ...o, sample_status: "Repeat Collection Required", verifierRemarks: fullRemarks }
-        : o
-    );
-    localStorage.setItem("apex_local_orders", JSON.stringify(updated));
-  } catch (e) {}
-
-  return data;
-}
-
-export async function markSampleRecollected(orderId) {
-  // Clears the flag from BOTH sample_status AND verifier_remarks
-  const { data, error } = await supabase
-    .from("orders")
-    .update({
-      sample_status: "Sample Recollected",
-      verifier_remarks: "New sample recollected. In laboratory analysis."
-    })
-    .eq("id", orderId);
-
-  if (error) throw error;
-
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    const updated = local.map((o) =>
-      (o.id === orderId || o.orderId === orderId)
-        ? { 
-            ...o, 
-            sample_status: "Sample Recollected", 
-            verifierRemarks: "New sample recollected. In laboratory analysis." 
+      (o.id === targetId || o.orderId === targetId || o.barcode === targetId)
+        ? {
+            ...o,
+            sample_status: "Repeat Collection Required",
+            sampleStatus: "Repeat Collection Required",
+            qc_status: "Pending",
+            qcStatus: "Pending",
+            verifier_remarks: fullRemarks,
+            verifierRemarks: fullRemarks
           }
         : o
     );
     localStorage.setItem("apex_local_orders", JSON.stringify(updated));
   } catch (e) {}
 
-  return data;
+  return { fullRemarks };
+}
+
+export async function markSampleRecollected(orderId) {
+  const cleanRemarks = "New sample recollected. Clinically correlated and verified with quality control standards.";
+  const targetId = String(orderId || "").trim();
+
+  // 1. Supabase Cloud update with safe fallback
+  try {
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        sample_status: "Sample Recollected",
+        verifier_remarks: cleanRemarks
+      })
+      .eq("id", targetId);
+
+    if (error) {
+      console.warn("Supabase update notice, retrying with remarks only:", error.message);
+      await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetId);
+    }
+  } catch (err) {
+    console.warn("Supabase cloud notice for recollection:", err);
+  }
+
+  // 2. Always update local storage cache immediately (checking both id and orderId)
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+    const updated = local.map((o) =>
+      (o.id === targetId || o.orderId === targetId || o.barcode === targetId)
+        ? {
+            ...o,
+            sample_status: "Sample Recollected",
+            sampleStatus: "Sample Recollected",
+            verifierRemarks: cleanRemarks,
+            verifier_remarks: cleanRemarks
+          }
+        : o
+    );
+    localStorage.setItem("apex_local_orders", JSON.stringify(updated));
+  } catch (e) {}
+
+  return { cleanRemarks };
 }
 
 // ==========================================
@@ -918,12 +950,42 @@ export const DEFAULT_LAB_SETTINGS = {
   report_layout: null
 };
 
-export async function getLabSettings() {
+export function getLocalReportLayout() {
   try {
-    const { data, error } = await supabase.from("lab_settings").select("*").eq("id", "MAIN_SETTINGS").maybeSingle();
+    const raw = localStorage.getItem("apex_report_layout");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.header?.elements && parsed?.footer?.elements) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+export async function getLabSettings() {
+  const localLayout = getLocalReportLayout();
+
+  try {
+    const { data, error } = await supabase
+      .from("lab_settings")
+      .select("*")
+      .eq("id", "MAIN_SETTINGS")
+      .maybeSingle();
+
     if (!error && data && data.lab_name) {
-      try { localStorage.setItem("apex_lab_settings", JSON.stringify(data)); } catch (e) {}
-      return data;
+      // Merge report_layout: use Supabase's if present, otherwise protect the local layout
+      const resolvedLayout = data.report_layout || localLayout || DEFAULT_LAB_SETTINGS.report_layout;
+      const mergedData = { ...data, report_layout: resolvedLayout };
+
+      try {
+        localStorage.setItem("apex_lab_settings", JSON.stringify(mergedData));
+        if (resolvedLayout) {
+          localStorage.setItem("apex_report_layout", JSON.stringify(resolvedLayout));
+        }
+      } catch (e) {}
+
+      return mergedData;
     }
   } catch (err) {
     console.warn("Lab settings cloud fetch notice:", err);
@@ -931,13 +993,33 @@ export async function getLabSettings() {
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_lab_settings") || "null");
-    if (local && local.lab_name) return local;
+    if (local && local.lab_name) {
+      if (!local.report_layout && localLayout) {
+        local.report_layout = localLayout;
+      }
+      return local;
+    }
   } catch (e) {}
 
-  return DEFAULT_LAB_SETTINGS;
+  return {
+    ...DEFAULT_LAB_SETTINGS,
+    report_layout: localLayout || DEFAULT_LAB_SETTINGS.report_layout
+  };
 }
 
+
 export async function saveLabSettings(settingsData) {
+  const layoutObj = settingsData.report_layout !== undefined
+    ? settingsData.report_layout
+    : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
+
+  // 1. Immediately persist to dedicated local storage so it is NEVER lost
+  try {
+    if (layoutObj) {
+      localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj));
+    }
+  } catch (e) {}
+
   const payload = {
     id: "MAIN_SETTINGS",
     lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name,
@@ -951,20 +1033,30 @@ export async function saveLabSettings(settingsData) {
     header_color: settingsData.header_color || settingsData.headerColor || "#ffffff",
     receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
     report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer,
-    report_layout: settingsData.report_layout !== undefined ? settingsData.report_layout : DEFAULT_LAB_SETTINGS.report_layout
+    report_layout: layoutObj
   };
 
-  // 1. Guaranteed local persistence
   try {
     localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
   } catch (e) {}
 
-  // 2. Sync to Supabase if table exists
+  // 2. Attempt saving to Supabase
   try {
     const { data, error } = await supabase.from("lab_settings").upsert(payload).select().single();
     if (!error && data) {
+      data.report_layout = data.report_layout || layoutObj;
       localStorage.setItem("apex_lab_settings", JSON.stringify(data));
       return data;
+    }
+
+    // If Supabase failed because the 'report_layout' column does not exist in schema cache
+    if (error) {
+      console.warn("Retrying save without report_layout column in Supabase:", error.message);
+      const { report_layout, ...safePayload } = payload;
+      const { data: safeData } = await supabase.from("lab_settings").upsert(safePayload).select().single();
+      const combined = { ...(safeData || payload), report_layout: layoutObj };
+      localStorage.setItem("apex_lab_settings", JSON.stringify(combined));
+      return combined;
     }
   } catch (err) {
     console.warn("Cloud save notice for lab settings:", err.message);
