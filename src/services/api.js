@@ -914,7 +914,8 @@ export const DEFAULT_LAB_SETTINGS = {
   header_bg: "#20122e",
   header_color: "#ffffff",
   receipt_footer: "Please scan the QR code to check real-time report status & download results.",
-  report_footer: ""
+  report_footer: "",
+  report_layout: null
 };
 
 export async function getLabSettings() {
@@ -949,7 +950,8 @@ export async function saveLabSettings(settingsData) {
     header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
     header_color: settingsData.header_color || settingsData.headerColor || "#ffffff",
     receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
-    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer
+    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer,
+    report_layout: settingsData.report_layout !== undefined ? settingsData.report_layout : DEFAULT_LAB_SETTINGS.report_layout
   };
 
   // 1. Guaranteed local persistence

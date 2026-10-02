@@ -1,5 +1,5 @@
 import { generateQrSvgString } from "./qrcode";
-
+import { buildReportHeaderHtml, buildReportFooterHtml } from "./reportLayout";
 // GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
@@ -773,13 +773,13 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   if (!tableRows && imagingSheets) return imagingSheets;
 
   const standardTable = tableRows ? `
-    <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-family: 'Inter', -apple-system, sans-serif;">
+    <table style="width: 92%; border-collapse: collapse; margin-top: 6px; margin-left: 8mm; margin-right:8mm; font-family: 'Inter', -apple-system, sans-serif;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; background: transparent;">
-          <th style="padding: 6px 4px; text-align: left; width: 36%; font-weight: 800; border: none;">Investigation / Parameter</th>
-          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 800; border: none;">Observed Result</th>
-          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 800; border: none;">Unit</th>
-          <th style="padding: 6px 4px; text-align: left; width: 28%; font-weight: 800; border: none;">Biological Ref. Range</th>
+          <th style="padding: 6px 4px; text-align: left; width: 36%; font-weight: 700; border: none;">Investigation / Parameter</th>
+          <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 700; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 28%; font-weight: 700; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
       <tbody>
@@ -862,7 +862,7 @@ export function printDepartmentA4Report(
       : "Clinically correlated and verified with quality control standards.";
 
     const remarksHtml = isImaging ? "" : `
-      <div style="margin-top: 12px; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', sans-serif;">
+      <div style="margin-top: 12px; margin-left: 8mm; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', sans-serif;">
         <span style="font-weight: 800; text-transform: uppercase; color: #000000; font-size: 9pt;">Pathologist Remarks:</span> 
         <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
       </div>
@@ -884,21 +884,10 @@ export function printDepartmentA4Report(
           <text x="50" y="58" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" font-family="Arial, sans-serif">AF</text>
         </svg>`;
 
-    const figmaHeaderHtml = usePadMode ? "" : `
-      <div style="background: ${curHeaderBg}; color: ${curHeaderColor}; min-height: 105px; box-sizing: border-box; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-          ${logoBlockHtml}
-          <span style="font-size: 6.5pt; color: #e2e8f0; letter-spacing: 0.3px;">${curTagline}</span>
-        </div>
-        <div style="text-align: right; max-width: 480px;">
-          <div style="font-size: 18pt; font-weight: 900; letter-spacing: 1.2px; line-height: 1.1;">${curLabName}</div>
-          <div style="font-size: 8pt; font-weight: 600; color: #cbd5e1; margin-top: 4px;">${curAddress}</div>
-        </div>
-      </div>
-    `;
+    const figmaHeaderHtml = usePadMode ? "" : buildReportHeaderHtml(labSettings);
 
     const patientDetailsHtml = `
-      <div style="padding: 10px 8px; border: 1.5px solid #000000; border-radius: 5px; margin-top: 6px; font-size: 9.5pt; color: #000000;">
+      <div style="padding: 10px 8px; border: 1.5px solid #000000; border-radius: 5px; margin: 6px 8mm 0px 8mm; font-size: 9.5pt; color: #000000;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
             <tr>
@@ -920,21 +909,10 @@ export function printDepartmentA4Report(
       </div>
     `;
 
-    const figmaFooterHtml = usePadMode ? "" : `
-      <div style="max-height: 38px; box-sizing: border-box; border-top: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 0 4px; font-size: 8.5pt; font-weight: 800; color: #000000; margin-top: 8px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="color: #dc2626; font-size: 11pt;">📍</span>
-          <span>${curAddress}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 11pt;">🎧</span>
-          <span>${curPhone}</span>
-        </div>
-      </div>
-    `;
+    const figmaFooterHtml = usePadMode ? "" : buildReportFooterHtml(labSettings);
 
     const pageTemplate = `
-      <div style="padding: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${usePadMode ? '210mm' : '250mm'}; font-family: 'Inter', sans-serif; background: #ffffff; color: #000000;">
+      <div style="padding: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${usePadMode ? '210mm' : '297mm'}; font-family: 'Inter', sans-serif; background: #ffffff; color: #000000;">
         <div>
           ${figmaHeaderHtml}
           ${patientDetailsHtml}
@@ -951,7 +929,7 @@ export function printDepartmentA4Report(
 
         <div>
           ${isVerified ? `
-            <div style="margin-top: 24px; padding-top: 4px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+            <div style="margin: 24px 8mm 10px 8mm; padding-top: 4px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
               <div style="text-align: center; width: 230px;">
                 ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
                 <div style="border-top: 1.5px solid #000000; padding-top: 4px;">
@@ -1003,10 +981,10 @@ export function printDepartmentA4Report(
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
           @page { 
             size: A4 portrait; 
-            margin-top: ${usePadMode ? '38mm' : '8mm'}; 
-            margin-bottom: ${usePadMode ? '21mm' : '8mm'}; 
-            margin-left: 8mm; 
-            margin-right: 8mm; 
+            margin-top: ${usePadMode ? '38mm' : '0mm'}; 
+            margin-bottom: ${usePadMode ? '21mm' : '0mm'}; 
+            margin-left: 0mm; 
+            margin-right: 0mm; 
           }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; color: #000000; background: #fff; }
