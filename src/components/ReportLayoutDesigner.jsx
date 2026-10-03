@@ -10,6 +10,7 @@ import {
 } from "../utils/reportLayout";
 
 const FONTS = [
+  ["Lora (Google Serif)", "'Lora', Georgia, serif"],
   ["Arial", "Arial, Helvetica, sans-serif"],
   ["Segoe UI / Inter", "'Inter','Segoe UI',system-ui,sans-serif"],
   ["Tahoma", "Tahoma, sans-serif"],

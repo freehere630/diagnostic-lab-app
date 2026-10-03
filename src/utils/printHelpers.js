@@ -86,7 +86,7 @@ export function renderDepartmentReportHtml({
     if (sigData && sigData.startsWith("data:image")) {
       return `<img src="${sigData}" style="height: 38px; max-width: 140px; object-fit: contain; margin: 0 auto 3px auto; display: block;" />`;
     }
-    return `<div style="font-family: 'Inter', -apple-system, sans-serif; font-size: 11pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center;">${sigData || fallbackName}</div>`;
+    return `<div style="font-family: 'Lora', Georgia, serif; font-size: 11pt; font-weight: 700; color: #000000; height: 34px; line-height: 34px; text-align: center;">${sigData || fallbackName}</div>`;
   };
 
   const testsTableHtml = buildUnifiedResultsTable(
@@ -102,9 +102,9 @@ export function renderDepartmentReportHtml({
   const remarksHtml = isImaging
     ? ""
     : `
-      <div style="margin-top: 12px; margin-left: 8mm; margin-right: 8mm; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Inter', sans-serif;">
-        <span style="font-weight: 800; text-transform: uppercase; color: #000000; font-size: 9pt;">Pathologist Remarks:</span>
-        <span style="margin-left: 6px; color: #000000;">${remarksText}</span>
+      <div style="margin-top: 12px; margin-left: 8mm; margin-right: 8mm; font-size: 9.5pt; color: #000000; line-height: 1.5; font-family: 'Lora', Georgia, serif;">
+        <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 9pt;">Pathologist Remarks:</span>
+        <span style="margin-left: 6px; color: #000000; font-style: italic;">${remarksText}</span>
       </div>
     `;
 
@@ -135,7 +135,7 @@ export function renderDepartmentReportHtml({
   }
 
   const patientDetailsHtml = `
-    <div style="padding: 10px 8px; border: 1.5px solid #000000; border-radius: 5px; margin: 6px 8mm 0px 8mm; font-size: 9.5pt; color: #000000;">
+    <div style="padding: 10px 8px; border: 1px solid #000000; border-radius: 5px; margin: 6px 8mm 0px 8mm; font-size: 9.5pt; color: #000000;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9.5pt;">
           <tr>
@@ -144,7 +144,7 @@ export function renderDepartmentReportHtml({
             <td style="padding: 4px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 9pt; font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
           </tr>
           <tr>
-            <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600;">${doctorName}</b></td>
+            <td style="padding: 4px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600; font-size: 8.5pt;">${doctorName}</b></td>
             <td style="padding: 4px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
             <td style="padding: 4px 0;">${sixthSlotDemographics}</td>
           </tr>
@@ -177,7 +177,7 @@ export function renderDepartmentReportHtml({
     : (usePadMode ? '237mm' : '296mm');
 
   return `
-    <div style="padding: 0; margin: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${minHeightCss}; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; background: #ffffff; color: #000000; width: 100%;">
+    <div style="padding: 0; margin: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: ${minHeightCss}; box-sizing: border-box; font-family: 'Lora', Georgia, serif; background: #ffffff; color: #000000; width: 100%;">
       <div style="flex-grow: 1;">
         ${headerHtml}
         ${patientDetailsHtml}
@@ -399,26 +399,21 @@ export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
   return allVials[0]?.barcode || allVials[0]?.testBarcode || order.barcode;
 }
 
-// Radiology Investigation Sheet Renderer
 function renderRadiologyInvestigationSheet(test, results, deptName) {
   const rawParams = test.test_parameters || test.parameters || [];
   const paramId = rawParams[0]?.id || test.id;
   const rawText = results?.[paramId]?.value || results?.[test.id]?.value || "Normal study. No significant acute abnormality detected.";
-
   let indication = "";
   let findings = rawText;
   let impression = "";
-
   if (rawText.includes("CLINICAL INDICATION:") || rawText.includes("INDICATION:")) {
     const indMatch = rawText.match(/(?:CLINICAL INDICATION|INDICATION):\s*([\s\S]*?)(?=(?:FINDINGS|OBSERVATIONS|IMPRESSION):|$)/i);
     if (indMatch) indication = indMatch[1].trim();
   }
-
   if (rawText.includes("IMPRESSION:") || rawText.includes("CONCLUSION:")) {
     const impMatch = rawText.match(/(?:IMPRESSION|CONCLUSION):\s*([\s\S]*?)$/i);
     if (impMatch) impression = impMatch[1].trim();
   }
-
   if (rawText.includes("FINDINGS:") || rawText.includes("OBSERVATIONS:")) {
     const findMatch = rawText.match(/(?:FINDINGS|OBSERVATIONS):\s*([\s\S]*?)(?=(?:IMPRESSION|CONCLUSION):|$)/i);
     if (findMatch) findings = findMatch[1].trim();
@@ -426,15 +421,13 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
     findings = rawText.replace(/(?:CLINICAL INDICATION|INDICATION):[\s\S]*?(?=(?:FINDINGS|OBSERVATIONS):|$)/i, "")
                       .replace(/(?:IMPRESSION|CONCLUSION):[\s\S]*$/i, "").trim();
   }
-
   return `
-    <div style="margin-top: 10px; margin-bottom: 16px; font-family: 'Inter', -apple-system, sans-serif;">
-      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 800; font-size: 9pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
+    <div style="margin-top: 10px; margin-bottom: 16px; font-family: 'Lora', Georgia, serif;">
+      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 700; font-size: 10pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
         <span>Investigation: ${test.name.toUpperCase()} ${test.code ? `(${test.code})` : ""}</span>
-        <span style="font-size: 8.5pt; color: #000000; font-weight: 700;">${deptName || "Imaging"}</span>
+        <span style="font-size: 8.5pt; color: #000000; font-weight: 600;">${deptName || "Imaging"}</span>
       </div>
-
-      <div style="padding: 10px 0 4px 0; font-size: 9.5pt; line-height: 1.6; color: #000000;">
+      <div style="padding: 10px 0 4px 0; font-size: 9.5pt; line-height: 1.65; color: #000000;">
         ${indication ? `
           <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #cbd5e1;">
             <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Clinical Indication:</b>
@@ -446,16 +439,14 @@ function renderRadiologyInvestigationSheet(test, results, deptName) {
             <span style="color: #000000;">${test.sample_type || "Standard Clinical Protocol"}</span>
           </div>
         `}
-
         <div style="margin-bottom: 12px;">
           <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Observations & Findings:</b>
           <div style="white-space: pre-wrap; font-size: 9.5pt; line-height: 1.65; color: #000000; font-weight: 400;">${findings}</div>
         </div>
-
         ${impression ? `
           <div style="margin-top: 14px; padding: 6px 0 0 0; border-top: 1px solid #cbd5e1;">
             <b style="color: #000000; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Radiological Impression:</b>
-            <div style="font-size: 9pt; color: #000000; line-height: 1.5; font-weight: 800;">${impression}</div>
+            <div style="font-size: 10pt; color: #000000; line-height: 1.5; font-weight: 700;">${impression}</div>
           </div>
         ` : ""}
       </div>
@@ -535,9 +526,9 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}) {
   const rdwcv = findVal(["RDW CV", "RDW-CV"], "13.3");
 
   return `
-    <table style="width: 92%; border-collapse: collapse; font-family: 'Inter', Arial, sans-serif; font-size: 9.5pt; color: #000000; margin-top: 4px; margin-right: 8mm; margin-left: 8mm;">
+    <table style="width: 92%; border-collapse: collapse; font-family: 'Lora', Georgia, serif; font-size: 9.5pt; color: #000000; margin-top: 4px;">
       <thead>
-        <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; ">
+        <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt;">
           <th style="padding: 6px 4px; text-align: left; width: 44%; font-weight: 700; border: none;">Investigation / Parameter</th>
           <th style="padding: 6px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
           <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 700; border: none;">Unit</th>
@@ -739,7 +730,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
   const refStyle = "padding: 3.5px 6px; font-size: 8pt; color: #555; border-bottom: 1px solid #f1f5f9;";
 
   return `
-    <div style="margin-top: 4px; font-family: 'Inter', -apple-system, sans-serif; color: #000;margin-left: 8mm; margin-right: 8mm;">
+    <div style="margin-top: 4px; font-family: 'Lora', Georgia, serif; color: #000;">
       <div style="display: grid; grid-template-columns: 1fr 1.25fr; gap: 12px; margin-bottom: 10px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
           <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 4px 6px; font-weight: 900; font-size: 8.5pt; text-transform: uppercase;">
@@ -951,7 +942,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   if (!tableRows && imagingSheets) return imagingSheets;
 
   const standardTable = tableRows ? `
-    <table style="width: 92%; border-collapse: collapse; margin-top: 6px; margin-left: 8mm; margin-right:8mm; font-family: 'Inter', -apple-system, sans-serif;">
+    <table style="width: 92%; border-collapse: collapse; margin-top: 6px; margin-left: 8mm; margin-right:8mm; font-family: 'Lora', Georgia, serif;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9.5pt; background: transparent;">
           <th style="padding: 6px 4px; text-align: left; width: 36%; font-weight: 700; border: none;">Investigation / Parameter</th>
@@ -1017,7 +1008,7 @@ export function printDepartmentA4Report(
         <meta charset="UTF-8" />
         <title>Report - ${activeOrder.barcode || activeOrder.orderId}</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+          @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600;700;800;900&display=swap');
           @page {
             size: A4 portrait;
             margin-top: ${usePadMode ? '38mm' : '0mm'};
@@ -1034,7 +1025,7 @@ export function printDepartmentA4Report(
             margin: 0;
             padding: 0;
             width: 210mm;
-            font-family: 'Inter', -apple-system, sans-serif;
+            font-family: 'Lora', Georgia, serif;
             color: #000000;
             background: #ffffff;
           }
