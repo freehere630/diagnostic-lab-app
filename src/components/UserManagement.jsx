@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { UserCheck, Plus, Trash2, Upload, FileImage, X, Image as ImageIcon } from "lucide-react";
+import { UserCheck, Plus, Trash2, Upload, X, Image as ImageIcon, Shield } from "lucide-react";
 
 export default function UserManagement({
-  staffList,
+  staffList = [],
   handleRegisterStaff,
   handleDeleteStaff,
   isLoading
@@ -18,7 +18,6 @@ export default function UserManagement({
 
   const [previewUrl, setPreviewUrl] = useState("");
 
-  // Handle Image / File Upload & convert to Base64
   const handleSignatureUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -52,7 +51,6 @@ export default function UserManagement({
       signatureData: formData.signatureData || formData.fullName
     });
 
-    // Reset Form
     setFormData({
       fullName: "",
       email: "",
@@ -65,33 +63,37 @@ export default function UserManagement({
   };
 
   return (
-    <div className="space-y-6 w-full font-sans text-slate-800">
+    <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
       
-      {/* Registration Form */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
-        <h2 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
-          <UserCheck className="w-5 h-5 text-blue-600" /> Register Laboratory Staff & Official Signatures
-        </h2>
-        <p className="text-xs text-slate-500 mb-6">
-          Upload scanned signature images (PNG, JPG, PDF) that will automatically print on all diagnostic reports.
-        </p>
+      {/* 1. REGISTRATION FORM (COMPACT) */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div>
+            <h2 className="font-bold text-xs uppercase tracking-wide text-slate-800 flex items-center gap-1.5">
+              <UserCheck className="w-4 h-4 text-blue-600" /> Register Laboratory Staff & Official Signatures
+            </h2>
+            <p className="text-[10px] text-slate-400">
+              Uploaded signature stamps will print automatically on authorized diagnostic reports.
+            </p>
+          </div>
+        </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+        <form onSubmit={onSubmit} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
             <div>
-              <label className="font-bold text-slate-600 uppercase block mb-1">Full Name *</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Full Name *</label>
               <input
                 type="text"
                 required
                 placeholder="e.g. Dr. Arthur Pendelton"
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-semibold"
               />
             </div>
 
             <div>
-              <label className="font-bold text-slate-600 uppercase block mb-1">Workstation Role *</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Workstation Role *</label>
               <select
                 value={formData.role}
                 onChange={(e) => {
@@ -102,131 +104,117 @@ export default function UserManagement({
                   if (r === "receptionist") defaultDesig = "Front Desk Executive";
                   setFormData({ ...formData, role: r, designation: defaultDesig });
                 }}
-                className="w-full p-2.5 border rounded-xl bg-slate-50 font-bold outline-none"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-slate-50 font-semibold outline-none"
               >
-                <option value="technologist">🧪 Lab Technologist (Prints on Left)</option>
-                <option value="verifier">👨‍🔬 Biochemist / Verifier (Prints on Right)</option>
-                <option value="admin">👨‍💼 Lab Manager / Director</option>
-                <option value="receptionist">🧑‍💼 Receptionist</option>
+                <option value="technologist">🧪 Lab Technologist (Left Sign)</option>
+                <option value="verifier">👨‍🔬 Verifier / Pathologist (Right Sign)</option>
+                <option value="admin">👨‍💼 Laboratory Director</option>
+                <option value="receptionist">🧑‍💼 Front Desk Executive</option>
               </select>
             </div>
 
-            <div className="sm:col-span-2">
-              <label className="font-bold text-slate-600 uppercase block mb-1">Medical Designation (Printed on Report) *</label>
+            <div className="lg:col-span-2">
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Official Medical Designation *</label>
               <input
                 type="text"
                 required
                 placeholder="e.g. MBBS, MD (Pathology) - Consultant Pathologist"
                 value={formData.designation}
                 onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium"
               />
             </div>
 
             <div>
-              <label className="font-bold text-slate-600 uppercase block mb-1">Login Email *</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Workstation Login Email *</label>
               <input
                 type="email"
                 required
-                placeholder="staff@apexlab.com"
+                placeholder="staff@lab.com"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full p-2.5 border rounded-xl outline-none"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none"
               />
             </div>
 
             <div>
-              <label className="font-bold text-slate-600 uppercase block mb-1">Password *</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Password *</label>
               <input
                 type="password"
                 required
-                placeholder="Set password"
+                placeholder="••••••••"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full p-2.5 border rounded-xl outline-none"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono"
               />
             </div>
-          </div>
 
-          {/* UPLOAD SCANNED SIGNATURE FILE BOX */}
-          <div className="border-t pt-4">
-            <label className="font-bold text-slate-700 uppercase text-xs block mb-2">
-              Upload Official Scanned Signature (Image / PDF)
-            </label>
+            {/* Signature Upload Zone (Compact) */}
+            <div className="lg:col-span-2 flex items-center gap-2">
+              <label className="flex-1 border border-dashed border-slate-300 hover:border-blue-500 hover:bg-slate-50 rounded-lg p-2 flex items-center justify-center gap-2 cursor-pointer transition">
+                <Upload className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-xs font-semibold text-slate-700">Select Signature Stamp (PNG / JPG)</span>
+                <input
+                  type="file"
+                  accept="image/png, image/jpeg, image/jpg, image/webp"
+                  onChange={handleSignatureUpload}
+                  className="hidden"
+                />
+              </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
-              {/* File Upload Zone */}
-              <div className="sm:col-span-2">
-                <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/30 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition text-center">
-                  <Upload className="w-6 h-6 text-blue-600 mb-1" />
-                  <span className="text-xs font-bold text-slate-800">Click to select signature file</span>
-                  <span className="text-[10px] text-slate-400 mt-0.5">Supports PNG (Transparent recommended), JPG, JPEG, PDF</span>
-                  <input
-                    type="file"
-                    accept="image/png, image/jpeg, image/jpg, image/webp, application/pdf"
-                    onChange={handleSignatureUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {/* Signature Live Preview Box */}
-              <div className="p-3 border rounded-2xl bg-slate-50 flex flex-col items-center justify-center min-h-[90px] relative">
-                <span className="text-[10px] font-bold uppercase text-slate-400 mb-1">Report Stamp Preview</span>
+              {/* Live Preview Stamp */}
+              <div className="w-28 h-10 border border-slate-200 rounded-lg bg-slate-50 flex items-center justify-center relative p-1 shrink-0">
                 {previewUrl ? (
-                  <div className="relative group w-full text-center">
-                    <img
-                      src={previewUrl}
-                      alt="Signature Preview"
-                      className="h-12 max-w-full object-contain mx-auto mix-blend-multiply"
-                    />
+                  <>
+                    <img src={previewUrl} alt="Signature" className="h-full object-contain mix-blend-multiply" />
                     <button
                       type="button"
                       onClick={clearSignature}
-                      className="absolute top-0 right-0 p-1 bg-rose-600 text-white rounded-full shadow hover:bg-rose-700"
-                      title="Remove image"
+                      className="absolute -top-1.5 -right-1.5 p-0.5 bg-rose-600 text-white rounded-full shadow hover:bg-rose-700"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-2.5 h-2.5" />
                     </button>
-                  </div>
+                  </>
                 ) : (
-                  <div className="text-center text-slate-400 text-xs italic">
-                    <ImageIcon className="w-5 h-5 mx-auto mb-1 opacity-40" />
-                    No image uploaded (Will use font name)
-                  </div>
+                  <span className="text-[10px] text-slate-400 italic">No image</span>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end pt-1">
             <button
               type="submit"
               disabled={isLoading}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2"
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition active:scale-95"
             >
-              <Plus className="w-4 h-4" /> {isLoading ? "Saving..." : "Save Staff Member & Signature in Database"}
+              <Plus className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Register Staff Member"}
             </button>
           </div>
         </form>
       </div>
 
-      {/* Registered Staff Directory Cards */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
-        <h3 className="font-bold text-sm text-slate-900 mb-4">
-          Registered Staff & Official Signatures ({staffList.length} Active Users)
-        </h3>
+      {/* 2. REGISTERED STAFF DIRECTORY */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <h3 className="font-bold text-xs uppercase tracking-wide text-slate-800">
+            Registered Staff & Authorized Signatures ({staffList.length} Active Accounts)
+          </h3>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
           {staffList.map((user) => {
             const hasImageSignature = user.signature_data && user.signature_data.startsWith("data:image");
 
             return (
-              <div key={user.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs flex flex-col justify-between hover:shadow-md transition">
+              <div 
+                key={user.id} 
+                className="p-3 bg-slate-50/70 border border-slate-200 rounded-xl text-xs flex flex-col justify-between hover:border-slate-300 transition"
+              >
                 <div>
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="font-black text-sm text-slate-900">{user.full_name}</span>
-                    <span className={`px-2 py-0.5 rounded font-mono font-bold text-[9px] uppercase ${
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="font-bold text-xs text-slate-900 leading-snug">{user.full_name}</span>
+                    <span className={`px-1.5 py-0.2 rounded font-mono font-bold text-[9px] uppercase ${
                       user.role === "admin" ? "bg-purple-100 text-purple-800" :
                       user.role === "verifier" ? "bg-amber-100 text-amber-800" :
                       user.role === "technologist" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"
@@ -235,32 +223,31 @@ export default function UserManagement({
                     </span>
                   </div>
 
-                  <p className="text-slate-600 font-medium">{user.designation}</p>
-                  <p className="text-slate-400 font-mono text-[11px] mt-1">{user.email}</p>
+                  <p className="text-[11px] text-slate-500 font-medium truncate">{user.designation}</p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">{user.email}</p>
 
-                  {/* Scanned Image / Stamp Display */}
-                  <div className="mt-3 p-2 bg-white border border-dashed rounded-xl text-center min-h-[55px] flex flex-col justify-center items-center">
-                    <p className="text-[9px] text-slate-400 uppercase font-mono mb-1">Official Signature</p>
+                  {/* Scanned Image / Stamp Preview Box */}
+                  <div className="mt-2 p-1.5 bg-white border border-dashed border-slate-200 rounded-lg text-center h-12 flex items-center justify-center">
                     {hasImageSignature ? (
                       <img
                         src={user.signature_data}
                         alt="Signature Stamp"
-                        className="h-9 max-w-full object-contain mix-blend-multiply"
+                        className="h-10 max-w-full object-contain mix-blend-multiply"
                       />
                     ) : (
-                      <p className="font-serif italic text-blue-900 font-bold text-base">
+                      <span className="font-serif italic text-blue-900 font-bold text-xs">
                         {user.signature_data || user.full_name}
-                      </p>
+                      </span>
                     )}
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t flex justify-between items-center text-slate-400 text-[11px]">
+                <div className="mt-3 pt-2 border-t border-slate-200/80 flex justify-between items-center text-[10px] text-slate-400">
                   <span>Pass: ••••••••</span>
                   <button
                     onClick={() => handleDeleteStaff(user.id, user.full_name)}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                    title="Remove Staff"
+                    className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                    title="Remove Staff User"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

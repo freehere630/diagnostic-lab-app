@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   ShieldCheck, CloudUpload, Lock, MessageSquare,
-  Sparkles, FileText, AlertOctagon, Calculator,
-  CheckCircle2, AlertTriangle, RotateCcw, FlaskConical
+  AlertOctagon, CheckCircle2, AlertTriangle, RotateCcw, FlaskConical,
+  Barcode, Check, Layers, ChevronRight
 } from "lucide-react";
 import { requestSampleRecollection, markSampleRecollected } from "../services/api";
 import { sendReportReadyWhatsApp, sendRecollectionWhatsApp } from "../utils/whatsappHelper";
@@ -20,24 +20,22 @@ export default function VerificationQC({
   currentUser,
   labSettings
 }) {
-  const [machineInputs, setMachineInputs] = useState({ wbc: "", gran: "", lymph: "", mid: "" });
-  
-  // Instant local overrides so the page updates with 0ms delay
+  const [selectedDeptId, setSelectedDeptId] = useState("ALL");
   const [localStatus, setLocalStatus] = useState(null);
   const [localRemarks, setLocalRemarks] = useState(null);
 
-  // Reset local overrides when switching patient order
   useEffect(() => {
     setLocalStatus(null);
     setLocalRemarks(null);
+    setSelectedDeptId("ALL");
   }, [activeOrder?.orderId, activeOrder?.id]);
 
   if (!activeOrder) {
     return (
-      <div className="p-12 text-center text-slate-400 font-sans bg-white rounded-2xl border border-dashed border-slate-200">
+      <div className="py-20 text-center text-slate-400 max-w-xl mx-auto bg-white rounded-2xl border border-dashed border-slate-200">
         <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-        <p className="font-semibold text-sm">No active order selected for verification.</p>
-        <p className="text-xs text-slate-400 mt-1">Select an order from the Dashboard or Worklists to enter and review results.</p>
+        <p className="font-semibold text-xs text-slate-600">No active specimen selected for examination</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">Select a patient order from the Dashboard or Worklists to begin result entry.</p>
       </div>
     );
   }
@@ -49,7 +47,6 @@ export default function VerificationQC({
   const currentStatus = (localStatus || activeOrder.sample_status || activeOrder.sampleStatus || "").toLowerCase();
   const currentRemarks = (localRemarks !== null ? localRemarks : (activeOrder.verifierRemarks || "")).toUpperCase();
 
-  // A verified order NEVER shows the awaiting recollection banner
   const isAwaitingRecollection = !isVerified && (
     (currentStatus.includes("repeat") && !currentStatus.includes("recollected")) ||
     (currentRemarks.includes("RECOLLECTION REQUIRED") && !currentStatus.includes("recollected"))
@@ -57,9 +54,108 @@ export default function VerificationQC({
 
   const isLockedOrAwaiting = isVerified || isAwaitingRecollection;
 
-  // 1. REJECT SAMPLE (Instant 0ms UI update)
+  // 1. Group tests by Department with completion counting
+  const departmentGroups = useMemo(() => {
+    const rawTests = activeOrder.tests || [];
+    const map = {};
+
+    rawTests.forEach((t) => {
+      const code = (t.code || "").toUpperCase();
+      const name = (t.name || "").toUpperCase();
+      let deptId = (t.dept_id || t.deptId || "DEP-BIO").toUpperCase();
+      let deptName = "Clinical Biochemistry";
+      let icon = "🧪";
+
+      if (code.includes("CBC") || name.includes("BLOOD COUNT") || deptId.includes("HEM")) {
+        deptId = "DEP-HEM";
+        deptName = "Hematology";
+        icon = "🩸";
+      } else if (code.includes("URINE") || name.includes("URINE") || deptId.includes("PAT")) {
+        deptId = "DEP-PAT";
+        deptName = "Clinical Pathology";
+        icon = "🧫";
+      } else if (code.includes("XRAY") || deptId.includes("RAD")) {
+        deptId = "DEP-RAD";
+        deptName = "Radiology & X-Ray";
+        icon = "🩻";
+      } else if (code.includes("USG") || deptId.includes("USG")) {
+        deptId = "DEP-USG";
+        deptName = "Ultrasonography (USG)";
+        icon = "📡";
+      } else if (code.includes("ECG") || deptId.includes("CARD")) {
+        deptId = "DEP-CARD";
+        deptName = "Cardiology";
+        icon = "💓";
+      }
+
+      if (!map[deptId]) {
+        map[deptId] = {
+          id: deptId,
+          name: deptName,
+          icon: icon,
+          tests: []
+        };
+      }
+      map[deptId].tests.push(t);
+    });
+
+    // Calculate parameter counts per department
+    return Object.values(map).map((dept) => {
+      let totalParams = 0;
+      let filledParams = 0;
+
+      dept.tests.forEach((test) => {
+        const rawParams = test.test_parameters || test.parameters || [];
+        const params = rawParams.length > 0 ? rawParams : [{ id: test.id, name: test.name }];
+        totalParams += params.length;
+
+        params.forEach((p) => {
+          const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
+          if (val !== undefined && val !== null && String(val).trim() !== "") {
+            filledParams++;
+          }
+        });
+      });
+
+      return {
+        ...dept,
+        totalParams,
+        filledParams,
+        isComplete: totalParams > 0 && filledParams >= totalParams
+      };
+    });
+  }, [activeOrder]);
+
+  // Set default active tab to first department if 'ALL' is not preferred
+  const activeDeptTests = useMemo(() => {
+    if (selectedDeptId === "ALL") {
+      return activeOrder.tests || [];
+    }
+    const targetDept = departmentGroups.find((d) => d.id === selectedDeptId);
+    return targetDept ? targetDept.tests : [];
+  }, [selectedDeptId, activeOrder, departmentGroups]);
+
+  // Separate individual tests and profile tests (individual first, profile last)
+  const sortedActiveTests = useMemo(() => {
+    const individuals = [];
+    const profiles = [];
+
+    activeDeptTests.forEach((t) => {
+      const isProf = t.is_profile === true || t.is_profile === "true" || t.is_profile === 1 || t.isProfile === true;
+      const params = t.test_parameters || t.parameters || [];
+      if (isProf || params.length > 1) {
+        profiles.push(t);
+      } else {
+        individuals.push(t);
+      }
+    });
+
+    return [...individuals, ...profiles];
+  }, [activeDeptTests]);
+
+  // Rejection handler
   const handleRejectHemolyzedInstant = async () => {
-    if (!window.confirm("Are you sure you want to REJECT this sample as Hemolyzed and request repeat collection?")) {
+    if (!window.confirm("Are you sure you want to REJECT this specimen as Hemolyzed and request a repeat collection?")) {
       return;
     }
 
@@ -67,26 +163,18 @@ export default function VerificationQC({
     if (!targetId) return;
 
     const fullRemarks = "[RECOLLECTION REQUIRED: Hemolyzed Specimen]";
-
-    // Immediately trigger UI change on this screen
     setLocalStatus("Repeat Collection Required");
     setLocalRemarks(fullRemarks);
-    if (handleRemarksChange) {
-      handleRemarksChange(fullRemarks);
-    }
+    if (handleRemarksChange) handleRemarksChange(fullRemarks);
 
-    // Persist to database in background
     try {
       if (typeof handleRejectSample === "function") {
         await handleRejectSample(targetId, "Hemolyzed Specimen");
       } else {
         await requestSampleRecollection(targetId, "Hemolyzed Specimen");
       }
-    } catch (e) {
-      console.warn("Background reject notice:", e);
-    }
+    } catch (e) {}
 
-    // Optional WhatsApp
     try {
       if (activeOrder.patient?.phone && activeOrder.patient.phone !== "N/A") {
         sendRecollectionWhatsApp(activeOrder, "Hemolyzed Specimen");
@@ -94,77 +182,41 @@ export default function VerificationQC({
     } catch (waErr) {}
   };
 
-  // 2. RECOLLECT SAMPLE (Instant 0ms UI update)
+  // Recollection unlock handler
   const handleUnlockRecollected = async () => {
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
 
     const cleanRemarks = "New sample recollected. Clinically correlated and verified with quality control standards.";
-
-    // Immediately trigger UI change on this screen
     setLocalStatus("Sample Recollected");
     setLocalRemarks(cleanRemarks);
-    if (handleRemarksChange) {
-      handleRemarksChange(cleanRemarks);
-    }
+    if (handleRemarksChange) handleRemarksChange(cleanRemarks);
 
-    // Persist to database in background
     try {
       if (typeof handleMarkRecollected === "function") {
         await handleMarkRecollected(targetId);
       } else {
         await markSampleRecollected(targetId);
       }
-    } catch (e) {
-      console.warn("Background recollect notice:", e);
-    }
+    } catch (e) {}
   };
 
-  // 3. STRICT VALIDATION: Blocks verification if any parameter is empty
+  // Strict validation
   const validateAllResultsEntered = () => {
     const missing = [];
     (activeOrder.tests || []).forEach((test) => {
-      const isCbc = (test.code || "").toUpperCase().includes("CBC") || (test.name || "").toLowerCase().includes("blood count");
-      const isUrine = (test.code || "").toUpperCase().includes("URINE") || (test.name || "").toLowerCase().includes("urine");
       const rawParams = test.test_parameters || test.parameters || [];
-
-      if (isCbc) {
-        const primaryCbcKeys = ["WBC", "Hemoglobin", "RBC", "Platelet", "MCV", "Neutrophil", "Lymphocyte"];
-        primaryCbcKeys.forEach((key) => {
-          const p = rawParams.find((pr) => (pr.name || "").toLowerCase().includes(key.toLowerCase()));
-          if (p) {
-            const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
-            if (val === undefined || val === null || String(val).trim() === "") {
-              missing.push(`CBC → ${p.name}`);
-            }
-          }
-        });
-      } else if (isUrine) {
-        const keyUrineParams = ["Color", "Appearance", "Albumin", "Sugar", "Pus Cells", "Epithelial"];
-        keyUrineParams.forEach((key) => {
-          const p = rawParams.find((pr) => (pr.name || "").toLowerCase().includes(key.toLowerCase()));
-          if (p) {
-            const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
-            if (val === undefined || val === null || String(val).trim() === "") {
-              missing.push(`Urine R/M/E → ${p.name}`);
-            }
+      if (rawParams.length > 0) {
+        rawParams.forEach((p) => {
+          const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
+          if (val === undefined || val === null || String(val).trim() === "") {
+            missing.push(`${test.name} → ${p.name}`);
           }
         });
       } else {
-        if (rawParams.length > 0) {
-          rawParams.forEach((p) => {
-            const val = activeOrder.results?.[p.id]?.value !== undefined
-              ? activeOrder.results[p.id].value
-              : (activeOrder.results?.[test.id]?.value ?? "");
-            if (val === undefined || val === null || String(val).trim() === "") {
-              missing.push(`${test.name} → ${p.name}`);
-            }
-          });
-        } else {
-          const val = activeOrder.results?.[test.id]?.value ?? "";
-          if (val === undefined || val === null || String(val).trim() === "") {
-            missing.push(test.name);
-          }
+        const val = activeOrder.results?.[test.id]?.value ?? "";
+        if (val === undefined || val === null || String(val).trim() === "") {
+          missing.push(test.name);
         }
       }
     });
@@ -172,45 +224,35 @@ export default function VerificationQC({
   };
 
   const onVerifyClickInstant = async () => {
-    // 1. Strict validation: blocks if any test is missing results
     const missingResults = validateAllResultsEntered();
     if (missingResults.length > 0) {
       alert(
         `⛔ CANNOT COMPLETE VERIFICATION!\n\n` +
-        `Required parameters must have a result before verification can be completed.\n` +
-        `Missing results for (${missingResults.length} parameter(s)):\n\n` +
+        `All required investigation parameters must have a result before verification.\n` +
+        `Missing observations for (${missingResults.length} parameter(s)):\n\n` +
         missingResults.slice(0, 6).map((m) => `• ${m}`).join("\n") +
         (missingResults.length > 6 ? `\n...and ${missingResults.length - 6} more` : "")
       );
       return;
     }
 
-    // 2. Lock & Verify in Database FIRST
     try {
       await handleVerifyInDb();
     } catch (e) {
-      console.error("Verification notice:", e);
       alert("Verification error: " + (e.message || e));
-      return; // Stop: do NOT notify patient if verification failed!
+      return;
     }
 
-    // 3. ONLY notify patient AFTER verification succeeds
     try {
       if (activeOrder.patient?.phone && activeOrder.patient.phone !== "N/A") {
         sendReportReadyWhatsApp(activeOrder, labSettings);
       }
-    } catch (waErr) {
-      console.warn("WhatsApp notification notice:", waErr);
-    }
+    } catch (waErr) {}
   };
 
   const renderQuickPills = (test, paramName, currentVal, onSelect) => {
-    const isUrineTest =
-      (test.code || "").toUpperCase().includes("URINE") ||
-      (test.name || "").toLowerCase().includes("urine") ||
-      (test.dept_id || test.deptId || "").toUpperCase().includes("PAT");
-
-    if (!isUrineTest) return null;
+    const isUrine = (test.code || "").toUpperCase().includes("URINE") || (test.name || "").toLowerCase().includes("urine");
+    if (!isUrine) return null;
 
     const pName = (paramName || "").toLowerCase();
     if (pName.includes("protein") || pName.includes("albumin") || pName.includes("sugar") || pName.includes("glucose")) {
@@ -222,10 +264,10 @@ export default function VerificationQC({
               type="button"
               disabled={isLockedOrAwaiting}
               onClick={() => onSelect(badge)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition ${
+              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition ${
                 currentVal === badge
-                  ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                  : "bg-white text-slate-700 hover:bg-slate-100 border-slate-200"
+                  ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
               }`}
             >
               {badge}
@@ -238,58 +280,68 @@ export default function VerificationQC({
   };
 
   return (
-    <div className="space-y-6 w-full font-sans text-slate-800">
+    <div className="space-y-3.5 max-w-[1720px] mx-auto text-slate-900">
+      
       {/* 1. RECOLLECTION WARNING BANNER */}
       {isAwaitingRecollection && (
-        <div className="bg-rose-50 border-2 border-rose-400 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-md animate-in fade-in">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-6 h-6 text-rose-600 flex-shrink-0 animate-bounce" />
+        <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
             <div>
-              <p className="font-black text-sm text-rose-950 uppercase">
-                Sample Rejected (Hemolyzed) — Awaiting Repeat Specimen
+              <p className="font-bold text-xs text-rose-950 uppercase tracking-tight">
+                Specimen Rejected (Hemolyzed) — Awaiting Repeat Specimen
               </p>
-              <p className="text-xs text-rose-700 mt-0.5">
-                Result entry is blocked until the new specimen is collected and registered.
+              <p className="text-[11px] text-rose-700">
+                Examination inputs are locked until the fresh clinical sample is delivered.
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={handleUnlockRecollected}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow transition whitespace-nowrap active:scale-95"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 whitespace-nowrap"
           >
-            <RotateCcw className="w-3.5 h-3.5" /> Mark Sample Recollected (Unlock)
+            <RotateCcw className="w-3.5 h-3.5" /> Mark Recollected (Unlock)
           </button>
         </div>
       )}
 
-      {/* 2. PATIENT BAR */}
-      <div className="bg-white p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full shadow-sm">
-        <div>
-          <h2 className="font-bold text-base text-slate-900">
-            {activeOrder.patient?.name || "Patient"} (ID: {activeOrder.patient?.id || "N/A"})
-          </h2>
-          <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-slate-600">Vial Barcodes:</span>
-            {(activeOrder.tests || []).reduce((acc, t) => {
-              const code = getDepartmentVialBarcode(activeOrder, t.dept_id || t.deptId);
-              const tube = (t.tube_color || "Vial").split(" ")[0];
-              if (!acc.some((x) => x.code === code)) acc.push({ code, tube });
-              return acc;
-            }, []).map((v, i) => (
-              <span key={i} className="font-mono font-bold bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
-                {v.tube}: {v.code}
-              </span>
-            ))}
-            <span className="text-slate-400">|</span>
-            <span>Ref. Doctor: <b className="text-slate-700">{activeOrder.patient?.doctor || activeOrder.doctor || "Self"}</b></span>
+      {/* 2. COMPACT PATIENT & VIAL HEADER */}
+      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-sm text-slate-900">{activeOrder.patient?.name || "Patient"}</span>
+            <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/60">
+              {activeOrder.patient?.id || "N/A"}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {activeOrder.patient?.age || "?"}Y / {activeOrder.patient?.gender || "?"}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+            <span className="flex items-center gap-1">
+              <Barcode className="w-3.5 h-3.5 text-slate-400" />
+              {(activeOrder.tests || []).reduce((acc, t) => {
+                const code = getDepartmentVialBarcode(activeOrder, t.dept_id || t.deptId);
+                const tube = (t.tube_color || "Vial").split(" ")[0];
+                if (!acc.some((x) => x.code === code)) acc.push({ code, tube });
+                return acc;
+              }, []).map((v, i) => (
+                <span key={i} className="font-mono font-semibold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-200 text-[10px] mr-1">
+                  {v.tube}: {v.code}
+                </span>
+              ))}
+            </span>
+            <span className="text-slate-300">•</span>
+            <span>Ref: <b className="text-slate-700">{activeOrder.patient?.doctor || activeOrder.doctor || "Self"}</b></span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {saveStatus?.state === "saving" && (
-            <span className="text-xs font-semibold text-amber-600 flex items-center gap-1 mr-2">
-              <CloudUpload className="w-3.5 h-3.5 animate-bounce" /> Syncing...
+            <span className="text-[11px] font-semibold text-amber-600 flex items-center gap-1">
+              <CloudUpload className="w-3.5 h-3.5 animate-pulse" /> Syncing...
             </span>
           )}
 
@@ -297,10 +349,10 @@ export default function VerificationQC({
             <button
               type="button"
               onClick={handleRejectHemolyzedInstant}
-              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md active:scale-95"
-              title="Flag sample as Hemolyzed and send recall notice"
+              className="px-2.5 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+              title="Flag specimen as hemolyzed"
             >
-              <AlertOctagon className="w-4 h-4" /> Reject (Hemolyzed)
+              <AlertOctagon className="w-3.5 h-3.5 text-rose-600" /> Reject (Hemolyzed)
             </button>
           )}
 
@@ -309,50 +361,113 @@ export default function VerificationQC({
               type="button"
               onClick={onVerifyClickInstant}
               disabled={isLockedOrAwaiting || isLoading}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow active:scale-95"
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs active:scale-95"
             >
-              <ShieldCheck className="w-4 h-4" />
-              {activeOrder.isLocked ? "Verified & Locked" : "Verify & Send WhatsApp"}
+              <ShieldCheck className="w-3.5 h-3.5" />
+              {activeOrder.isLocked ? "Report Verified & Signed" : "Verify & Complete Report"}
             </button>
           ) : (
-            <div className="px-3 py-1.5 bg-slate-100 border border-slate-300 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5 text-slate-400" />
-              Result Entry Only
+            <div className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-500 rounded-lg text-xs font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5 text-slate-400" /> Technologist Mode
             </div>
           )}
         </div>
       </div>
 
-      {/* 3. TEST PARAMETERS LIST */}
-      <div className="space-y-4">
-        {(activeOrder.tests || []).map((test) => {
-          const testNameLow = (test.name || "").toLowerCase();
-          const testCodeUp = (test.code || "").toUpperCase();
-          const rawParams = test.test_parameters || test.parameters || [];
+      {/* 3. DEPARTMENT-SEPARATED INPUT TABS (NEW WORKFLOW) */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 bg-white p-2 rounded-xl border border-slate-200/80 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setSelectedDeptId("ALL")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
+            selectedDeptId === "ALL"
+              ? "bg-slate-900 text-white shadow-xs"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>All Departments</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-200">
+            {activeOrder.tests?.length || 0}
+          </span>
+        </button>
 
-          const isCrpQuantitative =
-            (testCodeUp.includes("CRP") || testNameLow.includes("c-reactive protein")) &&
-            (testNameLow.includes("quantitative") || testCodeUp.includes("QUANT"));
+        {departmentGroups.map((dept) => {
+          const isActive = selectedDeptId === dept.id;
+          return (
+            <button
+              key={dept.id}
+              type="button"
+              onClick={() => setSelectedDeptId(dept.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shrink-0 border ${
+                isActive
+                  ? "bg-blue-600 border-blue-600 text-white shadow-xs"
+                  : "bg-slate-50/80 border-slate-200/80 text-slate-700 hover:bg-slate-100 hover:border-slate-300"
+              }`}
+            >
+              <span className="text-sm">{dept.icon}</span>
+              <span>{dept.name}</span>
+
+              {dept.isComplete ? (
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold flex items-center gap-0.5 ${
+                  isActive ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
+                }`}>
+                  <Check className="w-2.5 h-2.5" /> Done
+                </span>
+              ) : (
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-semibold ${
+                  isActive ? "bg-white/20 text-white" : "bg-amber-100 text-amber-800"
+                }`}>
+                  {dept.filledParams}/{dept.totalParams}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 4. TEST PARAMETERS (INDIVIDUAL ON TOP, PROFILES ON BOTTOM) */}
+      <div className="space-y-3">
+        {sortedActiveTests.map((test) => {
+          const isProf = test.is_profile === true || test.is_profile === "true" || test.is_profile === 1 || test.isProfile === true;
+          const rawParams = test.test_parameters || test.parameters || [];
+          const isProfilePanel = isProf || rawParams.length > 1;
 
           return (
-            <div key={test.id} className="bg-white rounded-2xl border overflow-hidden shadow-sm p-4 space-y-4">
-              <div className="flex justify-between items-center pb-2 border-b">
-                <span className="font-black text-sm uppercase text-slate-800">
-                  {test.name} {test.code ? `(${test.code})` : ""}
-                </span>
-                <span className="text-[10px] font-semibold text-slate-500">
-                  {rawParams.length} Parameters
+            <div 
+              key={test.id} 
+              className={`bg-white rounded-xl border overflow-hidden shadow-xs ${
+                isProfilePanel ? "border-indigo-200/80" : "border-slate-200/80"
+              }`}
+            >
+              {/* Header */}
+              <div className={`px-3 py-2 border-b flex items-center justify-between ${
+                isProfilePanel ? "bg-indigo-50/40 border-indigo-100" : "bg-slate-50/75 border-slate-200"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-xs text-slate-900 uppercase tracking-tight">
+                    {test.name} {test.code ? `(${test.code})` : ""}
+                  </span>
+                  {isProfilePanel && (
+                    <span className="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded text-[9px] font-bold uppercase tracking-wider">
+                      Multi-Parameter Profile
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {rawParams.length} Parameter{rawParams.length !== 1 ? 's' : ''}
                 </span>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full text-left text-xs">
+              {/* Matrix Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 border-b text-slate-600 font-bold">
-                      <th className="py-2.5 px-4 w-1/3">Parameter</th>
-                      <th className="py-2.5 px-4 w-56">Observed Result</th>
-                      <th className="py-2.5 px-4 w-24">Unit</th>
-                      <th className="py-2.5 px-4">Clinical Reference Range</th>
+                    <tr className="border-b border-slate-100 text-slate-400 text-[10px] font-semibold uppercase tracking-wider bg-white">
+                      <th className="py-2 px-3 w-1/3">Investigation Parameter</th>
+                      <th className="py-2 px-3 w-48">Observed Finding / Result</th>
+                      <th className="py-2 px-3 w-20">Unit</th>
+                      <th className="py-2 px-3">Biological Reference Range</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -361,25 +476,26 @@ export default function VerificationQC({
                         ? activeOrder.results[p.id].value
                         : (activeOrder.results?.[test.id]?.value || "");
 
-                      const isQual = !isCrpQuantitative && p.param_type === "qualitative";
-                      const effectiveUnit = isCrpQuantitative ? (p.unit && p.unit !== "—" ? p.unit : "mg/L") : (p.unit || "—");
-                      const effectiveRef = isCrpQuantitative ? (p.reference_text || "< 6.0 mg/L (Normal)") : (p.reference_text || p.ref_text);
+                      const isQual = p.param_type === "qualitative";
+                      const effectiveUnit = p.unit || "—";
+                      const effectiveRef = p.reference_text || p.ref_text;
 
                       return (
                         <tr key={p.id} className="hover:bg-slate-50/60 transition">
-                          <td className="py-2.5 px-4 font-semibold text-slate-800 align-top">
+                          <td className="py-2 px-3 font-medium text-slate-800 align-top">
                             <div>{p.name}</div>
                             {!isLockedOrAwaiting && renderQuickPills(test, p.name, val, (chosen) => handleResultInput(p.id, chosen))}
                           </td>
-                          <td className="py-2.5 px-4 align-top">
+
+                          <td className="py-2 px-3 align-top">
                             {isQual ? (
                               <select
                                 disabled={isLockedOrAwaiting}
                                 value={val}
                                 onChange={(e) => handleResultInput(p.id, e.target.value)}
-                                className="w-full p-1.5 border border-slate-300 rounded-lg font-bold text-xs bg-white outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                                className="w-full px-2 py-1 border border-slate-200 rounded-md font-semibold text-xs bg-white outline-none focus:border-blue-500 disabled:bg-slate-100"
                               >
-                                <option value="">-- Select Result --</option>
+                                <option value="">-- Choose Finding --</option>
                                 <option value="Nil">Nil</option>
                                 <option value="Negative">Negative</option>
                                 <option value="Trace">Trace</option>
@@ -394,21 +510,21 @@ export default function VerificationQC({
                                 disabled={isLockedOrAwaiting}
                                 value={val}
                                 onChange={(e) => handleResultInput(p.id, e.target.value)}
-                                placeholder={isCrpQuantitative ? "e.g. 3.2" : "Enter result"}
-                                className="w-full p-1.5 border border-slate-300 rounded-lg font-mono font-bold text-xs outline-none text-center focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-100"
+                                placeholder="Result"
+                                className="w-full px-2 py-1 border border-slate-200 rounded-md font-mono font-bold text-xs outline-none text-left focus:border-blue-500 bg-white disabled:bg-slate-100"
                               />
                             )}
                           </td>
-                          <td className="py-2.5 px-4 text-slate-700 font-mono font-bold align-top">
+
+                          <td className="py-2 px-3 font-mono text-slate-500 text-[11px] align-top">
                             {effectiveUnit}
                           </td>
-                          <td className="py-2.5 px-4 text-slate-700 font-mono text-xs leading-relaxed align-top">
+
+                          <td className="py-2 px-3 text-slate-600 font-mono text-[11px] leading-relaxed align-top">
                             {effectiveRef ? (
-                              <div className="text-blue-700 font-semibold bg-blue-50/50 p-1 rounded-lg border border-blue-100">
-                                {effectiveRef}
-                              </div>
+                              <span className="text-blue-700 font-medium">{effectiveRef}</span>
                             ) : p.min_range !== null && p.max_range !== null && p.min_range !== undefined && p.min_range !== "" ? (
-                              <span className="font-semibold">{p.min_range} - {p.max_range}</span>
+                              <span>{p.min_range} - {p.max_range}</span>
                             ) : (
                               <span className="text-slate-400">Normal</span>
                             )}
@@ -424,11 +540,10 @@ export default function VerificationQC({
         })}
       </div>
 
-      {/* 4. DOCTOR REMARKS */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-        <label className="text-xs font-bold text-slate-900 uppercase flex items-center gap-1.5">
-          <MessageSquare className="w-4 h-4 text-blue-600" />
-          Doctor Remarks & Interpretation (Printed on Report)
+      {/* 5. PATHOLOGIST REMARKS */}
+      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs space-y-1.5 text-xs">
+        <label className="font-bold text-slate-700 text-[11px] uppercase tracking-wide flex items-center gap-1.5">
+          <MessageSquare className="w-3.5 h-3.5 text-blue-600" /> Pathologist Clinical Interpretation & Remarks
         </label>
         <textarea
           rows={2}
@@ -438,10 +553,11 @@ export default function VerificationQC({
             setLocalRemarks(e.target.value);
             if (handleRemarksChange) handleRemarksChange(e.target.value);
           }}
-          placeholder="e.g. Findings correlate with patient clinical history."
-          className="w-full p-3 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-slate-50 disabled:bg-slate-100"
+          placeholder="e.g. Microscopic findings correlate with acute infection. Clinical correlation advised."
+          className="w-full p-2 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium bg-slate-50/50 disabled:bg-slate-100 text-slate-800"
         />
       </div>
+
     </div>
   );
 }

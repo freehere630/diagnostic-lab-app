@@ -13,8 +13,7 @@ import {
   printMoneyReceiptA5, 
   printSpecificVialBarcode, 
   printDepartmentA4Report,
-  getAllOrderVials,
-  isImagingOrRadiologyInvestigation 
+  getAllOrderVials
 } from "./utils/printHelpers";
 
 import Login from "./components/Login";
@@ -30,7 +29,6 @@ import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
 import PatientLivePortal from "./components/PatientLivePortal";
 import DoctorManagement from "./components/DoctorManagement";
-
 
 const MASTER_SAMPLE_TYPES = [
   "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", 
@@ -66,42 +64,13 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const handleRejectSample = async (orderId, reason = "Hemolyzed Specimen") => {
-    if (!orderId) return;
-    try {
-      const res = await requestSampleRecollection(orderId, reason);
-      const cleanRemarks = res?.fullRemarks || `[RECOLLECTION REQUIRED: ${reason}]`;
 
-      // Safe update: guards against scope issues
-      if (typeof setOrders === "function") {
-        setOrders((prev) =>
-          prev.map((o) =>
-            (o.orderId === orderId || o.id === orderId)
-              ? {
-                  ...o,
-                  sample_status: "Repeat Collection Required",
-                  sampleStatus: "Repeat Collection Required",
-                  verifierRemarks: cleanRemarks,
-                  verifier_remarks: cleanRemarks
-                }
-              : o
-          )
-        );
-      }
-
-      if (typeof fetchPaginatedOrders === "function") {
-        await fetchPaginatedOrders();
-      }
-    } catch (e) {
-      console.warn("Reject background notice:", e);
-    }
-  };
   // Date Filter Defaults
   const [activePreset, setActivePreset] = useState("TODAY");
   const [dateRange, setDateRange] = useState({ from: todayStr, to: todayStr });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Patient Tracking Portal
+  // Patient Tracking Portal (Public QR Scan)
   const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
@@ -119,6 +88,35 @@ export default function App() {
     tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, 
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
   });
+
+  // Rejection Handler
+  const handleRejectSample = async (orderId, reason = "Hemolyzed Specimen") => {
+    if (!orderId) return;
+    try {
+      const res = await requestSampleRecollection(orderId, reason);
+      const cleanRemarks = res?.fullRemarks || `[RECOLLECTION REQUIRED: ${reason}]`;
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.orderId === orderId || o.id === orderId)
+            ? {
+                ...o,
+                sample_status: "Repeat Collection Required",
+                sampleStatus: "Repeat Collection Required",
+                verifierRemarks: cleanRemarks,
+                verifier_remarks: cleanRemarks
+              }
+            : o
+        )
+      );
+
+      if (typeof fetchPaginatedOrders === "function") {
+        await fetchPaginatedOrders();
+      }
+    } catch (e) {
+      console.warn("Reject background notice:", e);
+    }
+  };
 
   // 1. Check Public QR Scan Link
   useEffect(() => {
@@ -208,7 +206,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-const fetchPaginatedOrders = async () => {
+  const fetchPaginatedOrders = async () => {
     if (!currentUser) return;
     setIsLoading(true);
     try {
@@ -223,7 +221,6 @@ const fetchPaginatedOrders = async () => {
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
 
       const formatted = (res.orders || []).map((o, idx) => {
-        // Hydrate tests from testCatalog so department/tube_color is never lost
         const matchedTests = (o.order_tests || []).map(ot => {
           const rawTest = ot.test || ot.tests || {};
           const testId = ot.test_id || rawTest.id || ot.id;
@@ -254,7 +251,6 @@ const fetchPaginatedOrders = async () => {
             ? localMatch.vials
             : [];
 
-       // Inside fetchPaginatedOrders in src/App.jsx:
         return {
           orderId: o.id || o.orderId,
           receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "").slice(4)}-${String(1001 + idx)}`,
@@ -283,7 +279,6 @@ const fetchPaginatedOrders = async () => {
           results: Array.isArray(o.results)
             ? o.results.reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {})
             : (o.results || {}),
-          // FIX: Maps sample_status so it never resets to 'Pending' on reload
           sample_status: o.sample_status || o.sampleStatus || localMatch?.sample_status || "Order Created",
           sampleStatus: o.sample_status || o.sampleStatus || localMatch?.sample_status || "Order Created",
           qcStatus: o.qc_status || o.qcStatus || "Pending",
@@ -326,8 +321,7 @@ const fetchPaginatedOrders = async () => {
     } else if (preset === "YESTERDAY") {
       const y = new Date();
       y.setDate(y.getDate() - 1);
-      const yStr = y.toISOString().slice(0, 10);
-      setDateRange({ from: yStr, to: yStr });
+      setDateRange({ from: y.toISOString().slice(0, 10), to: y.toISOString().slice(0, 10) });
     } else if (preset === "LAST_7") {
       const d = new Date();
       d.setDate(d.getDate() - 7);
@@ -342,7 +336,7 @@ const fetchPaginatedOrders = async () => {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-const handleMarkRecollected = async (orderId) => {
+  const handleMarkRecollected = async (orderId) => {
     if (!orderId) return;
     setIsLoading(true);
     try {
@@ -363,7 +357,6 @@ const handleMarkRecollected = async (orderId) => {
         )
       );
 
-      // Force active selection refresh so the banner dismisses instantly
       if (selectedOrderId === orderId) {
         setSelectedOrderId(orderId);
       }
@@ -375,12 +368,9 @@ const handleMarkRecollected = async (orderId) => {
     }
   };
 
-const departmentalVials = useMemo(() => {
+  const departmentalVials = useMemo(() => {
     if (!activeOrder?.tests) return [];
-    
-    // Pass testCatalog so department IDs and tube colors are accurately resolved
     const resolvedVials = getAllOrderVials(activeOrder, testCatalog);
-    
     return resolvedVials.map((v) => ({
       deptCode: v.deptCode || "GEN",
       testBarcode: v.barcode || v.testBarcode || activeOrder.barcode,
@@ -465,7 +455,7 @@ const departmentalVials = useMemo(() => {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nSample Barcode: ${createdOrder.barcode}\nPaid: ৳${finalPaid} | Due: ৳${finalDue}`);
+      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nBarcode: ${createdOrder.barcode}`);
       setActiveTab("dashboard");
       fetchPaginatedOrders();
     } catch (e) { 
@@ -494,7 +484,7 @@ const departmentalVials = useMemo(() => {
     }
   };
 
-const handleResultInput = async (paramId, val) => {
+  const handleResultInput = async (paramId, val) => {
     if (!activeOrder || activeOrder.isLocked) return;
     if (!paramId || String(paramId).trim() === "" || paramId === "undefined") return;
 
@@ -503,7 +493,6 @@ const handleResultInput = async (paramId, val) => {
       String(val).trim() === "undefined" || String(val).trim() === "null"
     ) ? "" : String(val).trim();
 
-    // If previous remarks had recollection notice, reset to clean clinical remark
     let cleanRemarks = activeOrder.verifierRemarks || "";
     if (cleanRemarks.toUpperCase().includes("RECOLLECTION REQUIRED")) {
       cleanRemarks = "New sample recollected. Clinically correlated and verified with internal quality control standards.";
@@ -525,16 +514,16 @@ const handleResultInput = async (paramId, val) => {
       )
     );
 
-    setSaveStatus({ state: "saving", message: "Saving result to cloud..." });
+    setSaveStatus({ state: "saving", message: "Syncing..." });
     try {
       await saveTestResult(activeOrder.orderId, paramId, cleanVal, "ENTERED");
       if (cleanRemarks !== activeOrder.verifierRemarks) {
         await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", activeOrder.orderId);
       }
-      setSaveStatus({ state: "saved", message: "Result saved" });
-      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 2000);
+      setSaveStatus({ state: "saved", message: "Saved" });
+      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1500);
     } catch (e) {
-      setSaveStatus({ state: "error", message: "Failed to save: " + e.message });
+      setSaveStatus({ state: "error", message: "Error: " + e.message });
     }
   };
 
@@ -561,7 +550,7 @@ const handleResultInput = async (paramId, val) => {
         verifierRemarks: remarksToSave
       } : o));
 
-      alert("✅ Report Verified and Locked with Remarks!");
+      alert("✅ Report Verified and Locked!");
       fetchPaginatedOrders();
     } catch (e) { 
       alert("Verification failed: " + e.message); 
@@ -575,14 +564,13 @@ const handleResultInput = async (paramId, val) => {
     setIsLoading(true);
     try {
       await createNewTestWithParameters(newTestForm);
-      alert("✅ Test Created!");
+      alert("✅ Test Added to Catalog!");
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
       setActiveTab("reception");
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // OPEN EDIT MODAL (PRESERVES MULTI-RANGE GENDER/AGE TEXT)
   const handleOpenEditModal = (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
     const normalizedParams = rawParams.length > 0
@@ -619,7 +607,7 @@ const handleResultInput = async (paramId, val) => {
     setIsLoading(true);
     try {
       await updateExistingTest(editingTest.id, editingTest);
-      alert("✅ Test Updated Successfully!");
+      alert("✅ Test Updated!");
       setEditingTest(null);
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
@@ -636,7 +624,6 @@ const handleResultInput = async (paramId, val) => {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // 1-CLICK REAGENT STOCK TOGGLE HANDLER
   const handleToggleReagent = async (testId, newStatus) => {
     try {
       await toggleTestAvailability(testId, newStatus);
@@ -655,7 +642,7 @@ const handleResultInput = async (paramId, val) => {
       const { departments: depts, tests } = await getMasterData();
       setDepartments(depts || []);
       setTestCatalog(tests || []);
-      alert("✅ Standard Radiology & Imaging Catalog added successfully!");
+      alert("✅ Standard Radiology Catalog loaded!");
     } catch (e) {
       alert("Notice loading radiology tests: " + e.message);
     } finally {
@@ -667,13 +654,13 @@ const handleResultInput = async (paramId, val) => {
     setIsLoading(true);
     try {
       await registerStaffUser(staffData);
-      alert("✅ Staff Registered!");
+      alert("✅ Staff Member Registered!");
       setStaffList((await getStaffUsers()) || []);
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
   const handleDeleteStaff = async (userId, userName) => {
-    if (!window.confirm(`Delete staff "${userName}"?`)) return;
+    if (!window.confirm(`Delete staff member "${userName}"?`)) return;
     setIsLoading(true);
     try {
       await deleteStaffUser(userId);
@@ -686,7 +673,7 @@ const handleResultInput = async (paramId, val) => {
     try {
       await createOrUpdateDoctor(docData);
       setDoctorsList((await getDoctorsList()) || []);
-      alert("✅ Doctor Saved Successfully!");
+      alert("✅ Doctor Saved!");
     } catch (e) {
       alert("Error saving doctor: " + e.message);
     } finally {
@@ -712,23 +699,24 @@ const handleResultInput = async (paramId, val) => {
       localStorage.setItem("apex_lab_settings", JSON.stringify(settingsData));
       const saved = await saveLabSettings(settingsData);
       setLabSettings(saved || settingsData);
-      alert("✅ Settings Saved to Database!");
+      alert("✅ Branding Settings Saved!");
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
+  // Public QR Code Scan Verification Portal
   if (isVerifyingPublicUrl) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white font-sans">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <h2 className="text-lg font-bold">Connecting to Clinical LIMS...</h2>
-        <p className="text-xs text-slate-400 mt-1">Retrieving live laboratory status</p>
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <h2 className="text-sm font-bold">Connecting to Clinical LIMS...</h2>
+        <p className="text-[11px] text-slate-400">Retrieving diagnostic laboratory status</p>
       </div>
     );
   }
 
   if (patientTrackingOrder || verificationError) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-3 sm:p-4">
         {patientTrackingOrder ? (
           <PatientLivePortal
             order={patientTrackingOrder}
@@ -736,17 +724,17 @@ const handleResultInput = async (paramId, val) => {
             staffList={staffList}
           />
         ) : (
-          <div className="bg-white p-6 rounded-2xl max-w-sm w-full text-center space-y-3">
-            <p className="text-rose-600 font-bold text-sm">Report Not Found</p>
+          <div className="bg-white p-5 rounded-2xl max-w-sm w-full text-center space-y-2.5 shadow-xl border border-slate-200">
+            <p className="text-rose-600 font-bold text-xs uppercase tracking-tight">Record Not Found</p>
             <p className="text-xs text-slate-500">{verificationError}</p>
             <button
               onClick={() => {
                 window.history.replaceState({}, document.title, window.location.pathname);
                 setVerificationError("");
               }}
-              className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold w-full"
+              className="px-4 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold w-full mt-2"
             >
-              Back to Home
+              Return to Login
             </button>
           </div>
         )}
@@ -771,7 +759,7 @@ const handleResultInput = async (paramId, val) => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans w-full">
+    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col w-full">
       <Navbar 
         currentUser={currentUser} 
         onLogout={() => setCurrentUser(null)} 
@@ -784,8 +772,9 @@ const handleResultInput = async (paramId, val) => {
         labSettings={labSettings} 
       />
       
+      {/* Micro Status Toast Strip */}
       {saveStatus.state !== "idle" && (
-        <div className={`py-1.5 px-4 text-xs text-center font-bold transition ${
+        <div className={`py-1 px-3 text-[11px] text-center font-semibold transition ${
           saveStatus.state === "saving" ? "bg-amber-500 text-white" : 
           saveStatus.state === "error" ? "bg-rose-600 text-white" : "bg-emerald-600 text-white"
         }`}>
@@ -793,7 +782,7 @@ const handleResultInput = async (paramId, val) => {
         </div>
       )}
 
-      <main className="w-full px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 flex-1">
+      <main className="w-full max-w-[1720px] mx-auto px-3 sm:px-4 py-3 sm:py-4 flex-1">
         {activeTab === "dashboard" && (
           <Dashboard
             orders={orders}
@@ -818,19 +807,6 @@ const handleResultInput = async (paramId, val) => {
             isLoading={isLoading}
           />
         )}
-        {activeTab === "verifier" && (
-          <VerificationQC
-            activeOrder={activeOrder}
-            handleResultInput={handleResultInput}
-            handleRemarksChange={handleRemarksChange}
-            handleVerifyInDb={handleVerifyInDb}
-            handleMarkRecollected={handleMarkRecollected}
-            handleRejectSample={handleRejectSample}
-            isLoading={isLoading}
-            saveStatus={saveStatus}
-            currentUser={currentUser}
-          />
-        )}
 
         {activeTab === "reception" && (
           <ReceptionPOS 
@@ -844,7 +820,6 @@ const handleResultInput = async (paramId, val) => {
             paidVal={paidVal}
             setPaidVal={setPaidVal}
             handleSaveOrderToDb={handleSaveOrderToDb} 
-            handlePrintMoneyReceipt={() => printMoneyReceiptA5(activeOrder, labSettings)} 
             activeOrder={activeOrder} 
             isLoading={isLoading} 
             doctorsList={doctorsList}
@@ -869,7 +844,21 @@ const handleResultInput = async (paramId, val) => {
           />
         )}
 
-        {/* REPORTS & PRINT (WITH PRE-PRINTED AL-FATTAH PAD TOGGLE) */}
+        {activeTab === "verifier" && (
+          <VerificationQC
+            activeOrder={activeOrder}
+            handleResultInput={handleResultInput}
+            handleRemarksChange={handleRemarksChange}
+            handleVerifyInDb={handleVerifyInDb}
+            handleMarkRecollected={handleMarkRecollected}
+            handleRejectSample={handleRejectSample}
+            isLoading={isLoading}
+            saveStatus={saveStatus}
+            currentUser={currentUser}
+            labSettings={labSettings}
+          />
+        )}
+
         {activeTab === "reports" && (
           <ReportsPrint 
             activeOrder={activeOrder} 
@@ -914,6 +903,15 @@ const handleResultInput = async (paramId, val) => {
           />
         )}
 
+        {activeTab === "doctor-manager" && (
+          <DoctorManagement 
+            doctorsList={doctorsList} 
+            handleSaveDoctor={handleSaveDoctor} 
+            handleDeleteDoctor={handleDeleteDoctor} 
+            isLoading={isLoading} 
+          />
+        )}
+
         {activeTab === "staff-manager" && (
           <UserManagement 
             staffList={staffList} 
@@ -927,15 +925,6 @@ const handleResultInput = async (paramId, val) => {
           <LabSettings 
             labSettings={labSettings} 
             handleSaveSettings={handleSaveSettings} 
-            isLoading={isLoading} 
-          />
-        )}
-
-        {activeTab === "doctor-manager" && (
-          <DoctorManagement 
-            doctorsList={doctorsList} 
-            handleSaveDoctor={handleSaveDoctor} 
-            handleDeleteDoctor={handleDeleteDoctor} 
             isLoading={isLoading} 
           />
         )}

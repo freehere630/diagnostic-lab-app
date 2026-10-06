@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { FlaskConical, Lock, Mail, ShieldCheck } from "lucide-react";
+import { FlaskConical, Lock, Mail, ShieldCheck, ArrowRight } from "lucide-react";
 import { getStaffUsers } from "../services/api";
 
 // Master Developer Account (Permanent Fail-Safe Credentials)
@@ -45,7 +45,7 @@ export default function Login({ onLoginSuccess }) {
       if (matched) {
         onLoginSuccess({
           id: matched.id,
-          role: matched.role, // 'manager', 'verifier', 'technologist', 'receptionist'
+          role: matched.role,
           name: matched.full_name,
           designation: matched.designation,
           email: matched.email,
@@ -62,62 +62,57 @@ export default function Login({ onLoginSuccess }) {
     }
 
     setIsSubmitting(false);
-    setErrorMsg("Invalid email or password. Please verify your credentials.");
+    setErrorMsg("Invalid email or password. Please verify credentials.");
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans text-slate-800 w-full">
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-800">
+    <div className="min-h-screen bg-slate-100/70 flex items-center justify-center p-4 text-slate-900">
+      <div className="max-w-sm w-full bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
         
         {/* Brand Banner */}
-        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-950 p-8 text-white text-center">
-          <div className="p-3 bg-white/10 rounded-2xl w-14 h-14 flex items-center justify-center mx-auto mb-3 border border-white/20 shadow-inner">
-            <FlaskConical className="w-7 h-7 text-blue-400" />
+        <div className="p-6 pb-4 text-center">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-2.5 text-white shadow-xs">
+            <FlaskConical className="w-5 h-5" />
           </div>
-          <h1 className="text-xl font-black tracking-tight">Apex Clinical LIMS</h1>
-          <p className="text-xs text-blue-200 mt-1">Enterprise Laboratory Operating System</p>
+          <h1 className="text-base font-bold tracking-tight text-slate-900">Apex Clinical LIMS</h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">Laboratory Operating & Reporting System</p>
         </div>
 
         {/* Credentials Form */}
-        <div className="p-8">
-          <div className="mb-6 text-center">
-            <h2 className="text-base font-bold text-slate-900">Workstation Authentication</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Enter your designated laboratory email and password</p>
-          </div>
-
+        <div className="p-6 pt-0 space-y-3.5">
           {errorMsg && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-semibold text-center">
+            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-[11px] rounded-lg font-semibold text-center">
               {errorMsg}
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-3 text-xs">
             <div>
-              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Email Address</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Workstation Email</label>
               <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <Mail className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                 <input
                   type="email"
                   required
-                  placeholder="e.g. rtraju630@gmail.com"
+                  placeholder="name@lab.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  className="w-full pl-8 pr-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 transition font-medium"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Password</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Password</label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <Lock className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 text-xs border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  className="w-full pl-8 pr-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-mono transition"
                 />
               </div>
             </div>
@@ -125,14 +120,14 @@ export default function Login({ onLoginSuccess }) {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+              className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs shadow-xs transition flex items-center justify-center gap-1.5 active:scale-[0.98] mt-2"
             >
-              <ShieldCheck className="w-4 h-4" /> 
-              {isSubmitting ? "Authenticating..." : "Authorize & Enter Workstation"}
+              <span>{isSubmitting ? "Authenticating..." : "Authorize Workstation"}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </form>
 
-          <div className="mt-8 pt-4 border-t border-slate-100 text-center text-[10px] text-slate-400">
+          <div className="pt-3 border-t border-slate-100 text-center text-[10px] text-slate-400">
             Protected Medical System • ISO 15189:2022 Compliant
           </div>
         </div>

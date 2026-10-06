@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Settings, Plus, Edit, Trash2, X, Sparkles, Search } from "lucide-react";
+import { Settings, Plus, Edit, Trash2, X, Sparkles, Search, Check, AlertCircle } from "lucide-react";
 
 export default function TestManager({
   departments = [],
@@ -20,7 +20,6 @@ export default function TestManager({
 }) {
   const [searchCatalog, setSearchCatalog] = useState("");
 
-  // Parameter Row Management (Create Form)
   const addCreateParameterRow = () => {
     setNewTestForm({
       ...newTestForm,
@@ -47,7 +46,6 @@ export default function TestManager({
     });
   };
 
-  // Parameter Row Management (Edit Modal)
   const addEditParameterRow = () => {
     if (!editingTest) return;
     setEditingTest({
@@ -78,7 +76,6 @@ export default function TestManager({
     });
   };
 
-  // Filter Catalog
   const filteredCatalog = testCatalog.filter((t) => {
     const q = searchCatalog.trim().toLowerCase();
     return (
@@ -90,99 +87,115 @@ export default function TestManager({
   });
 
   return (
-    <div className="space-y-6 w-full font-sans text-slate-800">
+    <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
       
-      {/* 1. RADIOLOGY CATALOG QUICK SEED BANNER */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 p-4 rounded-2xl text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-md">
-        <div>
-          <h3 className="font-bold text-sm flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-300" /> Need Standard Radiology & Imaging Templates?
-          </h3>
-          <p className="text-xs text-blue-200 mt-0.5">
-            1-Click import standard X-Ray, USG, CT Scan, MRI, and ECG templates into your catalog.
-          </p>
+      {/* 1. SEED RADIOLOGY QUICK-BANNER (COMPACT) */}
+      <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+          <div>
+            <span className="font-bold text-xs block">Need Standard Radiology & Imaging Templates?</span>
+            <span className="text-[10px] text-slate-400 block">1-Click import templates for X-Ray, USG, CT Scan, MRI, and ECG into catalog.</span>
+          </div>
         </div>
+
         <button
           type="button"
           disabled={isLoading}
           onClick={handleSeedRadiology}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition whitespace-nowrap"
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center gap-1 transition shrink-0 whitespace-nowrap"
         >
-          <Plus className="w-3.5 h-3.5" /> {isLoading ? "Adding..." : "Load Radiology Catalog"}
+          <Plus className="w-3.5 h-3.5" /> {isLoading ? "Importing..." : "Import Radiology Tests"}
         </button>
       </div>
 
-      {/* 2. CREATE NEW TEST OR PROFILE CARD */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
-        <h2 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-blue-600" /> Create Test or Profile Panel
-        </h2>
-        <p className="text-xs text-slate-500 mb-6">
-          Supports single tests, multi-test profiles, and multiple reference ranges (Gender / Age / Clinical cutoffs).
-        </p>
+      {/* 2. CREATE NEW TEST OR PROFILE PANEL (SPACE SAVING) */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <span className="font-bold text-xs uppercase tracking-wide text-slate-800 flex items-center gap-1.5">
+            <Settings className="w-3.5 h-3.5 text-blue-600" /> New Test / Panel Configuration
+          </span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              id="createIsProfileCheck"
+              checked={Boolean(newTestForm.isProfile)}
+              onChange={(e) => setNewTestForm({ ...newTestForm, isProfile: e.target.checked })}
+              className="w-3.5 h-3.5 text-blue-600 rounded cursor-pointer"
+            />
+            <label htmlFor="createIsProfileCheck" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+              Multi-Parameter Profile / Panel (e.g. LFT, Lipid, KFT)
+            </label>
+          </div>
+        </div>
 
-        {/* 6 MASTER DETAILS */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-xs">
+        {/* Master Details Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
           <div>
-            <label className="font-bold text-slate-600 uppercase">Test Name *</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Test Name *</label>
             <input
               type="text"
               placeholder="e.g. Serum Uric Acid"
               value={newTestForm.name}
               onChange={(e) => setNewTestForm({ ...newTestForm, name: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+              className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-semibold"
             />
           </div>
+
           <div>
-            <label className="font-bold text-slate-600 uppercase">Short Code *</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Short Code *</label>
             <input
               type="text"
               placeholder="e.g. UA or TSH"
               value={newTestForm.code}
               onChange={(e) => setNewTestForm({ ...newTestForm, code: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold"
+              className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-mono font-bold"
             />
           </div>
+
           <div>
-            <label className="font-bold text-slate-600 uppercase">Department</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department</label>
             <select
               value={newTestForm.deptId}
               onChange={(e) => setNewTestForm({ ...newTestForm, deptId: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
+              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
             >
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>{d.icon || "🔬"} {d.name}</option>
               ))}
             </select>
           </div>
+
           <div>
-            <label className="font-bold text-slate-600 uppercase">Price (BDT) *</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Price (BDT) *</label>
             <input
               type="number"
-              placeholder="e.g. 400"
+              placeholder="400"
               value={newTestForm.price}
               onChange={(e) => setNewTestForm({ ...newTestForm, price: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none font-mono font-bold text-emerald-700"
+              className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono font-bold text-slate-800"
             />
           </div>
+
           <div>
-            <label className="font-bold text-slate-600 uppercase">Sample Type</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Specimen</label>
             <select
               value={newTestForm.sampleType}
               onChange={(e) => setNewTestForm({ ...newTestForm, sampleType: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
+              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
             >
               {MASTER_SAMPLE_TYPES.map((type, idx) => (
                 <option key={idx} value={type}>{type}</option>
               ))}
             </select>
           </div>
+
           <div>
-            <label className="font-bold text-slate-600 uppercase">Tube Color</label>
+            <label className="font-semibold text-slate-600 text-[11px] block mb-1">Vial Tube</label>
             <select
               value={newTestForm.tubeColor}
               onChange={(e) => setNewTestForm({ ...newTestForm, tubeColor: e.target.value })}
-              className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
+              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
             >
               {MASTER_TUBE_COLORS.map((tube, idx) => (
                 <option key={idx} value={tube}>{tube}</option>
@@ -191,63 +204,44 @@ export default function TestManager({
           </div>
         </div>
 
-        {/* MULTI-TEST PROFILE CHECKBOX */}
-        <div className="mt-4 flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="createIsProfileCheck"
-            checked={Boolean(newTestForm.isProfile)}
-            onChange={(e) => setNewTestForm({ ...newTestForm, isProfile: e.target.checked })}
-            className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-          />
-          <label htmlFor="createIsProfileCheck" className="text-xs font-bold text-slate-700 cursor-pointer">
-            Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, KFT)
-          </label>
-        </div>
-
-        {/* PARAMETERS BUILDER */}
-        <div className="mt-8 border-t pt-6">
-          <div className="flex justify-between items-center mb-3">
-            <div>
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Parameters & Clinical Reference Limits</h3>
-              <p className="text-[11px] text-slate-400">Choose 'Multi-Range' to specify different ranges for Male, Female, or Age groups</p>
-            </div>
+        {/* Parameters Builder Rows */}
+        <div className="border-t border-slate-100 pt-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase text-slate-500">
+              Investigation Parameters ({newTestForm.parameters.length})
+            </span>
             <button
               type="button"
               onClick={addCreateParameterRow}
-              className="px-3.5 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold border border-blue-200 flex items-center gap-1.5 hover:bg-blue-100 transition shadow-sm"
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-semibold flex items-center gap-1 transition"
             >
-              <Plus className="w-3.5 h-3.5" /> Add Parameter Row
+              <Plus className="w-3 h-3" /> Add Parameter Row
             </button>
           </div>
 
-          <div className="space-y-2.5">
+          <div className="space-y-1.5">
             {newTestForm.parameters.map((param, index) => {
               const isMultiRange = param.param_type === "multirange";
               const isNumeric = param.param_type === "numeric";
               const isQual = param.param_type === "qualitative";
-              const isText = param.param_type === "text";
 
               return (
-                <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs items-center">
-                  
-                  {/* Parameter Name */}
-                  <div className="sm:col-span-4">
+                <div key={param.id || index} className="grid grid-cols-12 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200 text-xs items-center">
+                  <div className="col-span-4">
                     <input
                       type="text"
-                      placeholder="Parameter Name (e.g. Uric Acid)"
+                      placeholder="Parameter Name"
                       value={param.name}
                       onChange={(e) => {
                         const updated = [...newTestForm.parameters];
                         updated[index].name = e.target.value;
                         setNewTestForm({ ...newTestForm, parameters: updated });
                       }}
-                      className="w-full p-2 border rounded-lg bg-white font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-2 py-1 border border-slate-200 rounded bg-white font-medium outline-none text-xs"
                     />
                   </div>
-                  
-                  {/* Reference Range Type */}
-                  <div className="sm:col-span-3">
+
+                  <div className="col-span-3">
                     <select
                       value={param.param_type}
                       onChange={(e) => {
@@ -256,46 +250,44 @@ export default function TestManager({
                         if (e.target.value === "text") updated[index].unit = "Report";
                         setNewTestForm({ ...newTestForm, parameters: updated });
                       }}
-                      className="w-full p-2 border rounded-lg bg-white font-bold text-blue-700 outline-none"
+                      className="w-full px-2 py-1 border border-slate-200 rounded bg-white font-semibold text-blue-700 outline-none text-xs"
                     >
-                      <option value="numeric">Simple Numeric (Min – Max)</option>
-                      <option value="multirange">Multi-Range (Gender / Age / Text)</option>
-                      <option value="qualitative">Qualitative (+ / - Reactive)</option>
-                      <option value="text">Descriptive Text (Imaging)</option>
+                      <option value="numeric">Simple Numeric (Min - Max)</option>
+                      <option value="multirange">Multi-Range (Gender / Age)</option>
+                      <option value="qualitative">Qualitative (+ / -)</option>
+                      <option value="text">Descriptive Text</option>
                     </select>
                   </div>
 
-                  {/* Unit */}
-                  <div className="sm:col-span-2">
+                  <div className="col-span-2">
                     <input
                       type="text"
-                      placeholder="Unit (mg/dL)"
+                      placeholder="Unit"
                       value={param.unit}
                       onChange={(e) => {
                         const updated = [...newTestForm.parameters];
                         updated[index].unit = e.target.value;
                         setNewTestForm({ ...newTestForm, parameters: updated });
                       }}
-                      className="w-full p-2 border rounded-lg bg-white font-mono outline-none"
+                      className="w-full px-2 py-1 border border-slate-200 rounded bg-white font-mono outline-none text-xs"
                     />
                   </div>
 
-                  {/* Range Value Inputs */}
-                  <div className="sm:col-span-2">
+                  <div className="col-span-2">
                     {isMultiRange ? (
-                      <textarea
-                        rows={2}
-                        placeholder="Male: 3.5 - 7.2&#10;Female: 2.6 - 6.0"
+                      <input
+                        type="text"
+                        placeholder="M: 3.5-7.2, F: 2.6-6.0"
                         value={param.reference_text || ""}
                         onChange={(e) => {
                           const updated = [...newTestForm.parameters];
                           updated[index].reference_text = e.target.value;
                           setNewTestForm({ ...newTestForm, parameters: updated });
                         }}
-                        className="w-full p-1.5 border rounded-lg bg-white font-mono text-[11px] leading-tight outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1 border border-slate-200 rounded bg-white font-mono text-[11px] outline-none"
                       />
                     ) : isNumeric ? (
-                      <div className="flex gap-1.5">
+                      <div className="flex gap-1">
                         <input
                           type="number"
                           placeholder="Min"
@@ -305,7 +297,7 @@ export default function TestManager({
                             updated[index].min = e.target.value;
                             setNewTestForm({ ...newTestForm, parameters: updated });
                           }}
-                          className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
+                          className="w-1/2 px-1 py-1 border border-slate-200 rounded bg-white font-mono text-center outline-none text-xs"
                         />
                         <input
                           type="number"
@@ -316,30 +308,29 @@ export default function TestManager({
                             updated[index].max = e.target.value;
                             setNewTestForm({ ...newTestForm, parameters: updated });
                           }}
-                          className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
+                          className="w-1/2 px-1 py-1 border border-slate-200 rounded bg-white font-mono text-center outline-none text-xs"
                         />
                       </div>
                     ) : isQual ? (
-                      <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-[11px] text-center truncate">
-                        Negative (Normal)
+                      <div className="text-[10px] text-slate-500 font-semibold px-2 py-1 bg-white border border-slate-200 rounded truncate">
+                        Negative (Ref)
                       </div>
                     ) : (
-                      <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-[11px] text-center truncate">
-                        Observation / Report
+                      <div className="text-[10px] text-slate-500 font-semibold px-2 py-1 bg-white border border-slate-200 rounded truncate">
+                        Observation
                       </div>
                     )}
                   </div>
 
-                  {/* Remove Button */}
-                  <div className="sm:col-span-1 flex justify-center">
+                  <div className="col-span-1 flex justify-center">
                     <button
                       type="button"
                       onClick={() => removeCreateParameterRow(index)}
                       disabled={newTestForm.parameters.length <= 1}
-                      className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30 rounded-lg transition"
-                      title="Remove parameter"
+                      className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30 rounded transition"
+                      title="Remove Row"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -347,90 +338,99 @@ export default function TestManager({
             })}
           </div>
 
-          <button
-            type="button"
-            onClick={handleSaveNewTest}
-            disabled={isLoading}
-            className="mt-6 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow transition flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" /> {isLoading ? "Saving..." : "Save Test to Catalog"}
-          </button>
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={handleSaveNewTest}
+              disabled={isLoading}
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Add to Catalog"}
+            </button>
+          </div>
         </div>
+
       </div>
 
       {/* 3. LIVE DIAGNOSTIC CATALOG DIRECTORY */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           <div>
-            <h3 className="font-bold text-sm text-slate-900">
-              Live Diagnostic Catalog ({testCatalog.length} Investigations)
+            <h3 className="font-bold text-xs uppercase tracking-wide text-slate-800">
+              Diagnostic Catalog Directory ({testCatalog.length} Investigations)
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Toggle reagent stock, edit pricing, or update clinical reference limits</p>
+            <p className="text-[10px] text-slate-400">Toggle reagent stock status or edit prices and reference limits</p>
           </div>
 
           <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search test, code, dept..."
+              placeholder="Search by test, code, dept..."
               value={searchCatalog}
               onChange={(e) => setSearchCatalog(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+              className="w-full pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-slate-50 transition"
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5">
           {filteredCatalog.map((t) => (
-            <div key={t.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs flex flex-col justify-between hover:shadow-md transition">
+            <div 
+              key={t.id} 
+              className="p-3 bg-slate-50/70 border border-slate-200 rounded-xl text-xs flex flex-col justify-between hover:border-slate-300 transition"
+            >
               <div>
-                <div className="flex justify-between items-start mb-1">
-                  <span className="font-black text-sm text-slate-900 leading-tight">{t.name}</span>
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono font-bold text-[10px]">{t.code}</span>
+                <div className="flex justify-between items-start gap-1">
+                  <span className="font-bold text-xs text-slate-900 leading-snug truncate">{t.name}</span>
+                  <span className="font-mono text-[10px] font-bold text-blue-700 bg-blue-50 px-1 py-0.2 rounded shrink-0">
+                    {t.code}
+                  </span>
                 </div>
-                <div className="flex items-center gap-1.5 my-1.5">
-                  <span className="px-2 py-0.5 bg-slate-200 text-slate-800 font-bold rounded text-[10px]">
+
+                <div className="flex items-center gap-1 my-1">
+                  <span className="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded text-[9px] font-semibold">
                     {t.dept_id?.replace("DEP-", "") || "GEN"}
                   </span>
                   {t.is_profile && (
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold rounded text-[10px]">
-                      PROFILE
+                    <span className="px-1.5 py-0.2 bg-purple-100 text-purple-700 rounded text-[9px] font-bold">
+                      PANEL
                     </span>
                   )}
                 </div>
-                <p className="text-slate-500 font-medium">{t.sample_type || "Blood"} • {t.tube_color || "Standard"}</p>
-                <p className="font-mono text-xs font-bold text-emerald-700 mt-1">Price: ৳ {t.price}</p>
+
+                <p className="text-[11px] text-slate-500 truncate">{t.sample_type || "Blood"} • {t.tube_color || "Standard"}</p>
+                <p className="font-mono font-bold text-slate-800 text-xs mt-1">৳{t.price}</p>
               </div>
 
-              {/* 1-CLICK REAGENT STOCK TOGGLE SWITCH */}
-              <div className="mt-3 pt-2.5 border-t border-slate-200 flex justify-between items-center">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Reagent:</span>
+              {/* 1-Click Reagent Stock Toggle Button */}
+              <div className="mt-2 pt-2 border-t border-slate-200/80 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500 font-semibold">Reagent:</span>
                 <button
                   type="button"
                   onClick={() => handleToggleReagent && handleToggleReagent(t.id, t.is_available === false)}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition shadow-sm ${
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition ${
                     t.is_available === false
-                      ? "bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200"
-                      : "bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200"
+                      ? "bg-rose-100 text-rose-700 border border-rose-200"
+                      : "bg-emerald-100 text-emerald-800 border border-emerald-200"
                   }`}
-                  title={t.is_available === false ? "Click to mark reagent in stock" : "Click if out of reagent to hide from POS"}
                 >
-                  <span className={`w-2 h-2 rounded-full ${t.is_available === false ? "bg-rose-600" : "bg-emerald-600"}`}></span>
-                  {t.is_available === false ? "Out of Reagent (Hidden)" : "In Stock (Active)"}
+                  <span className={`w-1.5 h-1.5 rounded-full ${t.is_available === false ? "bg-rose-600" : "bg-emerald-600"}`}></span>
+                  {t.is_available === false ? "Out of Stock" : "In Stock"}
                 </button>
               </div>
 
-              <div className="flex gap-2 mt-3 pt-2.5 border-t border-slate-200">
+              <div className="flex gap-1.5 mt-2 pt-2 border-t border-slate-200/80">
                 <button
                   onClick={() => handleOpenEditModal(t)}
-                  className="flex-1 py-1.5 bg-slate-900 hover:bg-blue-600 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 transition"
+                  className="flex-1 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded text-[11px] font-semibold flex items-center justify-center gap-1 transition"
                 >
-                  <Edit className="w-3.5 h-3.5" /> Edit
+                  <Edit className="w-3 h-3" /> Edit
                 </button>
                 <button
                   onClick={() => handleDeleteTest(t.id, t.name)}
-                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                  title="Delete test"
+                  className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                  title="Delete Investigation"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -440,265 +440,136 @@ export default function TestManager({
         </div>
       </div>
 
-      {/* 4. EDIT TEST MODAL (WITH MULTI-RANGE SUPPORT) */}
+      {/* 4. COMPACT EDIT TEST MODAL */}
       {editingTest && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-4xl w-full shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 max-w-2xl w-full shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto text-xs">
             
-            <div className="flex justify-between items-start border-b pb-4 mb-6">
+            <div className="flex justify-between items-center border-b pb-2 mb-3">
               <div>
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Edit className="w-5 h-5 text-blue-600" /> Edit Diagnostic Test / Profile
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Editing: <b>{editingTest.name}</b> ({editingTest.code})
-                </p>
+                <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                  <Edit className="w-3.5 h-3.5 text-blue-600" /> Edit Test Profile ({editingTest.code})
+                </span>
               </div>
-              <button onClick={() => setEditingTest(null)} className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400">
-                <X className="w-5 h-5" />
+              <button onClick={() => setEditingTest(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* 6 MASTER DETAILS IN EDIT */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
               <div>
-                <label className="font-bold text-slate-600 uppercase">Test Name *</label>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Name *</label>
                 <input
                   type="text"
                   value={editingTest.name || ""}
                   onChange={(e) => setEditingTest({ ...editingTest, name: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none font-semibold text-xs"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-slate-600 uppercase">Short Code *</label>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Code *</label>
                 <input
                   type="text"
                   value={editingTest.code || ""}
                   onChange={(e) => setEditingTest({ ...editingTest, code: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold"
+                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none font-mono font-bold text-xs"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-slate-600 uppercase">Department</label>
-                <select
-                  value={editingTest.deptId || editingTest.dept_id || ""}
-                  onChange={(e) => setEditingTest({ ...editingTest, deptId: e.target.value, dept_id: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
-                >
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.icon || "🔬"} {d.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 uppercase">Price (BDT) *</label>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Price (৳) *</label>
                 <input
                   type="number"
                   value={editingTest.price || ""}
                   onChange={(e) => setEditingTest({ ...editingTest, price: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none font-mono font-bold text-emerald-700"
+                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none font-mono font-bold text-xs"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-slate-600 uppercase">Sample Type</label>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department</label>
                 <select
-                  value={editingTest.sampleType || editingTest.sample_type || MASTER_SAMPLE_TYPES[0]}
-                  onChange={(e) => setEditingTest({ ...editingTest, sampleType: e.target.value, sample_type: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
+                  value={editingTest.deptId || editingTest.dept_id || ""}
+                  onChange={(e) => setEditingTest({ ...editingTest, deptId: e.target.value, dept_id: e.target.value })}
+                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none bg-slate-50 text-xs"
                 >
-                  {MASTER_SAMPLE_TYPES.map((type, idx) => (
-                    <option key={idx} value={type}>{type}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 uppercase">Tube Color</label>
-                <select
-                  value={editingTest.tubeColor || editingTest.tube_color || MASTER_TUBE_COLORS[0]}
-                  onChange={(e) => setEditingTest({ ...editingTest, tubeColor: e.target.value, tube_color: e.target.value })}
-                  className="w-full mt-1 p-2.5 border rounded-xl outline-none bg-slate-50 font-medium"
-                >
-                  {MASTER_TUBE_COLORS.map((tube, idx) => (
-                    <option key={idx} value={tube}>{tube}</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
                 </select>
               </div>
             </div>
 
-            {/* PROFILE CHECKBOX IN EDIT */}
-            <div className="mt-4 flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="editIsProfileCheck"
-                checked={Boolean(editingTest.isProfile !== undefined ? editingTest.isProfile : editingTest.is_profile)}
-                onChange={(e) => setEditingTest({ ...editingTest, isProfile: e.target.checked, is_profile: e.target.checked })}
-                className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-              />
-              <label htmlFor="editIsProfileCheck" className="text-xs font-bold text-slate-700 cursor-pointer">
-                Is this a Multi-Test Profile / Panel? (e.g. LFT, Lipid Profile, KFT)
-              </label>
-            </div>
-
-            {/* EDIT PARAMETERS BUILDER */}
-            <div className="mt-8 border-t pt-6">
-              <div className="flex justify-between items-center mb-3">
-                <div>
-                  <h4 className="font-bold text-xs uppercase text-slate-800 tracking-wider">Parameters & Clinical Limits</h4>
-                  <p className="text-[11px] text-slate-400">Modify parameter names, types, units, and custom multi-ranges (Gender / Age)</p>
-                </div>
+            {/* Edit Parameters Section */}
+            <div className="border-t border-slate-100 pt-2 space-y-1.5">
+              <div className="flex justify-between items-center mb-1">
+                <span className="font-bold text-[11px] uppercase text-slate-600">Parameters ({editingTest.parameters?.length})</span>
                 <button
                   type="button"
                   onClick={addEditParameterRow}
-                  className="px-3.5 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold border border-blue-200 flex items-center gap-1.5 hover:bg-blue-100 transition shadow-sm"
+                  className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-semibold"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add Parameter Row
+                  + Add Row
                 </button>
               </div>
 
-              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-                {(editingTest.parameters || []).map((param, index) => {
-                  const currentType = param.reference_text || param.ref_text ? "multirange" : (param.param_type || "numeric");
-                  const isMultiRange = currentType === "multirange";
-                  const isNumeric = currentType === "numeric";
-                  const isQual = currentType === "qualitative";
-                  const isText = currentType === "text";
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                {(editingTest.parameters || []).map((param, index) => (
+                  <div key={param.id || index} className="grid grid-cols-12 gap-1 items-center bg-slate-50 p-1 rounded border border-slate-200">
+                    <input
+                      type="text"
+                      value={param.name || ""}
+                      onChange={(e) => {
+                        const updated = [...editingTest.parameters];
+                        updated[index].name = e.target.value;
+                        setEditingTest({ ...editingTest, parameters: updated });
+                      }}
+                      className="col-span-5 px-1.5 py-0.5 border border-slate-200 rounded text-xs bg-white"
+                      placeholder="Parameter"
+                    />
 
-                  return (
-                    <div key={param.id || index} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs items-center">
-                      
-                      {/* Name */}
-                      <div className="sm:col-span-4">
-                        <input
-                          type="text"
-                          placeholder="Parameter Name"
-                          value={param.name || ""}
-                          onChange={(e) => {
-                            const updated = [...editingTest.parameters];
-                            updated[index].name = e.target.value;
-                            setEditingTest({ ...editingTest, parameters: updated });
-                          }}
-                          className="w-full p-2 border rounded-lg bg-white font-semibold outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
+                    <input
+                      type="text"
+                      value={param.unit || ""}
+                      onChange={(e) => {
+                        const updated = [...editingTest.parameters];
+                        updated[index].unit = e.target.value;
+                        setEditingTest({ ...editingTest, parameters: updated });
+                      }}
+                      className="col-span-2 px-1.5 py-0.5 border border-slate-200 rounded text-xs bg-white font-mono"
+                      placeholder="Unit"
+                    />
 
-                      {/* Type */}
-                      <div className="sm:col-span-3">
-                        <select
-                          value={currentType}
-                          onChange={(e) => {
-                            const updated = [...editingTest.parameters];
-                            updated[index].param_type = e.target.value;
-                            if (e.target.value !== "multirange") {
-                              updated[index].reference_text = "";
-                            }
-                            if (e.target.value === "text") updated[index].unit = "Report";
-                            setEditingTest({ ...editingTest, parameters: updated });
-                          }}
-                          className="w-full p-2 border rounded-lg bg-white font-bold text-blue-700 outline-none"
-                        >
-                          <option value="numeric">Numeric (Min – Max)</option>
-                          <option value="multirange">Multi-Range (Gender / Age / Text)</option>
-                          <option value="qualitative">Qualitative (+ / -)</option>
-                          <option value="text">Descriptive Text (Imaging)</option>
-                        </select>
-                      </div>
+                    <input
+                      type="text"
+                      value={param.reference_text || (param.min !== undefined ? `${param.min}-${param.max}` : "")}
+                      onChange={(e) => {
+                        const updated = [...editingTest.parameters];
+                        updated[index].reference_text = e.target.value;
+                        setEditingTest({ ...editingTest, parameters: updated });
+                      }}
+                      className="col-span-4 px-1.5 py-0.5 border border-slate-200 rounded text-xs bg-white font-mono"
+                      placeholder="Range / Limits"
+                    />
 
-                      {/* Unit */}
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          placeholder="Unit"
-                          value={param.unit || ""}
-                          onChange={(e) => {
-                            const updated = [...editingTest.parameters];
-                            updated[index].unit = e.target.value;
-                            setEditingTest({ ...editingTest, parameters: updated });
-                          }}
-                          className="w-full p-2 border rounded-lg bg-white font-mono outline-none"
-                        />
-                      </div>
-
-                      {/* Range Input */}
-                      <div className="sm:col-span-2">
-                        {isMultiRange ? (
-                          <textarea
-                            rows={2}
-                            placeholder="Male: 3.5 - 7.2&#10;Female: 2.6 - 6.0"
-                            value={param.reference_text || param.ref_text || ""}
-                            onChange={(e) => {
-                              const updated = [...editingTest.parameters];
-                              updated[index].reference_text = e.target.value;
-                              setEditingTest({ ...editingTest, parameters: updated });
-                            }}
-                            className="w-full p-1.5 border rounded-lg bg-white font-mono text-[11px] leading-tight outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        ) : isNumeric ? (
-                          <div className="flex gap-1.5">
-                            <input
-                              type="number"
-                              placeholder="Min"
-                              value={param.min !== undefined && param.min !== null ? param.min : (param.min_range || "")}
-                              onChange={(e) => {
-                                const updated = [...editingTest.parameters];
-                                updated[index].min = e.target.value;
-                                updated[index].min_range = e.target.value;
-                                setEditingTest({ ...editingTest, parameters: updated });
-                              }}
-                              className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
-                            />
-                            <input
-                              type="number"
-                              placeholder="Max"
-                              value={param.max !== undefined && param.max !== null ? param.max : (param.max_range || "")}
-                              onChange={(e) => {
-                                const updated = [...editingTest.parameters];
-                                updated[index].max = e.target.value;
-                                updated[index].max_range = e.target.value;
-                                setEditingTest({ ...editingTest, parameters: updated });
-                              }}
-                              className="w-1/2 p-2 border rounded-lg bg-white font-mono text-center outline-none"
-                            />
-                          </div>
-                        ) : isQual ? (
-                          <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-emerald-800 font-bold text-center">
-                            Negative
-                          </div>
-                        ) : (
-                          <div className="bg-slate-100 p-2 rounded-lg text-slate-600 font-medium text-center">
-                            Observation
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Remove Button */}
-                      <div className="sm:col-span-1 flex justify-center">
-                        <button
-                          type="button"
-                          onClick={() => removeEditParameterRow(index)}
-                          disabled={(editingTest.parameters || []).length <= 1}
-                          className="p-2 text-rose-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30 rounded-lg transition"
-                          title="Remove parameter"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => removeEditParameterRow(index)}
+                      className="col-span-1 text-center text-slate-400 hover:text-rose-600"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mx-auto" />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-8 border-t pt-4">
+            <div className="flex justify-end gap-1.5 pt-3 border-t mt-3">
               <button
                 type="button"
                 onClick={() => setEditingTest(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"
+                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold text-xs"
               >
                 Cancel
               </button>
@@ -706,9 +577,9 @@ export default function TestManager({
                 type="button"
                 onClick={handleSaveTestEdits}
                 disabled={isLoading}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow"
+                className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-bold text-xs shadow-xs"
               >
-                Save Changes to Supabase
+                Save Changes
               </button>
             </div>
 

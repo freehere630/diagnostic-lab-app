@@ -1,7 +1,6 @@
 import React from "react";
 import {
   FlaskConical,
-  Database,
   RefreshCw,
   Menu,
   X,
@@ -14,7 +13,7 @@ import {
   Settings,
   UserCheck,
   Building2,
-  Stethoscope, // <--- Imported here
+  Stethoscope,
   LogOut
 } from "lucide-react";
 
@@ -30,66 +29,16 @@ export default function Navbar({
   labSettings
 }) {
   const allTabs = [
-    { 
-      id: "dashboard", 
-      label: "Dashboard", 
-      icon: Activity, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
-    },
-    { 
-      id: "reception", 
-      label: "1. Reception & POS", 
-      icon: Receipt, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
-    },
-    { 
-      id: "samples", 
-      label: "2. Sample Tracking", 
-      icon: QrCode, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
-    },
-    { 
-      id: "worklists", 
-      label: "3. Worklists", 
-      icon: Layers, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] 
-    },
-    { 
-      id: "verifier", 
-      label: "4. QC & Verification", 
-      icon: ShieldCheck, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] 
-    },
-    { 
-      id: "reports", 
-      label: "5. Reports & Print", 
-      icon: FileText, 
-      roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] 
-    },
-    { 
-      id: "test-manager", 
-      label: "6. Test Management", 
-      icon: Settings, 
-      roles: ["developer", "manager", "admin"] 
-    },
-    { 
-      id: "staff-manager", 
-      label: "7. Staff & Signatures", 
-      icon: UserCheck, 
-      roles: ["developer", "manager", "admin"] 
-    },
-    { 
-      id: "lab-settings", 
-      label: "8. Hospital Branding", 
-      icon: Building2, 
-      roles: ["developer"] // Developer Only
-    },
-    { 
-      id: "doctor-manager", 
-      label: "9. Doctor Directory", 
-      icon: Stethoscope, 
-      roles: ["developer", "manager", "admin", "receptionist"] 
-    },
+    { id: "dashboard", label: "Dashboard", icon: Activity, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] },
+    { id: "reception", label: "Reception POS", icon: Receipt, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] },
+    { id: "samples", label: "Vials & Barcodes", icon: QrCode, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] },
+    { id: "worklists", label: "Worklists", icon: Layers, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] },
+    { id: "verifier", label: "QC & Verification", icon: ShieldCheck, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist"] },
+    { id: "reports", label: "Reports & Print", icon: FileText, roles: ["developer", "manager", "admin", "verifier", "biochemist", "technologist", "receptionist"] },
+    { id: "test-manager", label: "Test Catalog", icon: Settings, roles: ["developer", "manager", "admin"] },
+    { id: "doctor-manager", label: "Doctors", icon: Stethoscope, roles: ["developer", "manager", "admin", "receptionist"] },
+    { id: "staff-manager", label: "Staff", icon: UserCheck, roles: ["developer", "manager", "admin"] },
+    { id: "lab-settings", label: "Branding", icon: Building2, roles: ["developer"] },
   ];
 
   const userRole = (currentUser?.role || "").toLowerCase();
@@ -98,86 +47,123 @@ export default function Navbar({
   const logoData = labSettings?.logo_data || "";
 
   return (
-    <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-50 w-full">
-      <div className="w-full px-4 sm:px-6 lg:px-8 2xl:px-12">
-        <div className="flex items-center justify-between h-16">
+    <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-xs select-none">
+      <div className="max-w-[1720px] mx-auto px-4">
+        <div className="flex items-center justify-between h-14 gap-4">
           
-          <div className="flex items-center gap-3">
+          {/* 1. Left: Branding */}
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg hover:bg-slate-800"
+              className="lg:hidden p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
-            {logoData ? (
-              <img src={logoData} alt="Logo" className="h-9 w-9 object-contain bg-white p-1 rounded-xl shadow" />
-            ) : (
-              <div className="p-2 bg-blue-600 rounded-xl shadow">
-                <FlaskConical className="w-5 h-5 text-white" />
-              </div>
-            )}
-            <div>
-              <h1 className="font-black text-base sm:text-lg tracking-tight flex items-center gap-2">
-                {labName}
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
-                  <Database className="w-3 h-3" /> Supabase Live
+
+            <div className="flex items-center gap-2.5">
+              {logoData ? (
+                <img src={logoData} alt="Logo" className="h-8 w-8 object-contain rounded-md border border-slate-200 p-0.5" />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+                  <FlaskConical className="w-4 h-4" />
+                </div>
+              )}
+
+              <div className="leading-tight">
+                <span className="font-bold text-sm text-slate-900 block truncate max-w-[200px] sm:max-w-xs">
+                  {labName}
                 </span>
-              </h1>
-              <p className="text-[10px] text-slate-400">Diagnostic Laboratory System</p>
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:block">
+                  Diagnostic Laboratory System
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* 2. Center: Fixed Rigid Tabs (Zero Shift on Click) */}
+          <nav className="hidden lg:flex items-center gap-1 overflow-x-auto py-1">
+            {visibleTabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border ${
+                    isActive
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-transparent"
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? "text-white" : "text-slate-400"}`} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* 3. Right: Refresh, User & Sign Out */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={loadDatabaseData}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition"
-              title="Refresh Cloud Data"
+              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg"
+              title="Sync / Refresh Data"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin text-blue-400" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-blue-600" : ""}`} />
             </button>
 
-            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl">
-              <div className={`w-7 h-7 rounded-lg ${currentUser?.avatarBg || 'bg-blue-600'} flex items-center justify-center font-bold text-xs text-white`}>
-                {currentUser?.name ? currentUser.name[0] : "U"}
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+              <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0">
+                {currentUser?.name ? currentUser.name[0].toUpperCase() : "U"}
               </div>
-              <div className="text-left hidden sm:block">
-                <p className="text-xs font-bold text-slate-200 leading-none">{currentUser?.name}</p>
-                <p className="text-[10px] font-semibold text-amber-400 capitalize mt-0.5">
-                  {currentUser?.role === "developer" ? "Chief Developer" : currentUser?.role}
-                </p>
+              <div className="hidden xl:block text-left leading-none">
+                <span className="font-semibold text-xs text-slate-800 block truncate max-w-[100px]">
+                  {currentUser?.name?.split(" ")[0] || "Staff"}
+                </span>
+                <span className="text-[9px] text-slate-400 uppercase font-mono mt-0.5 block">
+                  {currentUser?.role === "developer" ? "Chief Dev" : currentUser?.role}
+                </span>
               </div>
             </div>
 
             <button
               onClick={onLogout}
-              className="p-2 bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 text-xs font-bold"
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg ml-1"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
-              <span className="hidden md:inline">Sign Out</span>
             </button>
           </div>
 
         </div>
       </div>
 
-      <div className={`w-full px-4 sm:px-6 lg:px-8 2xl:px-12 border-t border-slate-800 ${mobileMenuOpen ? "block" : "hidden md:flex"} overflow-x-auto py-2 gap-1.5`}>
-        {visibleTabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                activeTab === tab.id ? "bg-blue-600 text-white shadow-md" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Mobile Drawer */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden border-t border-slate-200 bg-white px-3 py-2 space-y-1">
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold border ${
+                  isActive ? "bg-blue-600 text-white border-blue-600" : "text-slate-700 hover:bg-slate-100 border-transparent"
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? "text-white" : "text-slate-400"}`} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 }

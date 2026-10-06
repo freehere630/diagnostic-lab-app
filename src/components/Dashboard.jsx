@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
 import {
   Search, Calendar, Receipt, DollarSign, CheckCircle2,
-  AlertCircle, X, ChevronLeft, ChevronRight, Clock,
-  MessageCircle, RotateCcw, AlertTriangle, ChevronDown
+  X, ChevronLeft, ChevronRight, Clock,
+  MessageCircle, RotateCcw, AlertTriangle, ChevronDown, Filter
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
@@ -66,17 +66,15 @@ export default function Dashboard({
       const status = (o.sample_status || o.sampleStatus || "").toLowerCase();
       const remarks = (o.verifierRemarks || o.verifier_remarks || "").toUpperCase();
 
-      // If already recollected, never show in recollection queue
       if (status.includes("recollected") || status === "sample recollected") {
         return false;
       }
 
-      const isPendingRecollection =
+      return (
         status.includes("repeat collection required") ||
         status === "repeat collection" ||
-        (remarks.includes("RECOLLECTION REQUIRED") && !status.includes("recollected"));
-
-      return isPendingRecollection;
+        (remarks.includes("RECOLLECTION REQUIRED") && !status.includes("recollected"))
+      );
     });
   }, [sortedOrders]);
 
@@ -110,7 +108,6 @@ export default function Dashboard({
         await markSampleRecollected(targetId);
       }
 
-      // Immediately update local state so badge and notification dismiss with zero delay
       setLocalOrders((prev) =>
         prev.map((o) =>
           (o.orderId === targetId || o.id === targetId)
@@ -125,7 +122,6 @@ export default function Dashboard({
         )
       );
 
-      // Close the floating bubble if no more recollections remain
       if (recollectionOrders.length <= 1) {
         setIsBubbleOpen(false);
       }
@@ -147,55 +143,68 @@ export default function Dashboard({
     return dateStr || "Today";
   };
 
-  const metrics = [
-    { label: "Orders", val: sortedOrders.length, color: "text-slate-900", border: "border-blue-500" },
-    { label: "Total in Period", val: totalCount, color: "text-indigo-600", border: "border-purple-500" },
-    { label: "Pending QC", val: pendingQC, color: "text-amber-600", border: "border-amber-500" },
-    { label: "Verified Ready", val: verifiedCount, color: "text-emerald-600", border: "border-emerald-500" },
-    { label: "Collected", val: `৳ ${totalRevenue.toFixed(0)}`, color: "text-emerald-700 font-black", border: "border-emerald-600" },
-    { label: "Due", val: `৳ ${totalDue.toFixed(0)}`, color: "text-rose-600 font-black", border: "border-rose-500" },
-  ];
-
   const getPresetBtnClass = (presetName) => {
     const isActive = activePreset === presetName;
-    return `px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+    return `px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
       isActive
-        ? "bg-blue-600 text-white shadow-md shadow-blue-500/20 ring-2 ring-blue-600/30"
-        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"
+        ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+        : "text-slate-500 hover:text-slate-800"
     }`;
   };
 
   return (
-    <div className="space-y-6 w-full font-sans text-slate-800 relative">
-      {/* 1. FILTER & SEARCH BAR */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-slate-900">Laboratory Operations Dashboard</h2>
-            <p className="text-xs text-slate-500">
-              Showing <b>{activePreset === "TODAY" ? "Today's Clinical Activity" : activePreset.replace("_", " ")}</b> (Newest Registration on Top)
-            </p>
-          </div>
-          <div className="relative w-full lg:w-96">
-            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search Barcode, Patient ID, Name..."
-              value={dashboardSearch}
-              onChange={(e) => {
-                setDashboardSearch(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+    <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
+      
+      {/* 1. COMPACT ANALYTICS STRIP (SPACE SAVING) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Page Orders</span>
+          <span className="text-lg font-bold text-slate-800">{sortedOrders.length}</span>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Period Total</span>
+          <span className="text-lg font-bold text-blue-600">{totalCount}</span>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Pending QC</span>
+          <span className="text-lg font-bold text-amber-600">{pendingQC}</span>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Verified Ready</span>
+          <span className="text-lg font-bold text-emerald-600">{verifiedCount}</span>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Collected</span>
+          <span className="text-lg font-bold text-slate-900 font-mono">৳{totalRevenue.toLocaleString()}</span>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Outstanding Due</span>
+          <span className="text-lg font-bold text-rose-600 font-mono">৳{totalDue.toLocaleString()}</span>
+        </div>
+      </div>
+
+      {/* 2. DENSE FILTER & TOOLBAR */}
+      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Filter Barcode, Patient UHID, Phone, Name..."
+            value={dashboardSearch}
+            onChange={(e) => {
+              setDashboardSearch(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition font-medium"
+          />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-slate-600 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-blue-600" /> Date:
-            </span>
+        {/* Date Pickers & Range Presets */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
             <input
               type="date"
               value={dateRange.from}
@@ -203,9 +212,9 @@ export default function Dashboard({
                 setDateRange({ ...dateRange, from: e.target.value });
                 setCurrentPage(1);
               }}
-              className="p-1.5 border rounded-lg bg-slate-50 text-xs font-mono font-bold outline-none"
+              className="bg-transparent text-[11px] font-mono outline-none font-semibold text-slate-700"
             />
-            <span className="text-slate-400 font-bold">to</span>
+            <span className="text-slate-300">-</span>
             <input
               type="date"
               value={dateRange.to}
@@ -213,63 +222,45 @@ export default function Dashboard({
                 setDateRange({ ...dateRange, to: e.target.value });
                 setCurrentPage(1);
               }}
-              className="p-1.5 border rounded-lg bg-slate-50 text-xs font-mono font-bold outline-none"
+              className="bg-transparent text-[11px] font-mono outline-none font-semibold text-slate-700"
             />
           </div>
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+
+          <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
             <button type="button" onClick={() => setPreset("TODAY")} className={getPresetBtnClass("TODAY")}>Today</button>
             <button type="button" onClick={() => setPreset("YESTERDAY")} className={getPresetBtnClass("YESTERDAY")}>Yesterday</button>
-            <button type="button" onClick={() => setPreset("LAST_7")} className={getPresetBtnClass("LAST_7")}>Last 7 Days</button>
-            <button type="button" onClick={() => setPreset("THIS_MONTH")} className={getPresetBtnClass("THIS_MONTH")}>This Month</button>
-            <button type="button" onClick={() => setPreset("ALL")} className={getPresetBtnClass("ALL")}>All Time</button>
+            <button type="button" onClick={() => setPreset("LAST_7")} className={getPresetBtnClass("LAST_7")}>7D</button>
+            <button type="button" onClick={() => setPreset("THIS_MONTH")} className={getPresetBtnClass("THIS_MONTH")}>Month</button>
+            <button type="button" onClick={() => setPreset("ALL")} className={getPresetBtnClass("ALL")}>All</button>
           </div>
         </div>
+
       </div>
 
-      {/* 2. STATS OVERVIEW CARDS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 w-full">
-        {metrics.map((m, idx) => (
-          <div key={idx} className={`bg-white p-4 rounded-2xl border-t-4 ${m.border} shadow-sm border-x border-b border-slate-200`}>
-            <p className="text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">{m.label}</p>
-            <p className={`text-xl sm:text-2xl font-black mt-1 ${m.color}`}>{m.val}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* 3. PATIENTS QUEUE TABLE */}
-      <div className="bg-white p-5 rounded-2xl border shadow-sm w-full space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2">
-            <span>Patient Queue (Newest First)</span>
-            <span className="text-xs text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full font-mono font-bold">
-              {totalCount} Total in Period
-            </span>
-          </h3>
-          <span className="text-xs text-slate-500 font-semibold">
-            Page {currentPage} of {totalPages || 1}
-          </span>
-        </div>
-
+      {/* 3. PATIENT QUEUE TABLE (SLIM & FAST) */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        
         {isLoading ? (
           <div className="py-16 text-center text-slate-400 text-xs">
-            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-            Loading database records...
+            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+            Syncing database records...
           </div>
         ) : sortedOrders.length === 0 ? (
-          <p className="text-xs text-slate-400 italic py-12 text-center">No orders found for this period.</p>
+          <div className="py-16 text-center text-slate-400 text-xs italic">
+            No patient orders found in this period.
+          </div>
         ) : (
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b bg-slate-50 text-slate-500 font-bold">
-                  <th className="py-3 px-4">Time / Date</th>
-                  <th className="py-3 px-4">Receipt No</th>
-                  <th className="py-3 px-4">Patient ID</th>
-                  <th className="py-3 px-4">Patient Name</th>
-                  <th className="py-3 px-4">Phone</th>
-                  <th className="py-3 px-4">Paid / Due</th>
-                  <th className="py-3 px-4">QC Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
+                  <th className="py-2.5 px-3">Time</th>
+                  <th className="py-2.5 px-3">Receipt / Barcode</th>
+                  <th className="py-2.5 px-3">Patient (UHID)</th>
+                  <th className="py-2.5 px-3">Contact</th>
+                  <th className="py-2.5 px-3">Paid / Due</th>
+                  <th className="py-2.5 px-3">QC Status</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -279,60 +270,95 @@ export default function Dashboard({
                   const isRecollection = statusStr.includes("repeat") && !statusStr.includes("recollected");
 
                   return (
-                    <tr key={ord.orderId || ord.id} className={`hover:bg-blue-50/40 transition ${isRecollection ? "bg-rose-50/30" : ""}`}>
-                      <td className="py-3.5 px-4 font-mono text-slate-600">
-                        <span className="flex items-center gap-1 font-bold text-slate-800">
-                          <Clock className="w-3.5 h-3.5 text-blue-600" />
+                    <tr
+                      key={ord.orderId || ord.id}
+                      className={`hover:bg-slate-50/80 transition group ${isRecollection ? "bg-rose-50/30" : ""}`}
+                    >
+                      {/* Time */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <span className="font-mono text-slate-700 font-medium block">
                           {formatEntryTime(ord.date, ord.createdAt || ord.created_at)}
                         </span>
-                        <span className="text-[10px] text-slate-400 block">{ord.date}</span>
+                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{ord.date}</span>
                       </td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-800">{ord.receiptNo}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{ord.patient?.id}</td>
-                      <td className="py-3.5 px-4 font-semibold text-slate-900">{ord.patient?.name}</td>
-                      <td className="py-3.5 px-4 font-mono text-slate-600">{ord.patient?.phone}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold">
-                        ৳{ord.billing?.paid || 0} /{" "}
+
+                      {/* Receipt & Barcode */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <span className="font-mono font-bold text-slate-800 block text-[11px]">{ord.receiptNo}</span>
+                        <span className="font-mono text-[10px] text-slate-400 block">{ord.barcode}</span>
+                      </td>
+
+                      {/* Patient */}
+                      <td className="py-2 px-3">
+                        <div className="font-bold text-slate-900 truncate max-w-[160px] sm:max-w-[200px]">
+                          {ord.patient?.name}
+                        </div>
+                        <div className="text-[10px] text-blue-600 font-mono font-semibold">
+                          {ord.patient?.id} • {ord.patient?.age || "?"}Y / {ord.patient?.gender || "?"}
+                        </div>
+                      </td>
+
+                      {/* Contact */}
+                      <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
+                        {ord.patient?.phone || "—"}
+                      </td>
+
+                      {/* Paid / Due */}
+                      <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px]">
+                        <span className="font-semibold text-slate-700">৳{ord.billing?.paid || 0}</span>
                         {hasDue ? (
-                          <span className="text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded font-black">
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
                             Due ৳{ord.billing?.due}
                           </span>
                         ) : (
-                          <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">
+                          <span className="ml-1.5 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
                             PAID
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4">
+
+                      {/* Status */}
+                      <td className="py-2 px-3 whitespace-nowrap">
                         {isRecollection ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 flex items-center gap-1 w-fit">
-                            <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Required
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Specimen
                           </span>
                         ) : (
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${ord.qcStatus === "Verified" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                            ord.qcStatus === "Verified"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                          }`}>
                             {ord.qcStatus || "Pending"}
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+
+                      {/* Actions */}
+                      <td className="py-2 px-3 text-right whitespace-nowrap space-x-1">
                         {hasDue && (
                           <button
                             onClick={() => openSettleModal(ord)}
-                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded font-bold text-[11px] transition inline-flex items-center gap-1 shadow-sm"
-                            title="Collect remaining due"
+                            className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[11px] font-bold transition inline-flex items-center gap-1 shadow-xs"
+                            title="Collect balance"
                           >
-                            <DollarSign className="w-3 h-3" /> Collect Due
+                            <DollarSign className="w-3 h-3" /> Due
                           </button>
                         )}
+
                         <button
                           onClick={() => handlePrintMoneyReceipt(ord)}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded font-bold text-[11px] transition"
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
                         >
-                          <Receipt className="w-3.5 h-3.5 inline mr-1" /> A5 Receipt
+                          <Receipt className="w-3 h-3" /> A5 Receipt
                         </button>
+
                         <button
-                          onClick={() => { setSelectedOrderId(ord.orderId || ord.id); setActiveTab("reports"); }}
-                          className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded font-bold text-[11px] transition"
+                          onClick={() => {
+                            setSelectedOrderId(ord.orderId || ord.id);
+                            setActiveTab("reports");
+                          }}
+                          className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded-md text-[11px] font-semibold transition shadow-xs"
                         >
                           Report ➔
                         </button>
@@ -345,81 +371,75 @@ export default function Dashboard({
           </div>
         )}
 
-        {/* 4. PAGINATION CONTROLS */}
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-100 text-xs">
-          <span className="text-slate-500">
-            Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b> to{" "}
-            <b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> records
+        {/* 4. COMPACT PAGINATION FOOTER */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 border-t border-slate-100 text-[11px] bg-slate-50/50">
+          <span className="text-slate-500 font-medium">
+            Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b>–<b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> entries
           </span>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage <= 1 || isLoading}
-              className="px-3 py-1.5 border rounded-xl font-bold bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1 transition"
+              className="p-1 border border-slate-200 rounded-md bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition"
+              title="Previous Page"
             >
-              <ChevronLeft className="w-4 h-4" /> Prev Page
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            <span className="px-3 py-1.5 bg-slate-100 rounded-xl font-mono font-bold text-slate-800">
+
+            <span className="px-2 py-0.5 text-slate-700 font-mono font-semibold">
               {currentPage} / {totalPages || 1}
             </span>
+
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage >= totalPages || isLoading}
-              className="px-3 py-1.5 border rounded-xl font-bold bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1 transition"
+              className="p-1 border border-slate-200 rounded-md bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition"
+              title="Next Page"
             >
-              Next Page <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+
       </div>
 
-      {/* 5. FLOATING URGENT RECOLLECTION NOTIFICATION BUBBLE */}
+      {/* 5. FLOATING MINIMAL RECOLLECTION NOTIFIER */}
       {recollectionOrders.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 font-sans">
+        <div className="fixed bottom-4 right-4 z-50">
           {isBubbleOpen && (
-            <div className="mb-3 bg-white w-84 sm:w-96 rounded-2xl shadow-2xl border border-rose-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
-              <div className="bg-rose-600 text-white px-4 py-3 flex justify-between items-center shadow">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-white animate-bounce" />
-                  <span className="font-extrabold text-xs tracking-wide">
-                    Urgent Recollection Needed ({recollectionOrders.length})
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsBubbleOpen(false)}
-                  className="p-1 hover:bg-white/20 rounded-lg text-white/90 hover:text-white transition"
-                >
-                  <X className="w-4 h-4" />
+            <div className="mb-2 bg-white w-80 sm:w-96 rounded-xl shadow-xl border border-rose-200 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150">
+              <div className="bg-rose-600 text-white px-3 py-2 flex justify-between items-center text-xs font-bold">
+                <span className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Repeat Collection Needed ({recollectionOrders.length})
+                </span>
+                <button onClick={() => setIsBubbleOpen(false)} className="hover:opacity-75">
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 p-2 text-xs">
+              <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 p-1 text-xs">
                 {recollectionOrders.map((ord) => (
-                  <div key={ord.orderId || ord.id} className="p-2.5 hover:bg-rose-50/50 rounded-xl transition space-y-1.5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="font-black text-slate-900">{ord.patient?.name}</span>
-                        <span className="font-mono text-blue-700 font-bold ml-1.5">({ord.patient?.id})</span>
-                      </div>
-                      <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 rounded font-bold text-[9px] uppercase">
-                        Hemolyzed
-                      </span>
+                  <div key={ord.orderId || ord.id} className="p-2 hover:bg-rose-50/50 rounded-lg space-y-1">
+                    <div className="flex justify-between items-baseline">
+                      <span className="font-bold text-slate-900">{ord.patient?.name}</span>
+                      <span className="font-mono text-blue-600 text-[10px] font-semibold">{ord.patient?.id}</span>
                     </div>
-                    <div className="text-[11px] text-slate-500 font-mono">
+                    <div className="text-[10px] text-slate-500 font-mono">
                       📞 {ord.patient?.phone} • Barcode: {ord.barcode}
                     </div>
-                    <div className="flex gap-1.5 pt-1">
+                    <div className="flex gap-1 pt-1">
                       <button
                         onClick={() => sendRecollectionWhatsApp(ord, "Hemolyzed Specimen")}
-                        className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm transition"
+                        className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-semibold flex items-center justify-center gap-1"
                       >
-                        <MessageCircle className="w-3 h-3" /> WhatsApp Recall
+                        <MessageCircle className="w-3 h-3" /> WhatsApp
                       </button>
                       <button
                         type="button"
                         disabled={actionLoading}
                         onClick={() => handleMarkRecollectedAction(ord)}
-                        className="py-1 px-2.5 bg-slate-900 hover:bg-blue-600 text-white rounded-lg font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm transition active:scale-95 disabled:opacity-50"
+                        className="py-1 px-2 bg-slate-900 hover:bg-blue-600 text-white rounded text-[10px] font-semibold flex items-center justify-center gap-1 disabled:opacity-50"
                       >
                         <RotateCcw className="w-3 h-3" /> Recollected
                       </button>
@@ -432,82 +452,75 @@ export default function Dashboard({
 
           <button
             onClick={() => setIsBubbleOpen(!isBubbleOpen)}
-            className="flex items-center gap-2 px-4 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-2xl font-black text-xs transition-all transform hover:scale-105 active:scale-95 border-2 border-white"
+            className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-lg text-xs font-bold transition active:scale-95 border-2 border-white"
           >
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-200 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
-            </span>
-            <span>{recollectionOrders.length} Sample Recall{recollectionOrders.length > 1 ? 's' : ''}</span>
-            {isBubbleOpen ? <ChevronDown className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+            <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
+            <span>{recollectionOrders.length} Recalls</span>
+            {isBubbleOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
           </button>
         </div>
       )}
 
-      {/* 6. SETTLE DUE PAYMENT MODAL */}
+      {/* 6. COMPACT SETTLE DUE PAYMENT MODAL */}
       {settleOrder && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-sans text-slate-800">
-          <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl border overflow-hidden">
-            <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
-              <h3 className="font-bold text-sm flex items-center gap-1.5">
-                <DollarSign className="w-4 h-4" /> Collect Due on Report Delivery
-              </h3>
-              <button onClick={() => setSettleOrder(null)} className="text-white/80 hover:text-white">
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl border border-slate-200 overflow-hidden text-xs">
+            <div className="bg-amber-600 text-white px-4 py-3 flex justify-between items-center font-bold">
+              <span className="flex items-center gap-1.5">
+                <DollarSign className="w-4 h-4" /> Collect Due Balance
+              </span>
+              <button onClick={() => setSettleOrder(null)} className="hover:opacity-80">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-5 space-y-4 text-xs">
-              <div className="bg-slate-50 p-3 rounded-xl border space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Patient:</span>
-                  <span className="font-bold text-slate-900">{settleOrder.patient?.name} ({settleOrder.patient?.id})</span>
+
+            <div className="p-4 space-y-3">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1">
+                <div className="flex justify-between text-slate-600">
+                  <span>Patient:</span>
+                  <span className="font-bold text-slate-800">{settleOrder.patient?.name} ({settleOrder.patient?.id})</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Receipt No:</span>
-                  <span className="font-mono font-bold text-slate-700">{settleOrder.receiptNo}</span>
+                <div className="flex justify-between text-slate-600">
+                  <span>Receipt No:</span>
+                  <span className="font-mono text-slate-700">{settleOrder.receiptNo}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Net Payable:</span>
-                  <span className="font-mono font-bold">৳ {settleOrder.billing?.netPayable}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Already Paid:</span>
-                  <span className="font-mono font-bold text-emerald-700">৳ {settleOrder.billing?.paid}</span>
-                </div>
-                <div className="flex justify-between border-t pt-1 font-bold text-sm text-rose-600">
+                <div className="flex justify-between font-bold text-rose-600 border-t pt-1">
                   <span>Current Due:</span>
-                  <span>৳ {settleOrder.billing?.due}</span>
+                  <span className="font-mono">৳{settleOrder.billing?.due}</span>
                 </div>
               </div>
+
               <div>
-                <label className="font-bold text-slate-700 uppercase block mb-1">Amount Collected Now (৳)</label>
+                <label className="font-bold text-slate-700 block mb-1">Amount Collected (৳)</label>
                 <input
                   type="number"
                   value={collectionAmount}
                   onChange={(e) => setCollectionAmount(e.target.value)}
-                  className="w-full p-2.5 text-base font-mono font-black border-2 border-amber-400 bg-amber-50/50 rounded-xl outline-none text-slate-900"
+                  className="w-full p-2 text-sm font-mono font-bold border border-amber-300 bg-amber-50/40 rounded-lg outline-none focus:ring-1 focus:ring-amber-500"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2">
+
+              <div className="flex justify-end gap-1.5 pt-2">
                 <button
                   type="button"
                   onClick={() => setSettleOrder(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-700"
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={submitSettlement}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow"
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-xs"
                 >
-                  <CheckCircle2 className="w-4 h-4" /> Confirm & Clear Due
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Confirm Settlement
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }
