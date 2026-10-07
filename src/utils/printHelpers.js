@@ -573,8 +573,8 @@ export function renderDepartmentReportHtml({
     ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
     : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
 
-  // SIGNATURES BLOCK: ALWAYS PRESENT ON EVERY PAGE
-  const signaturesBlockHtml = `
+ // SIGNATURES BLOCK: ONLY APPEARS WHEN OFFICIALLY VERIFIED!
+  const signaturesBlockHtml = isVerified ? `
     <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
       <div style="text-align: center; width: 230px;">
         ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
@@ -588,6 +588,19 @@ export function renderDepartmentReportHtml({
         <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
           <div style="font-weight: 700; font-size: 8.5pt; color: #000000;">${verifierUser.full_name}</div>
           <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
+        </div>
+      </div>
+    </div>
+  ` : `
+    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; height: 38px;">
+      <div style="text-align: center; width: 230px;">
+        <div style="border-top: 1px dashed #94a3b8; padding-top: 2px;">
+          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;">[ Medical Technologist Sign ]</div>
+        </div>
+      </div>
+      <div style="text-align: center; width: 230px;">
+        <div style="border-top: 1px dashed #94a3b8; padding-top: 2px;">
+          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;">[ Consultant Pathologist Sign ]</div>
         </div>
       </div>
     </div>

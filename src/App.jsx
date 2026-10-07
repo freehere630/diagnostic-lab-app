@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest,
@@ -110,9 +110,7 @@ export default function App() {
         )
       );
 
-      if (typeof fetchPaginatedOrders === "function") {
-        await fetchPaginatedOrders();
-      }
+      fetchPaginatedOrders(true);
     } catch (e) {
       console.warn("Reject background notice:", e);
     }
@@ -206,9 +204,10 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  const fetchPaginatedOrders = async () => {
+  // Main Data Fetcher
+  const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
     try {
       const res = await getOrdersPaginated({
         page: currentPage,
@@ -303,13 +302,113 @@ export default function App() {
     } catch (err) {
       console.error("Pagination load error:", err);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
   useEffect(() => {
     fetchPaginatedOrders();
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
+
+  const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
+
+  // =========================================================================
+  // 3. BULLETPROOF AUTO-SYNC: REALTIME WEBSOCKET + ACTIVE PATIENT 2.5S POLLER
+  // =========================================================================
+  
+  // A. Realtime WebSocket Listener (0ms Instant Push)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const channel = supabase
+      .channel('lims-realtime-listener')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'results' },
+        (payload) => {
+          const newResult = payload.new;
+          if (!newResult) return;
+
+          setOrders((prev) =>
+            prev.map((ord) => {
+              const matches = ord.orderId === newResult.order_id || ord.id === newResult.order_id;
+              if (matches) {
+                return {
+                  ...ord,
+                  results: {
+                    ...ord.results,
+                    [newResult.parameter_id]: { value: newResult.result_value }
+                  }
+                };
+              }
+              return ord;
+            })
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        () => {
+          fetchPaginatedOrders(true);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
+  // B. Active Patient Direct Results Poller (Syncs active screen every 2.5s)
+  useEffect(() => {
+    if (!currentUser || !activeOrder) return;
+    const currentTargetId = activeOrder.orderId || activeOrder.id;
+    if (!currentTargetId) return;
+
+    const syncActiveResults = async () => {
+      if (document.hidden) return; // Pauses when tab is minimized to save quota!
+      try {
+        const { data: latestResults } = await supabase
+          .from('results')
+          .select('parameter_id, result_value')
+          .eq('order_id', currentTargetId);
+
+        if (latestResults && latestResults.length > 0) {
+          setOrders((prev) =>
+            prev.map((ord) => {
+              if (ord.orderId === currentTargetId || ord.id === currentTargetId) {
+                let changed = false;
+                const updatedResults = { ...ord.results };
+                latestResults.forEach((r) => {
+                  if (updatedResults[r.parameter_id]?.value !== r.result_value) {
+                    updatedResults[r.parameter_id] = { value: r.result_value };
+                    changed = true;
+                  }
+                });
+                return changed ? { ...ord, results: updatedResults } : ord;
+              }
+              return ord;
+            })
+          );
+        }
+      } catch (err) {}
+    };
+
+    const poller = setInterval(syncActiveResults, 2500);
+
+    // Instant sync when switching back into the browser window
+    const onFocus = () => {
+      syncActiveResults();
+      fetchPaginatedOrders(true);
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(poller);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [currentUser, activeOrder?.orderId, activeOrder?.id]);
 
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
@@ -333,8 +432,6 @@ export default function App() {
       setDateRange({ from: "", to: "" });
     }
   };
-
-  const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
   const handleMarkRecollected = async (orderId) => {
     if (!orderId) return;
@@ -392,7 +489,7 @@ export default function App() {
     activeOrder.tests.forEach((test) => {
       const code = (test.code || "").toUpperCase();
       const name = (test.name || "").toUpperCase();
-      const baseDeptId = test.dept_id || test.deptId || "DEP-GEN";
+      const baseDeptId = test.dept_id || test.deptId || "DEP-BIO";
 
       let groupKey = baseDeptId;
       let groupName = null;
@@ -457,7 +554,7 @@ export default function App() {
 
       alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nBarcode: ${createdOrder.barcode}`);
       setActiveTab("dashboard");
-      fetchPaginatedOrders();
+      fetchPaginatedOrders(true);
     } catch (e) { 
       alert("Error saving order: " + e.message); 
     } finally { 
@@ -476,7 +573,7 @@ export default function App() {
       if (matched) {
         printMoneyReceiptA5({ ...matched, billing: { ...matched.billing, paid: newPaid, due: newDue } }, labSettings);
       }
-      fetchPaginatedOrders();
+      fetchPaginatedOrders(true);
     } catch (e) { 
       alert("Error collecting due: " + e.message); 
     } finally { 
@@ -551,7 +648,7 @@ export default function App() {
       } : o));
 
       alert("✅ Report Verified and Locked!");
-      fetchPaginatedOrders();
+      fetchPaginatedOrders(true);
     } catch (e) { 
       alert("Verification failed: " + e.message); 
     } finally { 
@@ -703,7 +800,7 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // Public QR Code Scan Verification Portal
+  // Public QR Code Portal
   if (isVerifyingPublicUrl) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
@@ -767,12 +864,12 @@ export default function App() {
         setActiveTab={setActiveTab} 
         mobileMenuOpen={mobileMenuOpen} 
         setMobileMenuOpen={setMobileMenuOpen} 
-        loadDatabaseData={fetchPaginatedOrders} 
+        loadDatabaseData={() => fetchPaginatedOrders(false)} 
         isLoading={isLoading} 
         labSettings={labSettings} 
       />
       
-      {/* Micro Status Toast Strip */}
+      {/* Micro Status Toast */}
       {saveStatus.state !== "idle" && (
         <div className={`py-1 px-3 text-[11px] text-center font-semibold transition ${
           saveStatus.state === "saving" ? "bg-amber-500 text-white" : 
