@@ -212,14 +212,25 @@ export function getAllOrderVials(order, catalog = []) {
     let deptId = (test.dept_id || test.deptId || "").toUpperCase();
 
     if (!deptId || deptId === "DEP-GEN") {
-      if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
-      else if (code.includes("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
-      else if (code.includes("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
-      else if (code.includes("CT") || name.includes("CT SCAN")) deptId = "DEP-CTMRI";
-      else if (code.includes("ECG") || name.includes("ELECTROCARDIOGRAM")) deptId = "DEP-CARD";
-      else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX")) deptId = "DEP-HISTO";
-      else if (name.includes("URINE") || name.includes("STOOL")) deptId = "DEP-PAT";
-      else deptId = "DEP-BIO";
+      if (code.includes("CBC") || name.includes("BLOOD COUNT") || name.includes("HEMOGLOBIN")) {
+        deptId = "DEP-HEM";
+      } else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE")) {
+        deptId = "DEP-BIO";
+      } else if (code.startsWith("XRAY") || name.includes("X-RAY")) {
+        deptId = "DEP-RAD";
+      } else if (code.startsWith("USG") || name.includes("ULTRASO")) {
+        deptId = "DEP-USG";
+      } else if (code === "CT" || code.startsWith("CT-") || name.includes("CT SCAN")) {
+        deptId = "DEP-CTMRI";
+      } else if (code.startsWith("ECG") || name.includes("ELECTROCARDIOGRAM")) {
+        deptId = "DEP-CARD";
+      } else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX")) {
+        deptId = "DEP-HISTO";
+      } else if (name.includes("URINE") || name.includes("STOOL")) {
+        deptId = "DEP-PAT";
+      } else {
+        deptId = "DEP-BIO";
+      }
     }
 
     const deptCode = deptId.replace("DEP-", "").replace("-CBC", "");
@@ -305,7 +316,6 @@ function isTestProfile(test) {
   return params.length > 1;
 }
 
-// Value extractor
 function extractResultValue(tests = [], results = {}, keywords = [], fallback = "—") {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
   for (const test of tests) {
@@ -332,9 +342,7 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
   return fallback;
 }
 
-// =========================================================================
-// DYNAMIC PARAMETER RESOLVER (READS LIVE FROM TEST CATALOGUE)
-// =========================================================================
+// Dynamic Parameter Resolver with \n to <br> line break support
 function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef = "", defaultMin = null, defaultMax = null) {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
   for (const test of tests) {
@@ -344,7 +352,6 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
       if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
         let refText = (p.reference_text || p.ref_text || "").trim();
         
-        // If no explicit text, format from min & max range if present
         if (!refText) {
           const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "";
           const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "";
@@ -353,6 +360,7 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
           else if (hasMax) refText = `≤ ${p.max_range}`;
         }
 
+        const formattedRef = refText ? refText.replace(/\n/g, "<br>") : defaultRef.replace(/\n/g, "<br>");
         const minVal = p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : defaultMin);
         const maxVal = p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : defaultMax);
         const unitVal = p.unit !== undefined && p.unit !== null && p.unit !== "" ? p.unit : defaultUnit;
@@ -361,7 +369,7 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
           param: p,
           name: p.name || keys[0],
           unit: unitVal,
-          ref: refText || defaultRef,
+          ref: formattedRef,
           min: minVal,
           max: maxVal
         };
@@ -373,23 +381,21 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
     param: null,
     name: keys[0],
     unit: defaultUnit,
-    ref: defaultRef,
+    ref: defaultRef ? defaultRef.replace(/\n/g, "<br>") : "",
     min: defaultMin,
     max: defaultMax
   };
 }
 
-// =========================================================================
-// 1. HAEMATOLOGY / CBC FORMATTER (100% CATALOGUE-SYNCED)
-// =========================================================================
+// 1. HAEMATOLOGY / CBC FORMATTER
 export function renderCustomCbcHematologyReport(tests = [], results = {}, patient = {}) {
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defUnit, defRef, defMin, defMax) => getParamDetails(tests, keywords, defUnit, defRef, defMin, defMax);
 
-  const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5, Women: 11.5 - 15.5", 11.5, 16.5);
-  const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8, Women: 3.8 - 5.2", 3.8, 5.8);
-  const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50, Women: 36 - 46", 36.0, 50.0);
-  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10, Women: 0 - 20", 0, 20);
+  const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5<br>Adult Women: 11.5 - 15.5", 11.5, 16.5);
+  const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8<br>Women: 3.8 - 5.2", 3.8, 5.8);
+  const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50<br>Women: 36 - 46", 36.0, 50.0);
+  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10<br>Women: 0 - 20", 0, 20);
   const mcvInfo = getInfo(["Mean Corpuscular Volume (MCV)", "MCV"], "fL", "78.0 - 98.0", 78.0, 98.0);
   const mchInfo = getInfo(["Mean Corpuscular Hemoglobin (MCH)", "MCH"], "pg", "27.0 - 32.0", 27.0, 32.0);
   const mchcInfo = getInfo(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"], "g/dL", "31.0 - 36.0", 31.0, 36.0);
@@ -408,7 +414,6 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   const mpvInfo = getInfo(["Mean Platelet Volume (MPV)", "MPV"], "fL", "7.4 - 11.5", 7.4, 11.5);
   const pdwInfo = getInfo(["Platelet Distribution Width (PDW)", "PDW"], "%", "10.0 - 18.0", 10.0, 18.0);
 
-  // Observed Values
   const hb = getVal(["Hemoglobin (Hb)", "Haemoglobin", "Hb"]);
   const rbc = getVal(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"]);
   const pcv = getVal(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"]);
@@ -461,7 +466,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
       <td style="padding: 2.8px 6px; font-size: 8.5pt; vertical-align: top;">
         ${formatResultCell(val, info.min, info.max, info.unit)}
       </td>
-      <td style="padding: 2.8px 6px; font-size: 7.5pt; color: #333; line-height: 1.35;">${info.ref}</td>
+      <td style="padding: 2.8px 6px; font-size: 7.5pt; color: #333; line-height: 1.35; white-space: pre-line;">${info.ref}</td>
     </tr>
   `;
 
@@ -512,9 +517,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   `;
 }
 
-// =========================================================================
-// 2. URINE R/M/E CLINICAL REPORT (CATALOGUE-SYNCED)
-// =========================================================================
+// 2. URINE R/M/E CLINICAL REPORT
 export function renderCustomUrineRmeReport(tests = [], results = {}) {
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
@@ -574,7 +577,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
   const bacteriaInfo = getInfo(["Bacteria"], "", "Nil / Not Found");
 
   const rowStyle = "padding: 2.5px 5px; font-size: 8pt; border-bottom: 1px solid #f1f5f9;";
-  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9; white-space: pre-line;";
 
   const tableRow = (label, val, info, pType = "text") => `
     <tr>
@@ -674,9 +677,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
   `;
 }
 
-// =========================================================================
-// 3. STOOL R/E CLINICAL REPORT (CATALOGUE-SYNCED)
-// =========================================================================
+// 3. STOOL R/E CLINICAL REPORT
 export function renderCustomStoolRmeReport(tests = [], results = {}) {
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
@@ -712,7 +713,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
   const ovaInfo = getInfo(["Ova of Helminths", "Ova", "Helminths"], "", "Not Found / Nil");
 
   const rowStyle = "padding: 2.5px 5px; font-size: 8pt; border-bottom: 1px solid #f1f5f9;";
-  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9; white-space: pre-line;";
 
   const tableRow = (label, val, info, pType = "text") => `
     <tr>
@@ -785,9 +786,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
   `;
 }
 
-// =========================================================================
-// 4. WIDAL TEST (SEROLOGY MATRIX)
-// =========================================================================
+// 4. WIDAL TEST
 export function renderCustomWidalReport(tests = [], results = {}) {
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defRef) => getParamDetails(tests, keywords, "Titer", defRef);
@@ -830,7 +829,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
       <td style="padding: 4px 6px; text-align: center; font-weight: 900; border: 1px solid #000; font-size: 8.5pt; font-family: 'Inter', sans-serif;">
         ${observedVal}
       </td>
-      <td style="padding: 4px 6px; border: 1px solid #000; font-size: 7.5pt; color: #333;">
+      <td style="padding: 4px 6px; border: 1px solid #000; font-size: 7.5pt; color: #333; white-space: pre-line;">
         ${info.ref}
       </td>
     </tr>
@@ -869,9 +868,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
   `;
 }
 
-// =========================================================================
 // 5. SEMEN ANALYSIS REPORT
-// =========================================================================
 export function renderCustomSemenReport(tests = [], results = {}) {
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
@@ -910,7 +907,7 @@ export function renderCustomSemenReport(tests = [], results = {}) {
   const pusInfo = getInfo(["Pus Cells (WBC)", "Pus Cells"], "/HPF", "< 1 million/mL (0 - 4 /HPF)");
 
   const rowStyle = "padding: 3px 6px; font-size: 8.5pt; border-bottom: 1px solid #f1f5f9;";
-  const refStyle = "padding: 3px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 3px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9; white-space: pre-line;";
 
   return `
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
@@ -968,9 +965,7 @@ export function renderCustomSemenReport(tests = [], results = {}) {
   `;
 }
 
-// =========================================================================
-// 6. UNIFIED DESCRIPTIVE / NARRATIVE STUDY FORMATTER
-// =========================================================================
+// 6. DESCRIPTIVE STUDY SHEET
 export function renderDescriptiveStudySheet(test, results, deptName) {
   const rawParams = test.test_parameters || test.parameters || [];
   const param = rawParams[0] || { id: test.id, name: test.name };
@@ -1066,9 +1061,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
   `;
 }
 
-// =========================================================================
 // 7. MASTER UNIFIED RESULTS ROUTER
-// =========================================================================
 export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", deptName = "", patient = {}) {
   let descriptiveSheets = "";
 
@@ -1215,7 +1208,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
             ${formatResultCell(val, p.min_range, p.max_range, "", p.param_type)}
           </td>
           <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; vertical-align: top;">${p.unit || test.unit || "—"}</td>
-          <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top;">${refRange}</td>
+          <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top; white-space: pre-line;">${refRange}</td>
         </tr>
       `;
     });
@@ -1242,9 +1235,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   return standardTable + descriptiveSheets;
 }
 
-// =========================================================================
-// 8. COMPLETE A4 REPORT RENDERER
-// =========================================================================
+// 8. COMPLETE A4 REPORT RENDERER (WITH DEPARTMENT-SPECIFIC REMARKS)
 export function renderDepartmentReportHtml({
   group,
   activeOrder,
@@ -1297,6 +1288,23 @@ export function renderDepartmentReportHtml({
 
   const rawDeptName = group.dept?.name || "Clinical Pathology";
   const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
+  const deptId = group.dept?.id || "";
+
+  // RESOLVE SPECIFIC REMARK FOR THIS DEPARTMENT REPORT
+  let resolvedDeptRemark = "";
+  if (activeOrder.dept_remarks && activeOrder.dept_remarks[deptId]) {
+    resolvedDeptRemark = activeOrder.dept_remarks[deptId];
+  } else if (activeOrder.deptRemarks && activeOrder.deptRemarks[deptId]) {
+    resolvedDeptRemark = activeOrder.deptRemarks[deptId];
+  } else if (activeOrder.results?.[`DEPT_REMARKS_${deptId}`]?.value) {
+    resolvedDeptRemark = activeOrder.results[`DEPT_REMARKS_${deptId}`].value;
+  } else if (typeof activeOrder.verifierRemarks === "string" && !activeOrder.verifierRemarks.startsWith("{") && activeOrder.verifierRemarks.trim()) {
+    resolvedDeptRemark = activeOrder.verifierRemarks;
+  }
+
+  if (!resolvedDeptRemark || !resolvedDeptRemark.trim()) {
+    resolvedDeptRemark = "Clinically correlated and verified with internal quality control standards.";
+  }
 
   const sixthSlotDemographics = isDescriptive
     ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
@@ -1397,14 +1405,10 @@ export function renderDepartmentReportHtml({
     activeOrder.patient || {}
   );
 
-  const remarksText = activeOrder.verifierRemarks && activeOrder.verifierRemarks.trim()
-    ? activeOrder.verifierRemarks
-    : "Clinically correlated and verified with quality control standards.";
-
   const remarksHtml = isDescriptive ? "" : `
     <div style="margin-top: 6px; margin-left: 8mm; margin-right: 8mm; font-size: 8.5pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
-      <span style="margin-left: 6px; color: #000000; font-style: italic;">${remarksText}</span>
+      <span style="margin-left: 6px; color: #000000; font-style: italic;">${resolvedDeptRemark}</span>
     </div>
   `;
 
@@ -1434,9 +1438,7 @@ export function renderDepartmentReportHtml({
   `;
 }
 
-// =========================================================================
 // 9. PRINT DISPATCH DRIVER
-// =========================================================================
 export function printDepartmentA4Report(
   targetDeptId = "ALL",
   activeOrder,
@@ -1518,9 +1520,7 @@ export function printDepartmentA4Report(
   }, 350);
 }
 
-// =========================================================================
 // 10. A5 MONEY RECEIPT ENGINE
-// =========================================================================
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
     receiptNo: "RCP-0914-001",
@@ -1726,9 +1726,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   }, 250);
 }
 
-// =========================================================================
 // 11. 38mm x 25mm VIAL THERMAL STICKER
-// =========================================================================
 export function printSpecificVialBarcode(vial, onPrintedCallback) {
   if (!vial) return;
   if (onPrintedCallback) onPrintedCallback();

@@ -118,7 +118,7 @@ export default function App() {
     }
   };
 
-  // 1. Check Public QR Scan Link
+  // 1. Check Public QR Scan Link (Resolves ANY vial barcode)
   useEffect(() => {
     const checkPublicQrScan = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -141,14 +141,25 @@ export default function App() {
           results(*)
         `);
 
-        if (trackId) query = query.eq("id", trackId);
-        else if (barcode) query = query.eq("barcode", barcode);
+        if (trackId) {
+          query = query.eq("id", trackId);
+        } else if (barcode) {
+          query = query.or(`barcode.ilike.%${barcode}%,id.ilike.%${barcode}%`);
+        }
 
         const { data, error } = await query.maybeSingle();
 
         if (error || !data) {
           const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-          const matched = local.find(o => o.id === trackId || o.orderId === trackId || o.barcode === barcode);
+          const matched = local.find(o => {
+            const vials = o.vials || getAllOrderVials(o);
+            return (
+              o.id === trackId || o.orderId === trackId || 
+              o.barcode === barcode || 
+              (o.allBarcodes && o.allBarcodes.includes(barcode)) ||
+              vials.some(v => v.barcode === barcode)
+            );
+          });
           if (matched) setPatientTrackingOrder(matched);
           else setVerificationError("Report record not found or invalid certificate.");
         } else {
@@ -157,12 +168,35 @@ export default function App() {
             ? data.patient.address.replace("Ref: ", "") 
             : (data.patient?.doctor || "Self");
 
+          let resolvedDeptRemarks = {};
+          try {
+            if (data.verifier_remarks && data.verifier_remarks.trim().startsWith("{")) {
+              resolvedDeptRemarks = JSON.parse(data.verifier_remarks);
+            }
+          } catch (e) {}
+
+          (data.results || []).forEach(r => {
+            if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
+              const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
+              if (r.result_value) resolvedDeptRemarks[dId] = r.result_value;
+            }
+          });
+
+          let restoredVials = [];
+          const vialResult = (data.results || []).find(r => r.parameter_id === "SPECIMEN_VIALS");
+          if (vialResult && vialResult.result_value) {
+            try { restoredVials = JSON.parse(vialResult.result_value); } catch (e) {}
+          }
+
+          const primaryBc = String(data.barcode || "").split(/[\s,]+/)[0];
+
           setPatientTrackingOrder({
             orderId: data.id,
             receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "").slice(4)}-${data.id.slice(-4)}`,
             date: data.order_date,
             createdAt: data.created_at || data.order_date,
-            barcode: data.barcode,
+            barcode: primaryBc,
+            vials: restoredVials.length > 0 ? restoredVials : getAllOrderVials({ ...data, barcode: primaryBc, tests: matchedTests }),
             doctor: resolvedDoc,
             patient: { 
               ...(data.patient || {}), 
@@ -175,7 +209,10 @@ export default function App() {
             results: (data.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
             qcStatus: data.qc_status || "Pending",
             isLocked: data.is_locked || false,
-            verifierRemarks: data.verifier_remarks || ""
+            dept_remarks: resolvedDeptRemarks,
+            deptRemarks: resolvedDeptRemarks,
+            verifierRemarks: typeof data.verifier_remarks === "string" && !data.verifier_remarks.startsWith("{") ? data.verifier_remarks : (resolvedDeptRemarks["GLOBAL"] || ""),
+            verifier_remarks: data.verifier_remarks || ""
           });
         }
       } catch (err) {
@@ -206,7 +243,7 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // Main Data Fetcher
+  // Main Paginated Orders Fetcher
   const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
     if (!silent) setIsLoading(true);
@@ -221,16 +258,68 @@ export default function App() {
 
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
 
+      // SMART MULTI-BARCODE CACHE RESOLUTION:
+      // If server query returns 0 rows during search, check if query matches secondary vial barcode in local orders!
+      if (res.orders.length === 0 && dashboardSearch && dashboardSearch.trim()) {
+        const q = dashboardSearch.trim().toLowerCase();
+        const matchedLocal = localOrders.filter(lo => {
+          const vials = (lo.vials && lo.vials.length > 0) ? lo.vials : getAllOrderVials(lo, testCatalog);
+          const allBcs = [
+            lo.barcode,
+            ...(lo.allBarcodes || []),
+            ...(lo.barcodesList || []),
+            ...vials.map(v => v.barcode),
+            ...(lo.tests || []).map(t => t.vialBarcode || t.barcode)
+          ].filter(Boolean);
+          return (
+            allBcs.some(b => String(b).toLowerCase().includes(q)) ||
+            (lo.patient?.name && lo.patient.name.toLowerCase().includes(q)) ||
+            (lo.patient?.id && String(lo.patient.id).toLowerCase().includes(q)) ||
+            (lo.patient?.phone && lo.patient.phone.includes(q))
+          );
+        });
+
+        if (matchedLocal.length > 0) {
+          setOrders(matchedLocal);
+          setSelectedOrderId(matchedLocal[0].orderId || matchedLocal[0].id);
+          setTotalPages(1);
+          setTotalCount(matchedLocal.length);
+          if (!silent) setIsLoading(false);
+          return;
+        }
+      }
+
       const formatted = (res.orders || []).map((o, idx) => {
+        const localMatch = localOrders.find(lo => (lo.orderId || lo.id) === (o.id || o.orderId));
+
+        // Restore multi-vial mapping from Supabase results or local storage
+        let restoredVials = [];
+        if (Array.isArray(o.results)) {
+          const vialRow = o.results.find(r => r.parameter_id === "SPECIMEN_VIALS");
+          if (vialRow && vialRow.result_value) {
+            try { restoredVials = JSON.parse(vialRow.result_value); } catch (e) {}
+          }
+        }
+        if (restoredVials.length === 0 && localMatch?.vials && localMatch.vials.length > 0) {
+          restoredVials = localMatch.vials;
+        }
+
         const matchedTests = (o.order_tests || []).map(ot => {
           const rawTest = ot.test || ot.tests || {};
           const testId = ot.test_id || rawTest.id || ot.id;
           const fromCat = (testCatalog || []).find(t => t.id === testId || (t.code && t.code === rawTest.code)) || {};
 
-          // CRITICAL: Ensure live parameters and reference ranges from testCatalog are merged
           const catParams = fromCat.test_parameters || fromCat.parameters || [];
           const rawParams = rawTest.test_parameters || rawTest.parameters || [];
           const resolvedParams = catParams.length > 0 ? catParams : rawParams;
+
+          let specificVialBc = "";
+          if (restoredVials.length > 0) {
+            const vMatch = restoredVials.find(v => 
+              v.testIds?.includes(testId) || v.testIds?.includes(rawTest.code) || v.testNames?.includes(rawTest.name)
+            );
+            if (vMatch) specificVialBc = vMatch.barcode;
+          }
 
           return {
             ...fromCat,
@@ -243,29 +332,59 @@ export default function App() {
             tube_color: rawTest.tube_color || fromCat.tube_color || rawTest.tubeColor || fromCat.tubeColor || "Red / Yellow (SST / Plain Clot)",
             sample_type: rawTest.sample_type || fromCat.sample_type || "Blood",
             report_type: rawTest.report_type || fromCat.report_type || "tabular",
+            vialBarcode: specificVialBc || rawTest.vialBarcode || "",
             test_parameters: resolvedParams,
             parameters: resolvedParams
           };
         }).filter(Boolean);
+
+        const resolvedTests = (matchedTests && matchedTests.length > 0)
+          ? matchedTests
+          : (localMatch?.tests && localMatch.tests.length > 0)
+            ? localMatch.tests
+            : (Array.isArray(o.tests) && o.tests.length > 0)
+              ? o.tests
+              : [];
 
         const resolvedDoctor = 
           (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
             ? o.patient.address.replace("Ref: ", "") 
             : (o.patient?.doctor || o.doctor || "Self");
 
-        const localMatch = localOrders.find(lo => (lo.orderId || lo.id) === (o.id || o.orderId));
-        const resolvedVials = (Array.isArray(o.vials) && o.vials.length > 0)
-          ? o.vials
-          : (localMatch?.vials && localMatch.vials.length > 0)
-            ? localMatch.vials
-            : [];
+        const resolvedVials = restoredVials.length > 0
+          ? restoredVials
+          : getAllOrderVials({ ...o, tests: resolvedTests }, testCatalog);
+
+        let resolvedDeptRemarks = {};
+        try {
+          if (o.verifier_remarks && typeof o.verifier_remarks === "string" && o.verifier_remarks.trim().startsWith("{")) {
+            resolvedDeptRemarks = JSON.parse(o.verifier_remarks);
+          }
+        } catch (e) {}
+
+        if (Array.isArray(o.results)) {
+          o.results.forEach((r) => {
+            if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
+              const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
+              if (r.result_value !== undefined && r.result_value !== null) {
+                resolvedDeptRemarks[dId] = r.result_value;
+              }
+            }
+          });
+        }
+
+        const rawBarcodeStr = String(o.barcode || "");
+        const allBarcodesList = rawBarcodeStr.split(/[\s,]+/).filter(Boolean);
+        const primaryBarcode = allBarcodesList[0] || (resolvedVials[0]?.barcode) || "2026000001";
 
         return {
           orderId: o.id || o.orderId,
           receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "").slice(4)}-${String(1001 + idx)}`,
           date: o.order_date || o.date || todayStr,
           createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
-          barcode: o.barcode,
+          barcode: primaryBarcode,
+          allBarcodes: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
+          barcodesList: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
           doctor: resolvedDoctor,
           patient: {
             ...(o.patient || {}),
@@ -276,7 +395,7 @@ export default function App() {
             gender: o.patient?.gender || "Other",
             doctor: resolvedDoctor
           },
-          tests: matchedTests.length > 0 ? matchedTests : (o.tests || []),
+          tests: resolvedTests,
           vials: resolvedVials,
           billing: o.billing || {
             subTotal: parseFloat(o.subtotal) || 0,
@@ -292,7 +411,10 @@ export default function App() {
           sampleStatus: o.sample_status || o.sampleStatus || localMatch?.sample_status || "Order Created",
           qcStatus: o.qc_status || o.qcStatus || "Pending",
           isLocked: o.is_locked || o.isLocked || false,
-          verifierRemarks: o.verifier_remarks || o.verifierRemarks || ""
+          dept_remarks: resolvedDeptRemarks,
+          deptRemarks: resolvedDeptRemarks,
+          verifierRemarks: typeof o.verifier_remarks === "string" && !o.verifier_remarks.startsWith("{") ? o.verifier_remarks : (resolvedDeptRemarks["GLOBAL"] || ""),
+          verifier_remarks: o.verifier_remarks || ""
         };
       });
 
@@ -339,8 +461,18 @@ export default function App() {
             prev.map((ord) => {
               const matches = ord.orderId === newResult.order_id || ord.id === newResult.order_id;
               if (matches) {
+                const isDeptRemark = newResult.parameter_id && newResult.parameter_id.startsWith("DEPT_REMARKS_");
+                let updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
+
+                if (isDeptRemark) {
+                  const dId = newResult.parameter_id.replace("DEPT_REMARKS_", "");
+                  updatedDeptRemarks[dId] = newResult.result_value;
+                }
+
                 return {
                   ...ord,
+                  dept_remarks: updatedDeptRemarks,
+                  deptRemarks: updatedDeptRemarks,
                   results: {
                     ...ord.results,
                     [newResult.parameter_id]: { value: newResult.result_value }
@@ -366,7 +498,7 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Poller for Active Order
+  // Direct Results Poller
   useEffect(() => {
     if (!currentUser || !activeOrder) return;
     const currentTargetId = activeOrder.orderId || activeOrder.id;
@@ -386,13 +518,23 @@ export default function App() {
               if (ord.orderId === currentTargetId || ord.id === currentTargetId) {
                 let changed = false;
                 const updatedResults = { ...ord.results };
+                const updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
+
                 latestResults.forEach((r) => {
                   if (updatedResults[r.parameter_id]?.value !== r.result_value) {
                     updatedResults[r.parameter_id] = { value: r.result_value };
                     changed = true;
                   }
+                  if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
+                    const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
+                    if (updatedDeptRemarks[dId] !== r.result_value) {
+                      updatedDeptRemarks[dId] = r.result_value;
+                      changed = true;
+                    }
+                  }
                 });
-                return changed ? { ...ord, results: updatedResults } : ord;
+
+                return changed ? { ...ord, results: updatedResults, dept_remarks: updatedDeptRemarks, deptRemarks: updatedDeptRemarks } : ord;
               }
               return ord;
             })
@@ -538,6 +680,7 @@ export default function App() {
     return Object.values(grouped);
   }, [activeOrder, departments]);
 
+  // Order Creation Handler with Instant Receipt Print
   const handleSaveOrderToDb = async () => {
     if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
       return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
@@ -568,7 +711,12 @@ export default function App() {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      alert(`✅ Order Created!\nPatient ID: ${createdOrder.patient?.id}\nBarcode: ${createdOrder.barcode}`);
+      try {
+        printMoneyReceiptA5(createdOrder, labSettings);
+      } catch (err) {
+        console.warn("Receipt print notice:", err);
+      }
+
       setActiveTab("dashboard");
       fetchPaginatedOrders(true);
     } catch (e) { 
@@ -640,27 +788,62 @@ export default function App() {
     }
   };
 
-  const handleRemarksChange = (val) => {
+  const handleRemarksChange = (arg1, arg2) => {
     if (!activeOrder || activeOrder.isLocked) return;
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.orderId === activeOrder.orderId ? { ...o, verifierRemarks: val } : o
-      )
-    );
+
+    if (arg2 !== undefined) {
+      const deptId = arg1;
+      const text = arg2;
+      const currentDeptRemarks = { ...(activeOrder.dept_remarks || activeOrder.deptRemarks || {}), [deptId]: text };
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.orderId === activeOrder.orderId || o.id === activeOrder.orderId)
+            ? {
+                ...o,
+                dept_remarks: currentDeptRemarks,
+                deptRemarks: currentDeptRemarks
+              }
+            : o
+        )
+      );
+
+      (async () => {
+        try {
+          await saveTestResult(activeOrder.orderId, `DEPT_REMARKS_${deptId}`, text);
+          await supabase.from("orders").update({ verifier_remarks: JSON.stringify(currentDeptRemarks) }).eq("id", activeOrder.orderId);
+        } catch (e) {}
+      })();
+    } else {
+      const val = arg1;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === activeOrder.orderId ? { ...o, verifierRemarks: val } : o
+        )
+      );
+    }
   };
 
   const handleVerifyInDb = async () => {
     if (!activeOrder) return;
     setIsLoading(true);
     try {
-      const remarksToSave = activeOrder.verifierRemarks?.trim() || "Clinically correlated and verified with internal quality control standards.";
-      await verifyAndLockOrder(activeOrder.orderId, remarksToSave, currentUser?.name || "Consultant Pathologist");
+      const remarksToSave = typeof activeOrder.verifierRemarks === "string" && activeOrder.verifierRemarks.trim()
+        ? activeOrder.verifierRemarks.trim()
+        : "Clinically correlated and verified with internal quality control standards.";
+
+      const serializedRemarks = activeOrder.dept_remarks && Object.keys(activeOrder.dept_remarks).length > 0
+        ? JSON.stringify(activeOrder.dept_remarks)
+        : remarksToSave;
+
+      await verifyAndLockOrder(activeOrder.orderId, serializedRemarks, currentUser?.name || "Consultant Pathologist");
       
       setOrders(prev => prev.map(o => o.orderId === activeOrder.orderId ? {
         ...o,
         qcStatus: "Verified",
         isLocked: true,
-        verifierRemarks: remarksToSave
+        verifierRemarks: remarksToSave,
+        verifier_remarks: serializedRemarks
       } : o));
 
       alert("✅ Report Verified and Locked!");
@@ -676,17 +859,27 @@ export default function App() {
     if (!newTestForm.name || !newTestForm.code || !newTestForm.price) return alert("Fill Name, Code, Price.");
     setIsLoading(true);
     try {
-      await createNewTestWithParameters(newTestForm);
+      const createdTest = await createNewTestWithParameters(newTestForm);
       alert("✅ Test Added to Catalog!");
+      
       const { tests } = await getMasterData();
-      setTestCatalog(tests || []);
+      const updatedCatalog = (tests && tests.length > 0) ? tests : [createdTest, ...testCatalog];
+      setTestCatalog(updatedCatalog);
+
+      setNewTestForm({
+        name: "", code: "", deptId: departments[0]?.id || "DEP-BIO", price: "", sampleType: "Serum", 
+        tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
+        parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
+      });
+
       setActiveTab("reception");
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert(e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
-  // =========================================================================
-  // FIX: ACCURATE NORMALIZATION OF SAVED PARAMETERS IN EDIT MODAL
-  // =========================================================================
   const handleOpenEditModal = (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
 
@@ -694,16 +887,11 @@ export default function App() {
       ? rawParams.map((p, i) => {
           let resolvedType = p.param_type || "numeric";
 
-          // 1. If explicitly saved as text/descriptive, it is strictly "text"
           if (resolvedType === "text" || resolvedType === "descriptive") {
             resolvedType = "text";
-          }
-          // 2. If qualitative, keep qualitative
-          else if (resolvedType === "qualitative") {
+          } else if (resolvedType === "qualitative") {
             resolvedType = "qualitative";
-          }
-          // 3. If numeric in DB, check if it was multirange (has text, but no min/max numbers)
-          else if (resolvedType === "numeric") {
+          } else if (resolvedType === "numeric") {
             const hasMin = p.min_range !== null && p.min_range !== undefined && String(p.min_range).trim() !== "";
             const hasMax = p.max_range !== null && p.max_range !== undefined && String(p.max_range).trim() !== "";
             const hasRef = Boolean(p.reference_text && String(p.reference_text).trim() !== "");
@@ -931,7 +1119,6 @@ export default function App() {
         labSettings={labSettings} 
       />
       
-      {/* Micro Status Toast */}
       {saveStatus.state !== "idle" && (
         <div className={`py-1 px-3 text-[11px] text-center font-semibold transition ${
           saveStatus.state === "saving" ? "bg-amber-500 text-white" : 

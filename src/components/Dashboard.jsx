@@ -2,7 +2,8 @@ import React, { useMemo, useState, useEffect } from "react";
 import {
   Search, Calendar, Receipt, DollarSign, CheckCircle2,
   X, ChevronLeft, ChevronRight, Clock,
-  MessageCircle, RotateCcw, AlertTriangle, ChevronDown, Filter
+  MessageCircle, RotateCcw, AlertTriangle, ChevronDown, Filter,
+  Barcode
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
@@ -40,18 +41,28 @@ export default function Dashboard({
     setLocalOrders(orders);
   }, [orders]);
 
+  // Universal multi-barcode search: Matches primary, secondary, and test barcodes
   const sortedOrders = useMemo(() => {
     const q = (dashboardSearch || "").trim().toLowerCase();
     return [...localOrders]
       .filter((ord) => {
         if (!q) return true;
-        const orderVials = getAllOrderVials(ord);
-        const allBarcodes = [ord.barcode, ...orderVials.map((v) => v.barcode)].filter(Boolean);
+        const orderVials = getAllOrderVials(ord, testCatalog);
+        const allBarcodes = [
+          ord.barcode,
+          ...(ord.allBarcodes || []),
+          ...(ord.barcodesList || []),
+          ...orderVials.map((v) => v.barcode),
+          ...(ord.vials || []).map((v) => v.barcode),
+          ...(ord.tests || []).map((t) => t.vialBarcode || t.barcode)
+        ].filter(Boolean);
+
         return (
           allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
           (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
           (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q)) ||
-          (ord.patient?.phone && ord.patient.phone.includes(q))
+          (ord.patient?.phone && ord.patient.phone.includes(q)) ||
+          (ord.receiptNo && ord.receiptNo.toLowerCase().includes(q))
         );
       })
       .sort((a, b) => {
@@ -59,7 +70,7 @@ export default function Dashboard({
         const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
         return timeB - timeA;
       });
-  }, [localOrders, dashboardSearch]);
+  }, [localOrders, dashboardSearch, testCatalog]);
 
   const recollectionOrders = useMemo(() => {
     return sortedOrders.filter((o) => {
@@ -155,7 +166,7 @@ export default function Dashboard({
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
       
-      {/* 1. COMPACT ANALYTICS STRIP (SPACE SAVING) */}
+      {/* 1. ANALYTICS STRIP */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Page Orders</span>
@@ -183,15 +194,15 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* 2. DENSE FILTER & TOOLBAR */}
+      {/* 2. FILTER & TOOLBAR */}
       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         
-        {/* Search */}
+        {/* Universal Search Bar */}
         <div className="relative flex-1 max-w-md">
           <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
           <input
             type="text"
-            placeholder="Filter Barcode, Patient UHID, Phone, Name..."
+            placeholder="Scan / Type ANY Vial Barcode, UHID, Phone, Name..."
             value={dashboardSearch}
             onChange={(e) => {
               setDashboardSearch(e.target.value);
@@ -237,7 +248,7 @@ export default function Dashboard({
 
       </div>
 
-      {/* 3. PATIENT QUEUE TABLE (SLIM & FAST) */}
+      {/* 3. PATIENT QUEUE TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         
         {isLoading ? (
@@ -247,7 +258,7 @@ export default function Dashboard({
           </div>
         ) : sortedOrders.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-xs italic">
-            No patient orders found in this period.
+            No patient orders found matching your search.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -255,7 +266,7 @@ export default function Dashboard({
               <thead>
                 <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                   <th className="py-2.5 px-3">Time</th>
-                  <th className="py-2.5 px-3">Receipt / Barcode</th>
+                  <th className="py-2.5 px-3">Receipt / All Specimen Vials</th>
                   <th className="py-2.5 px-3">Patient (UHID)</th>
                   <th className="py-2.5 px-3">Contact</th>
                   <th className="py-2.5 px-3">Paid / Due</th>
@@ -268,6 +279,8 @@ export default function Dashboard({
                   const hasDue = (ord.billing?.due || 0) > 0;
                   const statusStr = (ord.sample_status || ord.sampleStatus || "").toLowerCase();
                   const isRecollection = statusStr.includes("repeat") && !statusStr.includes("recollected");
+                  const orderVials = (ord.vials && ord.vials.length > 0) ? ord.vials : getAllOrderVials(ord, testCatalog);
+                  const searchTrimmed = (dashboardSearch || "").trim().toLowerCase();
 
                   return (
                     <tr
@@ -282,10 +295,31 @@ export default function Dashboard({
                         <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{ord.date}</span>
                       </td>
 
-                      {/* Receipt & Barcode */}
-                      <td className="py-2 px-3 whitespace-nowrap">
+                      {/* Receipt & Registered Specimen Vials */}
+                      <td className="py-2 px-3">
                         <span className="font-mono font-bold text-slate-800 block text-[11px]">{ord.receiptNo}</span>
-                        <span className="font-mono text-[10px] text-slate-400 block">{ord.barcode}</span>
+                        
+                        <div className="flex flex-wrap gap-1 mt-0.5 max-w-xs">
+                          {orderVials.map((v, vIdx) => {
+                            const isMatchedSearch = searchTrimmed && String(v.barcode).toLowerCase().includes(searchTrimmed);
+                            return (
+                              <span
+                                key={vIdx}
+                                className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-semibold border flex items-center gap-0.5 ${
+                                  isMatchedSearch
+                                    ? "bg-blue-600 text-white border-blue-600 font-bold ring-2 ring-blue-300"
+                                    : "bg-slate-100 text-slate-700 border-slate-200"
+                                }`}
+                                title={`Department: ${v.deptCode || v.deptId} • Tube: ${v.tubeColor}`}
+                              >
+                                <span>{v.barcode}</span>
+                                <span className={isMatchedSearch ? "text-blue-100" : "text-slate-400"}>
+                                  ({(v.tubeColor || "Vial").split(" ")[0]})
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
                       </td>
 
                       {/* Patient */}
@@ -350,7 +384,7 @@ export default function Dashboard({
                           onClick={() => handlePrintMoneyReceipt(ord)}
                           className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
                         >
-                          <Receipt className="w-3 h-3" /> A5 Receipt
+                          <Receipt className="w-3 h-3" /> Receipt
                         </button>
 
                         <button
@@ -371,7 +405,7 @@ export default function Dashboard({
           </div>
         )}
 
-        {/* 4. COMPACT PAGINATION FOOTER */}
+        {/* 4. PAGINATION FOOTER */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 border-t border-slate-100 text-[11px] bg-slate-50/50">
           <span className="text-slate-500 font-medium">
             Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b>–<b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> entries
@@ -404,7 +438,7 @@ export default function Dashboard({
 
       </div>
 
-      {/* 5. FLOATING MINIMAL RECOLLECTION NOTIFIER */}
+      {/* 5. FLOATING RECOLLECTION NOTIFIER */}
       {recollectionOrders.length > 0 && (
         <div className="fixed bottom-4 right-4 z-50">
           {isBubbleOpen && (
@@ -441,7 +475,7 @@ export default function Dashboard({
                         onClick={() => handleMarkRecollectedAction(ord)}
                         className="py-1 px-2 bg-slate-900 hover:bg-blue-600 text-white rounded text-[10px] font-semibold flex items-center justify-center gap-1 disabled:opacity-50"
                       >
-                        <RotateCcw className="w-3 h-3" /> Recollected
+                        <RotateCcw className="w-3.5 h-3.5" /> Recollected
                       </button>
                     </div>
                   </div>
@@ -461,7 +495,7 @@ export default function Dashboard({
         </div>
       )}
 
-      {/* 6. COMPACT SETTLE DUE PAYMENT MODAL */}
+      {/* 6. SETTLE DUE PAYMENT MODAL */}
       {settleOrder && (
         <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl border border-slate-200 overflow-hidden text-xs">

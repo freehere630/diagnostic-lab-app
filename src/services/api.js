@@ -140,9 +140,6 @@ export const MASTER_SEMEN_PARAMETERS = [
   { name: "Pus Cells (WBC)", unit: "/HPF", min: 0, max: 5, type: "text", defaultRef: "< 1 million/mL or 0 - 4 /HPF" }
 ];
 
-// ==========================================
-// 3. DESCRIPTIVE NARRATIVE MASTER TEMPLATES
-// ==========================================
 export const DESCRIPTIVE_STANDARD_TEMPLATES = {
   radiologyChest: 
 `CLINICAL INDICATION: Routine health screening / Respiratory evaluation.
@@ -223,86 +220,8 @@ Normal 12-Lead Electrocardiogram. No ischemic ST-T changes or arrhythmias detect
 };
 
 // ==========================================
-// 4. SILENT SEEDERS & MASTER DATA
+// 3. MASTER DATA FETCHER
 // ==========================================
-
-async function ensureSilentSeedProfile(testId, code, name, deptId, price, sampleType, tubeColor, paramList, existingTests = [], reportType = "tabular") {
-  const existing = existingTests.find(
-    (t) => t.id === testId || (t.code || "").toUpperCase() === code.toUpperCase() || (t.name || "").toLowerCase() === name.toLowerCase()
-  );
-
-  const existingParams = existing ? (existing.test_parameters || existing.parameters || []) : [];
-  if (existing && existingParams.length >= paramList.length) {
-    return existingTests;
-  }
-
-  const targetId = existing?.id || testId;
-
-  try {
-    await supabase.from("tests").upsert({
-      id: targetId,
-      code: code,
-      name: name,
-      dept_id: deptId,
-      price: price,
-      sample_type: sampleType,
-      tube_color: tubeColor,
-      is_profile: reportType === "tabular",
-      report_type: reportType,
-      is_available: true
-    });
-
-    if (existingParams.length < paramList.length) {
-      await supabase.from("test_parameters").delete().eq("test_id", targetId);
-    }
-
-    const paramRows = paramList.map((p, idx) => ({
-      id: `P-${code}-${String(idx + 1).padStart(2, "0")}`,
-      test_id: targetId,
-      name: p.name,
-      param_type: p.type === "qualitative" ? "qualitative" : (p.type === "text" ? "text" : "numeric"),
-      unit: p.unit || "",
-      min_range: p.min !== null && p.min !== undefined ? p.min : null,
-      max_range: p.max !== null && p.max !== undefined ? p.max : null,
-      reference_text: p.defaultRef || p.template_text || null
-    }));
-
-    await supabase.from("test_parameters").insert(paramRows);
-
-    const { data: updated } = await supabase.from("tests").select("*, test_parameters(*)").eq("id", targetId).single();
-    if (updated) {
-      return [updated, ...existingTests.filter((t) => t.id !== targetId)];
-    }
-  } catch (err) {
-    console.warn(`Silent seeder notice for ${code}:`, err.message);
-  }
-
-  const inMemory = {
-    id: targetId,
-    code: code,
-    name: name,
-    dept_id: deptId,
-    price: price,
-    sample_type: sampleType,
-    tube_color: tubeColor,
-    is_profile: reportType === "tabular",
-    report_type: reportType,
-    is_available: true,
-    test_parameters: paramList.map((p, idx) => ({
-      id: `P-${code}-${String(idx + 1).padStart(2, "0")}`,
-      test_id: targetId,
-      name: p.name,
-      param_type: p.type,
-      unit: p.unit || "",
-      min_range: p.min,
-      max_range: p.max,
-      reference_text: p.defaultRef || p.template_text || null
-    }))
-  };
-
-  return [inMemory, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== code.toUpperCase())];
-}
-
 export async function getMasterData() {
   try {
     const { data: departments } = await supabase.from("departments").select("*");
@@ -315,82 +234,16 @@ export async function getMasterData() {
 
     let currentTests = tests || [];
 
-    // Quantitative Profiles
-    currentTests = await ensureSilentSeedProfile(
-      "T-CBC-5PART", "CBC", "Complete Blood Count (CBC) with 5-Part Differential",
-      "DEP-HEM", 400, "Whole Blood", "Purple / Lavender (EDTA)", MASTER_CBC_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-URINE-RME", "URINE-RME", "Urine Routine & Microscopic Examination (R/M/E)",
-      "DEP-PAT", 250, "Clean Catch Urine", "Sterile Urine Cup", MASTER_URINE_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-STOOL-RE", "STOOL-RE", "Stool Routine Examination (R/E)",
-      "DEP-PAT", 250, "Fresh Stool", "Sterile Urine Cup", MASTER_STOOL_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-WIDAL", "WIDAL", "Widal Test (Typhoid Serology)",
-      "DEP-MIC", 350, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_WIDAL_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-LIPID", "LIPID", "Lipid Profile (Full Fasting Panel)",
-      "DEP-BIO", 900, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_LIPID_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-LFT", "LFT", "Liver Function Test (LFT Panel)",
-      "DEP-BIO", 1000, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_LFT_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-ELECTROLYTES", "ELECTROLYTES", "Serum Electrolytes (Na+, K+, Cl-, HCO3-)",
-      "DEP-BIO", 800, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_ELECTROLYTE_PARAMETERS, currentTests, "tabular"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-SEMEN", "SEMEN-RE", "Semen Routine & Morphological Analysis",
-      "DEP-PAT", 600, "Fresh Specimen", "Sterile Urine Cup", MASTER_SEMEN_PARAMETERS, currentTests, "tabular"
-    );
-
-    // Descriptive Investigations (With built-in narrative templates)
-    currentTests = await ensureSilentSeedProfile(
-      "T-XRAY-CHEST", "XRAY-CHEST", "X-Ray Chest (P/A View)",
-      "DEP-RAD", 500, "Radiological Study", "No Specimen (Imaging)",
-      [{ name: "Chest Radiography Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest }],
-      currentTests, "descriptive"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-USG-ABD", "USG-ABD", "USG of Whole Abdomen",
-      "DEP-USG", 1500, "Ultrasound Protocol", "No Specimen (Imaging)",
-      [{ name: "Abdominal Sonography Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }],
-      currentTests, "descriptive"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-ECG-12", "ECG-12", "12-Lead Electrocardiogram (ECG)",
-      "DEP-CARD", 350, "12-Lead Tracing", "No Specimen (Imaging)",
-      [{ name: "Electrocardiogram Findings", type: "text", unit: "Tracing", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead }],
-      currentTests, "descriptive"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-HISTO-BX", "HISTO-BX", "Histopathology (Biopsy Examination)",
-      "DEP-HISTO", 1800, "Biopsy Specimen", "Sterile Container with 10% Formalin",
-      [{ name: "Histopathological Examination Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.histopathology }],
-      currentTests, "descriptive"
-    );
-
-    currentTests = await ensureSilentSeedProfile(
-      "T-FNAC", "FNAC", "Fine Needle Aspiration Cytology (FNAC)",
-      "DEP-HISTO", 1200, "Aspiration Smear", "Fixed Glass Slides",
-      [{ name: "Cytological Examination Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.fnacCytology }],
-      currentTests, "descriptive"
-    );
+    try {
+      const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+      if (local && local.length > 0) {
+        const localMap = new Map(local.map(lt => [lt.id, lt]));
+        currentTests = currentTests.map(t => localMap.has(t.id) ? localMap.get(t.id) : t);
+        local.forEach(lt => {
+          if (!currentTests.some(ct => ct.id === lt.id)) currentTests.push(lt);
+        });
+      }
+    } catch (e) {}
 
     return { 
       departments: finalDepts, 
@@ -402,7 +255,6 @@ export async function getMasterData() {
   }
 }
 
-// 1-Click Seed Standard Radiology & Modality Catalog
 export async function seedRadiologyCatalog() {
   const radiologyDepts = [
     { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
@@ -441,17 +293,6 @@ export async function seedRadiologyCatalog() {
       parameters: [{ name: "Abdominal Sonography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }]
     },
     {
-      code: "CT-BRAIN",
-      name: "CT Scan of Brain",
-      deptId: "DEP-CTMRI",
-      price: "4500",
-      sampleType: "Non-Contrast CT Head",
-      tubeColor: "No Specimen (Imaging)",
-      isProfile: false,
-      reportType: "descriptive",
-      parameters: [{ name: "Cranial CT Observations", param_type: "text", unit: "Report", reference_text: "CLINICAL INDICATION: Headache / Neurological deficit.\nTECHNIQUE: Axial non-contrast CT sections.\n\nFINDINGS:\n- Normal parenchymal density across cerebral and cerebellar hemispheres.\n- Ventricles and sulci are normal for age.\n- No evidence of acute hemorrhage, territorial infarct, or mass effect.\n\nIMPRESSION:\nNormal Brain CT Scan." }]
-    },
-    {
       code: "ECG-12",
       name: "12-Lead Electrocardiogram (ECG)",
       deptId: "DEP-CARD",
@@ -476,7 +317,7 @@ export async function seedRadiologyCatalog() {
 }
 
 // ==========================================
-// 5. DOCTOR MANAGEMENT
+// 4. DOCTOR MANAGEMENT
 // ==========================================
 export async function getDoctorsList() {
   try {
@@ -497,7 +338,6 @@ export async function getDoctorsList() {
     { id: "DOC-002", name: "Dr. Farhana Yasmin", degrees: "MBBS, DGO, MCPS (Gyne & Obs)", chamber: "Popular Diagnostic Center", phone: "01819000002" },
     { id: "DOC-003", name: "Dr. K. S. Hossain", degrees: "MBBS, MD (Cardiology)", chamber: "National Heart Foundation", phone: "01912000003" }
   ];
-  try { localStorage.setItem("apex_local_doctors", JSON.stringify(defaultDoctors)); } catch (e) {}
   return defaultDoctors;
 }
 
@@ -532,7 +372,7 @@ export async function deleteDoctor(docId) {
 }
 
 // ==========================================
-// 6. PATIENT SEARCH & HISTORY
+// 5. PATIENT SEARCH & HISTORY
 // ==========================================
 export async function searchPatients(query) {
   if (!query || query.trim().length < 2) return [];
@@ -579,7 +419,7 @@ export async function getPatientHistory(patientId) {
 }
 
 // ==========================================
-// 7. PAGINATED ORDERS QUERY
+// 6. PAGINATED ORDERS QUERY (ADVANCED MULTI-BARCODE & RESULTS SEARCH)
 // ==========================================
 export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "", dateTo = "", searchQuery = "" }) {
   const fromIndex = (page - 1) * pageSize;
@@ -601,7 +441,35 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
 
     if (searchQuery && searchQuery.trim()) {
       const q = searchQuery.trim();
-      query = query.or(`barcode.ilike.%${q}%,patient_id.ilike.%${q}%,id.ilike.%${q}%`);
+
+      // Look up secondary vial barcodes stored in results table
+      let matchedOrderIds = [];
+      try {
+        const { data: resMatches } = await supabase
+          .from("results")
+          .select("order_id")
+          .or(`parameter_id.ilike.%${q}%,result_value.ilike.%${q}%`)
+          .limit(10);
+        if (resMatches && resMatches.length > 0) {
+          matchedOrderIds = resMatches.map(r => r.order_id).filter(Boolean);
+        }
+      } catch (e) {}
+
+      // If secondary barcode belongs to an offset (e.g. 202600002 has base 202600001)
+      const numericDigits = q.replace(/\D/g, "");
+      let candidateBases = [];
+      if (numericDigits.length >= 6) {
+        const numVal = parseInt(numericDigits, 10);
+        for (let offset = 1; offset <= 5; offset++) {
+          candidateBases.push(String(numVal - offset));
+        }
+      }
+
+      let orClauses = [`barcode.ilike.%${q}%`, `patient_id.ilike.%${q}%`, `id.ilike.%${q}%`];
+      candidateBases.forEach(b => orClauses.push(`barcode.ilike.%${b}%`));
+      matchedOrderIds.forEach(mId => orClauses.push(`id.eq.${mId}`));
+
+      query = query.or(orClauses.join(","));
     }
 
     query = query
@@ -677,14 +545,31 @@ export async function getAllOrders() {
 }
 
 // ==========================================
-// 8. ORDER CREATION WITH MULTI-VIALS
+// 7. ORDER CREATION: MULTI-BARCODE & VIAL SYNC
 // ==========================================
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
   const patientId = patientData.id && patientData.id.trim() 
     ? patientData.id.trim() 
     : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
+  const selectedTests = (testCatalog || []).filter((t) => testIds.includes(t.id)).map(t => {
+    const rawParams = t.test_parameters || t.parameters || [];
+    const resolvedParams = rawParams.length > 0 ? rawParams : [{
+      id: `P-${(t.code || t.id || "TEST").toUpperCase().replace(/[^A-Z0-9]/g, "")}-01`,
+      test_id: t.id,
+      name: t.name || "Test",
+      param_type: t.report_type === "descriptive" ? "text" : "numeric",
+      unit: "",
+      min_range: null,
+      max_range: null,
+      reference_text: t.report_type === "descriptive" ? DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest : "Normal"
+    }];
+    return {
+      ...t,
+      test_parameters: resolvedParams,
+      parameters: resolvedParams
+    };
+  });
 
   const departmentVials = [];
   selectedTests.forEach((t) => {
@@ -694,9 +579,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
     if (!deptId || deptId === "DEP-GEN") {
       if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
-      else if (code.includes("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
-      else if (code.includes("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
-      else if (code.includes("ECG")) deptId = "DEP-CARD";
+      else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE") || deptId.includes("BIO")) deptId = "DEP-BIO";
+      else if (code.startsWith("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
+      else if (code.startsWith("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
+      else if (code === "CT" || code.startsWith("CT-") || name.includes("CT SCAN")) deptId = "DEP-CTMRI";
+      else if (code.startsWith("ECG") || name.includes("ELECTROCARDIOGRAM")) deptId = "DEP-CARD";
       else if (code.includes("URINE") || code.includes("STOOL")) deptId = "DEP-PAT";
       else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX")) deptId = "DEP-HISTO";
       else deptId = "DEP-BIO";
@@ -706,9 +593,9 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     let tubeColor = (t.tube_color || t.tubeColor || "Standard").trim();
     if (tubeColor === "Standard") {
       if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
-      else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD")) tubeColor = "Imaging Requisition";
+      else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD") || deptCode.includes("CT")) tubeColor = "Imaging Requisition";
       else if (deptCode.includes("HISTO")) tubeColor = "Formalin Container";
-      else if (deptCode.includes("PAT") && name.includes("URINE")) tubeColor = "Sterile Urine Cup";
+      else if (deptCode.includes("PAT") && (code.includes("URINE") || name.includes("URINE"))) tubeColor = "Sterile Urine Cup";
       else tubeColor = "Red / Yellow (SST / Plain Clot)";
     }
     const tubeShort = tubeColor.split(" ")[0];
@@ -739,7 +626,17 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     v.testBarcode = barcodeList[i];
   });
 
+  selectedTests.forEach((t) => {
+    const matchedVial = departmentVials.find(v => 
+      v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)
+    ) || departmentVials[0];
+    t.vialBarcode = matchedVial.barcode;
+    t.barcode = matchedVial.barcode;
+  });
+
   const primaryBarcode = barcodeList[0];
+  const allBarcodesStr = barcodeList.join(", ");
+
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
@@ -769,7 +666,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const orderRow = {
     id: orderId,
     patient_id: patientId,
-    barcode: primaryBarcode,
+    barcode: allBarcodesStr,
     order_date: todayDate,
     created_at: nowIso,
     subtotal: subTotal,
@@ -781,12 +678,42 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     qc_status: "Pending",
     is_locked: false
   };
-  try { await supabase.from("orders").insert(orderRow); } catch (e) {}
+
+  try {
+    const { error: insErr } = await supabase.from("orders").insert(orderRow);
+    if (insErr) {
+      await supabase.from("orders").insert({ ...orderRow, barcode: primaryBarcode });
+    }
+  } catch (e) {}
+
+  for (const t of selectedTests) {
+    try {
+      await supabase.from("tests").upsert({
+        id: t.id,
+        code: (t.code || "TEST").toUpperCase(),
+        name: t.name,
+        dept_id: t.dept_id || t.deptId || "DEP-BIO",
+        price: parseFloat(t.price) || 0,
+        sample_type: t.sample_type || "Serum",
+        tube_color: t.tube_color || "Red / Yellow (SST / Plain Clot)",
+        is_profile: Boolean(t.is_profile),
+        is_available: true
+      });
+    } catch (e) {}
+  }
 
   if (testIds && testIds.length > 0) {
     const orderTestRows = testIds.map((tid) => ({ order_id: orderId, test_id: tid }));
     try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
   }
+
+  // Permanently save the complete multi-vial mapping to Supabase results table
+  try {
+    await saveTestResult(orderId, "SPECIMEN_VIALS", JSON.stringify(departmentVials));
+    for (const v of departmentVials) {
+      await saveTestResult(orderId, `VIAL_BARCODE_${v.barcode}`, v.deptId);
+    }
+  } catch (e) {}
 
   const completeOrder = {
     ...orderRow,
@@ -795,6 +722,8 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     createdAt: nowIso,
     created_at: nowIso,
     barcode: primaryBarcode,
+    allBarcodes: barcodeList,
+    barcodesList: barcodeList,
     doctor: referringDoctor,
     receiptNo: receiptNo,
     patient: {
@@ -813,7 +742,9 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     results: {},
     qcStatus: "Pending",
     isLocked: false,
-    verifierRemarks: ""
+    verifierRemarks: "",
+    dept_remarks: {},
+    deptRemarks: {}
   };
 
   try {
@@ -825,7 +756,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 }
 
 // ==========================================
-// 9. SETTLE DUE & RESULT ENTRY
+// 8. SETTLE DUE & RESULT ENTRY
 // ==========================================
 export async function settleOrderDue(orderId, collectedAmount) {
   const amountToClear = parseFloat(collectedAmount) || 0;
@@ -885,7 +816,7 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
 }
 
 // ==========================================
-// 10. REJECTION & RECOLLECTION WORKFLOW
+// 9. REJECTION & RECOLLECTION WORKFLOW
 // ==========================================
 export async function requestSampleRecollection(orderId, reason = "Hemolyzed Specimen", remarks = "") {
   const fullRemarks = `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim();
@@ -969,13 +900,19 @@ export async function markSampleRecollected(orderId) {
 }
 
 // ==========================================
-// 11. TEST CATALOG CRUD & TEMPLATE SUPPORT
+// 10. ROBUST TEST CATALOG CRUD & SAFE PARAMETERS UPSERT
 // ==========================================
 export async function toggleTestAvailability(testId, isAvailable) {
   const { data, error } = await supabase
     .from("tests")
     .update({ is_available: isAvailable })
     .eq("id", testId);
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+    const updated = local.map(t => t.id === testId ? { ...t, is_available: isAvailable } : t);
+    localStorage.setItem("apex_local_tests", JSON.stringify(updated));
+  } catch (e) {}
 
   if (error) throw error;
   return data;
@@ -984,106 +921,129 @@ export async function toggleTestAvailability(testId, isAvailable) {
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
 
-  const isDescriptive = testData.reportType === "descriptive" || 
+  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
     (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
+
+  const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
+
+  try {
+    await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") });
+  } catch (e) {}
 
   const testPayload = {
     id: testId,
     code: testData.code.trim().toUpperCase(),
     name: testData.name.trim(),
-    dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
+    dept_id: deptId,
     price: parseFloat(testData.price) || 0,
     sample_type: testData.sampleType || testData.sample_type || "Serum",
     tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
     is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
+    report_type: isDescriptive ? "descriptive" : "tabular",
     is_available: testData.is_available !== undefined ? testData.is_available : true
   };
 
   let test = null;
   try {
-    const { data, error: tErr } = await supabase.from("tests").insert({ ...testPayload, report_type: isDescriptive ? "descriptive" : "tabular" }).select().single();
-    if (!tErr) test = data;
-    else throw tErr;
+    const { data } = await supabase.from("tests").insert(testPayload).select().single();
+    test = data || testPayload;
   } catch (e) {
-    const { data: fallbackData } = await supabase.from("tests").insert(testPayload).select().single();
-    test = fallbackData || testPayload;
+    test = testPayload;
   }
 
-  if (testData.parameters && testData.parameters.length > 0) {
-    const paramRows = testData.parameters
-      .filter((p) => p.name && p.name.trim() !== "")
-      .map((p, idx) => {
-        const minVal = p.min !== "" && p.min !== null && p.min !== undefined && !isNaN(parseFloat(p.min)) ? parseFloat(p.min) : null;
-        const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
-        const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
+  const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
+  const paramRows = (validParams.length > 0 ? validParams : [{ name: testData.name, param_type: "numeric" }]).map((p, idx) => {
+    const minVal = p.min !== "" && p.min !== null && p.min !== undefined && !isNaN(parseFloat(p.min)) ? parseFloat(p.min) : null;
+    const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
+    const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
 
-        let safeType = p.param_type || "numeric";
-        if (safeType === "multirange") safeType = "numeric";
-        if (safeType === "descriptive") safeType = "text";
+    let safeType = p.param_type || "numeric";
+    if (safeType === "multirange") safeType = "numeric";
+    if (safeType === "descriptive") safeType = "text";
 
-        return {
-          id: `P-${testId}-${idx + 1}`,
-          test_id: testId,
-          name: p.name.trim(),
-          param_type: safeType,
-          unit: (p.unit || "").trim(),
-          min_range: minVal,
-          max_range: maxVal,
-          reference_text: refText || null
-        };
-      });
+    return {
+      id: p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}`,
+      test_id: testId,
+      name: p.name.trim(),
+      param_type: safeType,
+      unit: (p.unit || "").trim(),
+      min_range: minVal,
+      max_range: maxVal,
+      reference_text: refText || null
+    };
+  });
 
-    if (paramRows.length > 0) {
-      const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
-      if (insErr) {
-        const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
-        await supabase.from("test_parameters").insert(safeRows);
-      }
-    }
+  try {
+    await supabase.from("test_parameters").upsert(paramRows, { onConflict: "id" });
+  } catch (e) {
+    console.warn("Insert params notice:", e);
   }
 
-  return test;
+  const fullTestWithParams = {
+    ...testPayload,
+    id: testId,
+    test_parameters: paramRows,
+    parameters: paramRows
+  };
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+    localStorage.setItem("apex_local_tests", JSON.stringify([fullTestWithParams, ...local.filter(t => t.id !== testId)]));
+  } catch (e) {}
+
+  return fullTestWithParams;
 }
 
 export async function updateExistingTest(testId, testData) {
-  const isDescriptive = testData.reportType === "descriptive" || 
+  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
     (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
+
+  const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
+  try {
+    await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") });
+  } catch (e) {}
 
   const testPayload = {
     code: testData.code.trim().toUpperCase(),
     name: testData.name.trim(),
-    dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
+    dept_id: deptId,
     price: parseFloat(testData.price) || 0,
     sample_type: testData.sampleType || testData.sample_type || "Serum",
     tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
     is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
+    report_type: isDescriptive ? "descriptive" : "tabular",
     is_available: testData.is_available !== undefined ? testData.is_available : true
   };
 
   try {
-    await supabase.from("tests").update({ ...testPayload, report_type: isDescriptive ? "descriptive" : "tabular" }).eq("id", testId);
-  } catch (e) {
     await supabase.from("tests").update(testPayload).eq("id", testId);
+  } catch (e) {
+    console.warn("Update test row notice:", e);
   }
 
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
 
   if (validParams.length > 0) {
+    const keptIds = [];
     const paramRows = validParams.map((p, idx) => {
-      const rawMin = p.min !== undefined && p.min !== "" ? p.min : p.min_range;
-      const rawMax = p.max !== undefined && p.max !== "" ? p.max : p.max_range;
-      const minVal = rawMin !== "" && rawMin !== null && rawMin !== undefined && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
-      const maxVal = rawMax !== "" && rawMax !== null && rawMax !== undefined && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
+      const rawMin = (p.min !== undefined && p.min !== null && p.min !== "") ? p.min : (p.min_range ?? "");
+      const rawMax = (p.max !== undefined && p.max !== null && p.max !== "") ? p.max : (p.max_range ?? "");
+      const minVal = rawMin !== "" && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
+      const maxVal = rawMax !== "" && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
       const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
 
-      const existingId = p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
+      const pId = p.id && String(p.id).trim() !== "" && !String(p.id).startsWith("p-")
+        ? String(p.id).trim()
+        : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
+
+      keptIds.push(pId);
 
       let safeType = p.param_type || "numeric";
       if (safeType === "multirange") safeType = "numeric";
       if (safeType === "descriptive") safeType = "text";
 
       return {
-        id: existingId,
+        id: pId,
         test_id: testId,
         name: p.name.trim(),
         param_type: safeType,
@@ -1094,23 +1054,56 @@ export async function updateExistingTest(testId, testData) {
       };
     });
 
-    await supabase.from("test_parameters").delete().eq("test_id", testId);
-    const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
-    if (insErr) {
-      const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
-      await supabase.from("test_parameters").insert(safeRows);
+    try {
+      const { data: existingDbParams } = await supabase.from("test_parameters").select("id").eq("test_id", testId);
+      if (existingDbParams && existingDbParams.length > 0) {
+        const toDeleteIds = existingDbParams.map(ep => ep.id).filter(id => !keptIds.includes(id));
+        if (toDeleteIds.length > 0) {
+          await supabase.from("results").delete().in("parameter_id", toDeleteIds);
+          await supabase.from("test_parameters").delete().in("id", toDeleteIds);
+        }
+      }
+
+      await supabase.from("test_parameters").upsert(paramRows, { onConflict: "id" });
+    } catch (dbErr) {
+      console.warn("DB param update notice:", dbErr);
     }
+
+    try {
+      const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+      const updatedTestObj = {
+        ...testPayload,
+        id: testId,
+        test_parameters: paramRows,
+        parameters: paramRows
+      };
+      localStorage.setItem("apex_local_tests", JSON.stringify([updatedTestObj, ...local.filter(t => t.id !== testId)]));
+    } catch (e) {}
   }
 }
 
 export async function deleteTest(testId) {
-  await supabase.from("order_tests").delete().eq("test_id", testId);
-  await supabase.from("test_parameters").delete().eq("test_id", testId);
-  await supabase.from("tests").delete().eq("id", testId);
+  try {
+    const { data: params } = await supabase.from("test_parameters").select("id").eq("test_id", testId);
+    if (params && params.length > 0) {
+      const pIds = params.map(p => p.id);
+      await supabase.from("results").delete().in("parameter_id", pIds);
+    }
+    await supabase.from("order_tests").delete().eq("test_id", testId);
+    await supabase.from("test_parameters").delete().eq("test_id", testId);
+    await supabase.from("tests").delete().eq("id", testId);
+  } catch (e) {
+    console.warn("Delete test DB notice:", e);
+  }
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+    localStorage.setItem("apex_local_tests", JSON.stringify(local.filter(t => t.id !== testId)));
+  } catch (e) {}
 }
 
 // ==========================================
-// 12. STAFF & LAB SETTINGS
+// 11. STAFF & LAB SETTINGS
 // ==========================================
 export async function getStaffUsers() {
   try {

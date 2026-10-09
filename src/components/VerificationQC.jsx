@@ -23,14 +23,12 @@ export default function VerificationQC({
 }) {
   const [selectedDeptId, setSelectedDeptId] = useState("ALL");
   const [localStatus, setLocalStatus] = useState(null);
-  const [localRemarks, setLocalRemarks] = useState(null);
 
   // CBC 3-Part Machine Quick Inputs
   const [cbcMachine, setCbcMachine] = useState({ wbc: "", gran: "", lymph: "", mid: "" });
 
   useEffect(() => {
     setLocalStatus(null);
-    setLocalRemarks(null);
     setSelectedDeptId("ALL");
     setCbcMachine({ wbc: "", gran: "", lymph: "", mid: "" });
   }, [activeOrder?.orderId, activeOrder?.id]);
@@ -45,12 +43,30 @@ export default function VerificationQC({
     );
   }
 
+  // Safe tests resolution
+  const resolvedOrderTests = useMemo(() => {
+    const rawTests = activeOrder.tests || activeOrder.order_tests || [];
+    return (Array.isArray(rawTests) ? rawTests : []).map(t => {
+      const raw = t.test || t.tests || t;
+      return {
+        ...raw,
+        id: t.test_id || raw.id || t.id,
+        name: raw.name || "Investigation",
+        code: raw.code || "",
+        dept_id: raw.dept_id || raw.deptId || "DEP-BIO",
+        deptId: raw.dept_id || raw.deptId || "DEP-BIO",
+        test_parameters: raw.test_parameters || raw.parameters || [],
+        parameters: raw.test_parameters || raw.parameters || []
+      };
+    });
+  }, [activeOrder]);
+
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
 
   const isVerified = activeOrder.isLocked === true || activeOrder.qcStatus === "Verified";
   const currentStatus = (localStatus || activeOrder.sample_status || activeOrder.sampleStatus || "").toLowerCase();
-  const currentRemarks = (localRemarks !== null ? localRemarks : (activeOrder.verifierRemarks || "")).toUpperCase();
+  const currentRemarks = (activeOrder.verifierRemarks || "").toUpperCase();
 
   const isAwaitingRecollection = !isVerified && (
     (currentStatus.includes("repeat") && !currentStatus.includes("recollected")) ||
@@ -61,33 +77,54 @@ export default function VerificationQC({
 
   // Department grouping
   const departmentGroups = useMemo(() => {
-    const rawTests = activeOrder.tests || [];
     const map = {};
 
-    rawTests.forEach((t) => {
+    resolvedOrderTests.forEach((t) => {
       const code = (t.code || "").toUpperCase();
       const name = (t.name || "").toUpperCase();
       let deptId = (t.dept_id || t.deptId || "DEP-BIO").toUpperCase();
-      let deptName = "Clinical Biochemistry";
+      let deptName = "Immunology";
       let icon = "🧪";
 
+      // 1. Hematology
       if (code.includes("CBC") || name.includes("BLOOD COUNT") || deptId.includes("HEM")) {
         deptId = "DEP-HEM";
-        deptName = "Hematology";
+        deptName = "Hematology & Coagulation";
         icon = "🩸";
-      } else if (code.includes("URINE") || name.includes("URINE") || code.includes("STOOL") || name.includes("STOOL") || deptId.includes("PAT")) {
+      } 
+      // 2. Clinical Pathology & Urine/Stool
+      else if (code.includes("URINE") || name.includes("URINE") || code.includes("STOOL") || name.includes("STOOL") || deptId.includes("PAT")) {
         deptId = "DEP-PAT";
-        deptName = "Clinical Pathology";
+        deptName = "Clinical Pathology & Urinalysis";
         icon = "🧫";
-      } else if (code.includes("WIDAL") || deptId.includes("MIC")) {
+      } 
+      // 3. Microbiology & Serology
+      else if (code.includes("WIDAL") || deptId.includes("MIC")) {
         deptId = "DEP-MIC";
         deptName = "Microbiology & Serology";
         icon = "🔬";
-      } else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX") || deptId.includes("HISTO")) {
+      } 
+      // 4. Histopathology & Cytology
+      else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX") || deptId.includes("HISTO")) {
         deptId = "DEP-HISTO";
         deptName = "Histopathology & Cytology";
         icon = "🔬";
-      } else if (code.includes("XRAY") || deptId.includes("RAD") || code.includes("USG") || deptId.includes("USG") || code.includes("CT") || deptId.includes("CT") || code.includes("ECG") || deptId.includes("CARD")) {
+      } 
+      // 5. Explicitly Guard Electrolytes & Biochemistry (Never classify as Radiology!)
+      else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE") || deptId.includes("BIO")) {
+        deptId = "DEP-BIO";
+        deptName = "Biochemistry";
+        icon = "🧪";
+      }
+      // 6. Radiology & Imaging (Safe matching, no false positives on "CT" inside "ELECTROLYTES")
+      else if (
+        deptId.includes("RAD") || deptId.includes("USG") || deptId.includes("CTMRI") || deptId.includes("CARD") ||
+        code.startsWith("XRAY") || name.includes("X-RAY") ||
+        code.startsWith("USG") || name.includes("ULTRASO") ||
+        code === "CT" || code.startsWith("CT-") || name.includes("CT SCAN") || name.includes("COMPUTED TOMOGRAPHY") ||
+        code.startsWith("MRI") || name.includes("MRI") ||
+        code.startsWith("ECG") || name.includes("ELECTROCARDIOGRAM")
+      ) {
         deptId = "DEP-RAD";
         deptName = "Radiology & Imaging";
         icon = "🩻";
@@ -109,11 +146,15 @@ export default function VerificationQC({
       let filledParams = 0;
 
       dept.tests.forEach((test) => {
-        const rawParams = test.test_parameters || test.parameters || [];
-        const params = rawParams.length > 0 ? rawParams : [{ id: test.id, name: test.name }];
-        totalParams += params.length;
+        const rawParams = (test.test_parameters && test.test_parameters.length > 0)
+          ? test.test_parameters
+          : (test.parameters && test.parameters.length > 0)
+            ? test.parameters
+            : [{ id: test.id, name: test.name }];
 
-        params.forEach((p) => {
+        totalParams += rawParams.length;
+
+        rawParams.forEach((p) => {
           const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
           if (val !== undefined && val !== null && String(val).trim() !== "") {
             filledParams++;
@@ -128,13 +169,7 @@ export default function VerificationQC({
         isComplete: totalParams > 0 && filledParams >= totalParams
       };
     });
-  }, [activeOrder]);
-
-  const activeDeptTests = useMemo(() => {
-    if (selectedDeptId === "ALL") return activeOrder.tests || [];
-    const targetDept = departmentGroups.find((d) => d.id === selectedDeptId);
-    return targetDept ? targetDept.tests : [];
-  }, [selectedDeptId, activeOrder, departmentGroups]);
+  }, [resolvedOrderTests, activeOrder.results]);
 
   const findParam = (test, keywords) => {
     const keys = Array.isArray(keywords) ? keywords : [keywords];
@@ -149,6 +184,65 @@ export default function VerificationQC({
     return activeOrder.results?.[paramId]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
   };
 
+  const getDeptRemark = (deptId) => {
+    if (activeOrder.dept_remarks && activeOrder.dept_remarks[deptId]) {
+      return activeOrder.dept_remarks[deptId];
+    }
+    if (activeOrder.deptRemarks && activeOrder.deptRemarks[deptId]) {
+      return activeOrder.deptRemarks[deptId];
+    }
+    if (activeOrder.results?.[`DEPT_REMARKS_${deptId}`]?.value) {
+      return activeOrder.results[`DEPT_REMARKS_${deptId}`].value;
+    }
+    if (typeof activeOrder.verifierRemarks === "string" && !activeOrder.verifierRemarks.startsWith("{")) {
+      return activeOrder.verifierRemarks;
+    }
+    return "";
+  };
+
+  const handleUpdateDeptRemark = (deptId, text) => {
+    if (isLockedOrAwaiting) return;
+    if (handleRemarksChange) {
+      handleRemarksChange(deptId, text);
+    }
+    handleResultInput(`DEPT_REMARKS_${deptId}`, text);
+  };
+
+  const DEPARTMENT_REMARK_PRESETS = {
+    "DEP-HEM": [
+      { label: "Normal Blood Picture", text: "Normocytic normochromic blood picture. Red blood cell morphology and platelets appear within normal limits." },
+      { label: "Microcytic Hypochromic", text: "Microcytic hypochromic blood picture with mild anisopoikilocytosis. Features suggestive of Iron Deficiency Anemia. Serum Ferritin advised." },
+      { label: "Neutrophilic Leukocytosis", text: "Leukocytosis with neutrophilia and toxic granulation. Features suggestive of acute bacterial infection." },
+      { label: "Thrombocytopenia", text: "Thrombocytopenia confirmed on peripheral blood film. No platelet clumps seen. Clinical correlation advised." }
+    ],
+    "DEP-PAT": [
+      { label: "Normal Urinalysis", text: "Routine urinalysis shows no significant physical, chemical, or microscopic abnormalities." },
+      { label: "Features of UTI", text: "Significant pyuria (pus cells) noted with bacteria. Findings suggestive of Urinary Tract Infection (UTI). Urine Culture & Sensitivity advised." },
+      { label: "Hematuria / Proteinuria", text: "Microscopic hematuria with proteinuria noted. Nephrological evaluation and repeat urinalysis advised." },
+      { label: "Normal Stool", text: "Normal routine stool examination. No protozoal cysts, vegetative forms, or helminthic ova detected." }
+    ],
+    "DEP-BIO": [
+      { label: "Normal Biochemistry", text: "Biochemical investigation findings are within normal biological reference intervals." },
+      { label: "Dyslipidemia", text: "Dyslipidemia noted with elevated LDL and Triglycerides. Dietary modification and clinical correlation advised." },
+      { label: "Impaired Glucose", text: "Elevated plasma glucose level. Correlation with HbA1c and clinical history recommended." },
+      { label: "Renal Impairment", text: "Elevated serum creatinine and blood urea noted. Renal ultrasound correlation advised." }
+    ],
+    "DEP-MIC": [
+      { label: "Non-Reactive Screen", text: "Serological screening is non-reactive for tested viral and infectious markers." },
+      { label: "Diagnostic Widal Titer", text: "Significant antibody titers (≥ 1:160) for Salmonella antigens noted. Findings correlate with Enteric (Typhoid) Fever." },
+      { label: "Insignificant Widal", text: "Insignificant baseline titers (< 1:80). Repeat examination after 7-10 days recommended if symptoms persist." }
+    ],
+    "DEP-HISTO": [
+      { label: "Benign Lesion", text: "Histopathological features are consistent with benign lesion. Negative for dysplasia or invasive malignancy." },
+      { label: "Chronic Inflammation", text: "Microscopic examination reveals chronic non-specific inflammatory tissue changes." },
+      { label: "Clinical Correlation", text: "Microscopic findings to be correlated with clinical, radiological, and operative findings." }
+    ],
+    "DEP-RAD": [
+      { label: "Normal Study", text: "Normal radiological study. No significant acute bony or visceral abnormality detected." },
+      { label: "Clinical Correlation", text: "Radiological findings should be correlated with clinical signs and symptoms." }
+    ]
+  };
+
   // Automated Calculators
   const handleCbcMachineCalculate = (field, val) => {
     const updated = { ...cbcMachine, [field]: val };
@@ -159,7 +253,7 @@ export default function VerificationQC({
     const lymph = parseFloat(updated.lymph) || 0;
     const mid = parseFloat(updated.mid) || 0;
 
-    const cbcTest = (activeOrder.tests || []).find(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
+    const cbcTest = resolvedOrderTests.find(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
     if (!cbcTest) return;
 
     const setValByKey = (keywords, value) => {
@@ -201,7 +295,7 @@ export default function VerificationQC({
   };
 
   const handleCalculateRbcIndices = () => {
-    const cbcTest = (activeOrder.tests || []).find(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
+    const cbcTest = resolvedOrderTests.find(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
     if (!cbcTest) return;
 
     const getNum = (keys) => {
@@ -360,10 +454,7 @@ export default function VerificationQC({
   const handleUnlockRecollected = async () => {
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
-    const cleanRemarks = "New sample recollected. Clinically correlated and verified with quality control standards.";
     setLocalStatus("Sample Recollected");
-    setLocalRemarks(cleanRemarks);
-    if (handleRemarksChange) handleRemarksChange(cleanRemarks);
     try {
       await handleMarkRecollected(targetId);
     } catch (e) {}
@@ -373,18 +464,15 @@ export default function VerificationQC({
     if (!window.confirm("Reject this specimen as Hemolyzed and request repeat collection?")) return;
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
-    const fullRemarks = "[RECOLLECTION REQUIRED: Hemolyzed Specimen]";
     setLocalStatus("Repeat Collection Required");
-    setLocalRemarks(fullRemarks);
-    if (handleRemarksChange) handleRemarksChange(fullRemarks);
     try {
       await handleRejectSample(targetId, "Hemolyzed Specimen");
     } catch (e) {}
   };
 
   const hasCbcTest = useMemo(() => {
-    return (activeOrder.tests || []).some(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
-  }, [activeOrder]);
+    return resolvedOrderTests.some(t => (t.code || "").toUpperCase().includes("CBC") || (t.name || "").toLowerCase().includes("blood count"));
+  }, [resolvedOrderTests]);
 
   return (
     <div className="space-y-3.5 max-w-[1720px] mx-auto text-slate-900 font-sans">
@@ -430,7 +518,7 @@ export default function VerificationQC({
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
             <span className="flex items-center gap-1">
               <Barcode className="w-3.5 h-3.5 text-slate-400" />
-              {(activeOrder.tests || []).reduce((acc, t) => {
+              {resolvedOrderTests.reduce((acc, t) => {
                 const code = getDepartmentVialBarcode(activeOrder, t.dept_id || t.deptId);
                 const tube = (t.tube_color || "Vial").split(" ")[0];
                 if (!acc.some((x) => x.code === code)) acc.push({ code, tube });
@@ -493,10 +581,7 @@ export default function VerificationQC({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>All Tests</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-200">
-            {activeOrder.tests?.length || 0}
-          </span>
+          <span>All Reports ({resolvedOrderTests.length})</span>
         </button>
 
         {departmentGroups.map((dept) => {
@@ -513,7 +598,7 @@ export default function VerificationQC({
               }`}
             >
               <span>{dept.icon}</span>
-              <span>{dept.name}</span>
+              <span>{dept.name.split(" ")[0]}</span>
               <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-semibold ${
                 isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
               }`}>
@@ -524,7 +609,7 @@ export default function VerificationQC({
         })}
       </div>
 
-      {/* 4. CBC 3-PART & 5-PART AUTO-CALCULATOR BENCH */}
+      {/* 4. CBC QUICK CALCULATOR (When CBC present) */}
       {hasCbcTest && (selectedDeptId === "ALL" || selectedDeptId === "DEP-HEM") && !isLockedOrAwaiting && (
         <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white p-3.5 rounded-xl shadow-xs space-y-2.5">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
@@ -588,71 +673,309 @@ export default function VerificationQC({
         </div>
       )}
 
-      {/* 5. STRUCTURED TEST PARAMETERS LIST */}
-      <div className="space-y-3">
-        {activeDeptTests.map((test) => {
-          const testNameLow = (test.name || "").toLowerCase();
-          const testCodeUp = (test.code || "").toUpperCase();
-          const rawParams = test.test_parameters || test.parameters || [];
+      {/* 5. DEPARTMENT-BY-DEPARTMENT REPORT WORKSTATION & REMARKS */}
+      <div className="space-y-4">
+        {departmentGroups.map((deptGroup) => {
+          if (selectedDeptId !== "ALL" && selectedDeptId !== deptGroup.id) return null;
 
-          const isUrine = testCodeUp.includes("URINE") || testNameLow.includes("urine");
-          const isStool = testCodeUp.includes("STOOL") || testNameLow.includes("stool");
-          const isWidal = testCodeUp.includes("WIDAL") || testNameLow.includes("widal");
-          const isLipid = testCodeUp.includes("LIPID") || testNameLow.includes("lipid");
-          const isLFT = testCodeUp.includes("LFT") || testNameLow.includes("liver function");
-          const isBloodGroup = testCodeUp.includes("ABO") || testCodeUp.includes("GROUP") || testNameLow.includes("blood group");
+          const deptRemarkVal = getDeptRemark(deptGroup.id);
+          const deptPresets = DEPARTMENT_REMARK_PRESETS[deptGroup.id] || [
+            { label: "Normal Study", text: "Investigation findings within normal biological limits." },
+            { label: "Clinical Correlation", text: "Findings should be correlated with clinical signs and symptoms." }
+          ];
 
-          // Universal Descriptive / Narrative Check
-          const isDescriptiveTest = isDescriptiveInvestigation(test, test.dept_id || test.deptId, "");
-
-          // =========================================================
-          // A. DESCRIPTIVE STUDY WORKBENCH (WITH CATALOG TEMPLATE)
-          // =========================================================
-          if (isDescriptiveTest) {
-            const param = rawParams[0] || { id: test.id, name: test.name };
-            const paramId = param.id;
-            const currentVal = getParamCurrentVal(test, paramId);
-            const catalogTemplate = param.reference_text || param.ref_text || param.default_template || "";
-
-            return (
-              <div key={test.id} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs space-y-2">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 border-b border-slate-100 gap-2">
-                  <div className="flex items-center gap-2">
-                    <AlignLeft className="w-4 h-4 text-blue-600" />
-                    <span className="font-bold text-xs uppercase text-slate-900">
-                      {test.name} {test.code ? `(${test.code})` : ""}
-                    </span>
-                    <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded text-[9px] font-bold">
-                      Descriptive Study
-                    </span>
+          return (
+            <div key={deptGroup.id} className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-xs">
+              
+              {/* Department Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{deptGroup.icon}</span>
+                  <div>
+                    <h3 className="font-bold text-xs uppercase text-slate-900 tracking-wide">
+                      Department of {deptGroup.name}
+                    </h3>
+                    <p className="text-[10px] text-slate-400">
+                      {deptGroup.tests.length} Investigation(s) • Specific report sheet & pathologist remarks
+                    </p>
                   </div>
+                </div>
+
+                <span className="text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                  {deptGroup.filledParams}/{deptGroup.totalParams} Verified
+                </span>
+              </div>
+
+              {/* Department Tests */}
+              <div className="space-y-3">
+                {deptGroup.tests.map((test) => {
+                  const testNameLow = (test.name || "").toLowerCase();
+                  const testCodeUp = (test.code || "").toUpperCase();
+
+                  // SAFE PARAMETER FALLBACK: Never renders blank even if parameters were delayed
+                  const rawParams = (test.test_parameters && test.test_parameters.length > 0)
+                    ? test.test_parameters
+                    : (test.parameters && test.parameters.length > 0)
+                      ? test.parameters
+                      : [{
+                          id: `P-${(test.code || test.id || "PARAM").toUpperCase().replace(/[^A-Z0-9]/g, "")}-01`,
+                          test_id: test.id,
+                          name: test.name || "Test Result",
+                          param_type: test.report_type === "descriptive" ? "text" : "numeric",
+                          unit: "",
+                          min_range: null,
+                          max_range: null,
+                          reference_text: test.report_type === "descriptive" ? (test.reference_text || "Normal examination findings.") : "Normal"
+                        }];
+
+                  const isUrine = testCodeUp.includes("URINE") || testNameLow.includes("urine");
+                  const isStool = testCodeUp.includes("STOOL") || testNameLow.includes("stool");
+                  const isWidal = testCodeUp.includes("WIDAL") || testNameLow.includes("widal");
+                  const isLipid = testCodeUp.includes("LIPID") || testNameLow.includes("lipid");
+                  const isLFT = testCodeUp.includes("LFT") || testNameLow.includes("liver function");
+                  const isBloodGroup = testCodeUp.includes("ABO") || testCodeUp.includes("GROUP") || testNameLow.includes("blood group");
+                  const isDescriptiveTest = isDescriptiveInvestigation(test, test.dept_id || test.deptId, "");
+
+                  // A. Descriptive Narrative Test
+                  if (isDescriptiveTest) {
+                    const param = rawParams[0] || { id: test.id, name: test.name };
+                    const paramId = param.id;
+                    const currentVal = getParamCurrentVal(test, paramId);
+                    const catalogTemplate = param.reference_text || param.ref_text || param.default_template || test.reference_text || "";
+
+                    return (
+                      <div key={test.id} className="bg-slate-50/60 rounded-xl border border-slate-200 p-3 shadow-xs space-y-2">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-1.5 border-b border-slate-200/80 gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <AlignLeft className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="font-bold text-xs uppercase text-slate-900">{test.name}</span>
+                          </div>
+
+                          {!isLockedOrAwaiting && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              {catalogTemplate && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResultInput(paramId, catalogTemplate)}
+                                  className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs"
+                                >
+                                  <FileCode className="w-3 h-3" /> Load Catalogue Template
+                                </button>
+                              )}
+                              {currentVal && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResultInput(paramId, "")}
+                                  className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded text-[10px]"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <textarea
+                          rows={6}
+                          disabled={isLockedOrAwaiting}
+                          value={currentVal}
+                          onChange={(e) => handleResultInput(paramId, e.target.value)}
+                          placeholder="Type or load your clinical study findings here..."
+                          className="w-full p-2.5 text-xs font-mono border border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-white disabled:bg-slate-100"
+                        />
+                      </div>
+                    );
+                  }
+
+                  // B. Tabular Parameter Table
+                  return (
+                    <div key={test.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-slate-900 uppercase">
+                            {test.name} {test.code ? `(${test.code})` : ""}
+                          </span>
+                          {rawParams.length > 1 && (
+                            <span className="px-1.5 py-0.2 bg-purple-100 text-purple-700 rounded text-[9px] font-bold uppercase">
+                              Panel
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {isUrine && !isLockedOrAwaiting && (
+                            <button
+                              type="button"
+                              onClick={() => handleFillNormalUrine(test)}
+                              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <Droplets className="w-3 h-3" /> Fill Normal Urine
+                            </button>
+                          )}
+                          {isStool && !isLockedOrAwaiting && (
+                            <button
+                              type="button"
+                              onClick={() => handleFillNormalStool(test)}
+                              className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <Microscope className="w-3 h-3" /> Fill Normal Stool
+                            </button>
+                          )}
+                          {isLipid && !isLockedOrAwaiting && (
+                            <button
+                              type="button"
+                              onClick={() => handleCalculateLipidProfile(test)}
+                              className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <Calculator className="w-3 h-3" /> Auto-Calculate LDL/VLDL
+                            </button>
+                          )}
+                          {isLFT && !isLockedOrAwaiting && (
+                            <button
+                              type="button"
+                              onClick={() => handleCalculateLFT(test)}
+                              className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <Calculator className="w-3 h-3" /> Auto-Calculate LFT Ratios
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-slate-400 text-[10px] font-semibold uppercase bg-white">
+                              <th className="py-2 px-3 w-1/3">Investigation Parameter</th>
+                              <th className="py-2 px-3 w-64">Observed Finding / Result</th>
+                              <th className="py-2 px-3 w-20">Unit</th>
+                              <th className="py-2 px-3">Biological Reference Range</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {rawParams.map((p) => {
+                              const val = getParamCurrentVal(test, p.id);
+                              const pName = (p.name || "").toLowerCase();
+                              const isQual = p.param_type === "qualitative";
+                              const { isAbnormal, flag } = checkAbnormalStatus(val, p.min_range, p.max_range, p.param_type);
+                              const isWidalTiter = isWidal && pName.includes("titer");
+
+                              return (
+                                <tr key={p.id} className={`hover:bg-slate-50/60 transition ${isAbnormal ? "bg-rose-50/30" : ""}`}>
+                                  <td className="py-2 px-3 font-medium text-slate-800 align-top">
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{p.name}</span>
+                                      {isAbnormal && (
+                                        <span className="px-1.5 py-0.2 bg-rose-100 text-rose-700 text-[9px] font-bold rounded">
+                                          {flag}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {!isLockedOrAwaiting && isBloodGroup && (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {["A (+ve)", "B (+ve)", "O (+ve)", "AB (+ve)", "A (-ve)", "B (-ve)", "O (-ve)", "AB (-ve)"].map((pill) => (
+                                          <button
+                                            key={pill}
+                                            type="button"
+                                            onClick={() => handleResultInput(p.id, pill)}
+                                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${val === pill ? "bg-blue-600 text-white" : "bg-white text-slate-600 border-slate-200"}`}
+                                          >
+                                            {pill}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  <td className="py-2 px-3 align-top">
+                                    {isWidalTiter ? (
+                                      <select
+                                        disabled={isLockedOrAwaiting}
+                                        value={val}
+                                        onChange={(e) => handleResultInput(p.id, e.target.value)}
+                                        className="w-full px-2 py-1 border border-slate-200 rounded font-semibold text-xs bg-white outline-none"
+                                      >
+                                        <option value="">-- Select Titer --</option>
+                                        <option value="< 1:20">&lt; 1:20</option>
+                                        <option value="1:20">1:20</option>
+                                        <option value="1:40">1:40</option>
+                                        <option value="1:80">1:80</option>
+                                        <option value="1:160">1:160</option>
+                                        <option value="1:320">1:320</option>
+                                      </select>
+                                    ) : isQual ? (
+                                      <select
+                                        disabled={isLockedOrAwaiting}
+                                        value={val}
+                                        onChange={(e) => handleResultInput(p.id, e.target.value)}
+                                        className="w-full px-2 py-1 border border-slate-200 rounded font-semibold text-xs bg-white outline-none"
+                                      >
+                                        <option value="">-- Select --</option>
+                                        <option value="Nil">Nil</option>
+                                        <option value="Negative">Negative (Non-Reactive)</option>
+                                        <option value="Positive">Positive (Reactive)</option>
+                                        <option value="Trace">Trace</option>
+                                        <option value="+">+ (1+)</option>
+                                        <option value="++">++ (2+)</option>
+                                        <option value="+++">+++ (3+)</option>
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        disabled={isLockedOrAwaiting}
+                                        value={val}
+                                        onChange={(e) => handleResultInput(p.id, e.target.value)}
+                                        placeholder="Result"
+                                        className={`w-full px-2 py-1 border rounded font-mono font-bold text-xs outline-none bg-white ${isAbnormal ? "border-rose-400 text-rose-950 bg-rose-50/40" : "border-slate-200"}`}
+                                      />
+                                    )}
+                                  </td>
+
+                                  <td className="py-2 px-3 font-mono text-slate-500 text-[11px] align-top">
+                                    {p.unit || "—"}
+                                  </td>
+
+                                  <td className="py-2 px-3 text-slate-600 font-mono text-[11px] align-top whitespace-pre-line leading-relaxed">
+                                    {p.reference_text || (p.min_range !== null && p.max_range !== null ? `${p.min_range} - ${p.max_range}` : "Normal")}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* DEDICATED PATHOLOGIST REMARKS BOX */}
+              <div className="bg-slate-50/80 p-3 rounded-xl border border-blue-200/70 shadow-xs space-y-1.5 text-xs">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5">
+                  <label className="font-bold text-slate-800 text-[11px] uppercase tracking-wide flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Pathologist Clinical Remarks for {deptGroup.name}:</span>
+                  </label>
 
                   {!isLockedOrAwaiting && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {catalogTemplate && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="text-[10px] text-slate-400 font-medium">Quick Presets:</span>
+                      {deptPresets.map((preset, pIdx) => (
                         <button
+                          key={pIdx}
                           type="button"
-                          onClick={() => handleResultInput(paramId, catalogTemplate)}
-                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
-                          title="Insert pre-configured template from Test Catalogue"
+                          onClick={() => handleUpdateDeptRemark(deptGroup.id, preset.text)}
+                          className="px-1.5 py-0.5 bg-white border border-slate-300 hover:border-blue-500 hover:text-blue-700 text-slate-700 rounded text-[9px] font-semibold transition shadow-2xs"
                         >
-                          <FileCode className="w-3 h-3" /> ⚡ Load Catalogue Template
+                          + {preset.label}
                         </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleResultInput(paramId, "CLINICAL INDICATION: Routine clinical evaluation.\nTECHNIQUE: Standard clinical protocol.\n\nFINDINGS:\nNo significant pathological abnormality detected. Normal study.\n\nIMPRESSION:\nNormal examination findings.")}
-                        className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-semibold flex items-center gap-1 transition"
-                      >
-                        <Sparkles className="w-2.5 h-2.5" /> Normal Study
-                      </button>
-
-                      {currentVal && (
+                      ))}
+                      {deptRemarkVal && (
                         <button
                           type="button"
-                          onClick={() => handleResultInput(paramId, "")}
-                          className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-semibold transition"
+                          onClick={() => handleUpdateDeptRemark(deptGroup.id, "")}
+                          className="px-1 py-0.5 text-slate-400 hover:text-rose-600 text-[9px] font-bold"
+                          title="Clear Remarks"
                         >
                           Clear
                         </button>
@@ -661,271 +984,19 @@ export default function VerificationQC({
                   )}
                 </div>
 
-                <div className="space-y-1">
-                  <textarea
-                    rows={8}
-                    disabled={isLockedOrAwaiting}
-                    value={currentVal}
-                    onChange={(e) => handleResultInput(paramId, e.target.value)}
-                    placeholder="Type or load your clinical study findings here (e.g. CLINICAL INDICATION, FINDINGS, IMPRESSION)..."
-                    className="w-full p-2.5 text-xs font-mono border border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-slate-50 disabled:bg-slate-100 leading-relaxed"
-                  />
-                  <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono px-1">
-                    <span>Formats automatically on official report with Indication, Observations & Impression.</span>
-                    <span>{currentVal.length} chars</span>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // =========================================================
-          // B. QUANTITATIVE / TABULAR WORKBENCH
-          // =========================================================
-          return (
-            <div key={test.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-slate-900 uppercase">
-                    {test.name} {test.code ? `(${test.code})` : ""}
-                  </span>
-                  {rawParams.length > 1 && (
-                    <span className="px-1.5 py-0.2 bg-purple-100 text-purple-700 rounded text-[9px] font-bold uppercase">
-                      Profile Panel
-                    </span>
-                  )}
-                </div>
-
-                {/* 1-Click Profile Helper Actions */}
-                <div className="flex items-center gap-1.5">
-                  {isUrine && !isLockedOrAwaiting && (
-                    <button
-                      type="button"
-                      onClick={() => handleFillNormalUrine(test)}
-                      className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
-                    >
-                      <Droplets className="w-3 h-3" /> Fill Routine Normal Urine
-                    </button>
-                  )}
-
-                  {isStool && !isLockedOrAwaiting && (
-                    <button
-                      type="button"
-                      onClick={() => handleFillNormalStool(test)}
-                      className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
-                    >
-                      <Microscope className="w-3 h-3" /> Fill Routine Normal Stool
-                    </button>
-                  )}
-
-                  {isLipid && !isLockedOrAwaiting && (
-                    <button
-                      type="button"
-                      onClick={() => handleCalculateLipidProfile(test)}
-                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
-                    >
-                      <Calculator className="w-3 h-3" /> Auto-Calculate LDL & VLDL
-                    </button>
-                  )}
-
-                  {isLFT && !isLockedOrAwaiting && (
-                    <button
-                      type="button"
-                      onClick={() => handleCalculateLFT(test)}
-                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
-                    >
-                      <Calculator className="w-3 h-3" /> Auto-Calculate Indirect Bilirubin & A/G
-                    </button>
-                  )}
-
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {rawParams.length} Parameters
-                  </span>
-                </div>
+                <textarea
+                  rows={2}
+                  disabled={isLockedOrAwaiting}
+                  value={deptRemarkVal}
+                  onChange={(e) => handleUpdateDeptRemark(deptGroup.id, e.target.value)}
+                  placeholder={`Clinical interpretation specific to ${deptGroup.name} report...`}
+                  className="w-full p-2 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium bg-white disabled:bg-slate-100 text-slate-800 leading-relaxed shadow-inner"
+                />
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-slate-400 text-[10px] font-semibold uppercase bg-white">
-                      <th className="py-2 px-3 w-1/3">Investigation Parameter</th>
-                      <th className="py-2 px-3 w-64">Observed Finding / Result</th>
-                      <th className="py-2 px-3 w-20">Unit</th>
-                      <th className="py-2 px-3">Biological Reference Range</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rawParams.map((p) => {
-                      const val = getParamCurrentVal(test, p.id);
-                      const pName = (p.name || "").toLowerCase();
-                      const isQual = p.param_type === "qualitative";
-
-                      const { isAbnormal, flag } = checkAbnormalStatus(val, p.min_range, p.max_range, p.param_type);
-
-                      const isUrineDipstick = isUrine && (
-                        pName.includes("albumin") || pName.includes("protein") ||
-                        pName.includes("sugar") || pName.includes("glucose") ||
-                        pName.includes("ketone") || pName.includes("bilirubin") ||
-                        pName.includes("nitrite") || pName.includes("blood")
-                      );
-                      const isUrineAppearance = isUrine && (pName.includes("appearance") || pName.includes("clarity"));
-                      const isUrineColor = isUrine && pName.includes("color");
-                      const isWidalTiter = isWidal && pName.includes("titer");
-
-                      return (
-                        <tr key={p.id} className={`hover:bg-slate-50/60 transition ${isAbnormal ? "bg-rose-50/30" : ""}`}>
-                          <td className="py-2 px-3 font-medium text-slate-800 align-top">
-                            <div className="flex items-center gap-1.5">
-                              <span>{p.name}</span>
-                              {isAbnormal && (
-                                <span className="px-1.5 py-0.2 bg-rose-100 text-rose-700 text-[9px] font-bold rounded">
-                                  {flag}
-                                </span>
-                              )}
-                            </div>
-
-                            {!isLockedOrAwaiting && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {isUrineDipstick && ["Nil", "Trace", "+", "++", "+++"].map((pill) => (
-                                  <button
-                                    key={pill}
-                                    type="button"
-                                    onClick={() => handleResultInput(p.id, pill)}
-                                    className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                                      val === pill ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    {pill}
-                                  </button>
-                                ))}
-
-                                {isUrineColor && ["Straw", "Pale Yellow", "Amber", "Reddish"].map((pill) => (
-                                  <button
-                                    key={pill}
-                                    type="button"
-                                    onClick={() => handleResultInput(p.id, pill)}
-                                    className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                                      val === pill ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    {pill}
-                                  </button>
-                                ))}
-
-                                {isUrineAppearance && ["Clear", "Slightly Hazy", "Turbid"].map((pill) => (
-                                  <button
-                                    key={pill}
-                                    type="button"
-                                    onClick={() => handleResultInput(p.id, pill)}
-                                    className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                                      val === pill ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    {pill}
-                                  </button>
-                                ))}
-
-                                {isBloodGroup && ["A (+ve)", "B (+ve)", "O (+ve)", "AB (+ve)", "A (-ve)", "B (-ve)", "O (-ve)", "AB (-ve)"].map((pill) => (
-                                  <button
-                                    key={pill}
-                                    type="button"
-                                    onClick={() => handleResultInput(p.id, pill)}
-                                    className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${
-                                      val === pill ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    {pill}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="py-2 px-3 align-top">
-                            {isWidalTiter ? (
-                              <select
-                                disabled={isLockedOrAwaiting}
-                                value={val}
-                                onChange={(e) => handleResultInput(p.id, e.target.value)}
-                                className="w-full px-2 py-1 border border-slate-200 rounded font-semibold text-xs bg-white outline-none focus:border-blue-500 disabled:bg-slate-100"
-                              >
-                                <option value="">-- Select Titer --</option>
-                                <option value="< 1:20">&lt; 1:20</option>
-                                <option value="1:20">1:20</option>
-                                <option value="1:40">1:40</option>
-                                <option value="1:80">1:80</option>
-                                <option value="1:160">1:160</option>
-                                <option value="1:320">1:320</option>
-                              </select>
-                            ) : isQual ? (
-                              <select
-                                disabled={isLockedOrAwaiting}
-                                value={val}
-                                onChange={(e) => handleResultInput(p.id, e.target.value)}
-                                className="w-full px-2 py-1 border border-slate-200 rounded font-semibold text-xs bg-white outline-none focus:border-blue-500 disabled:bg-slate-100"
-                              >
-                                <option value="">-- Select --</option>
-                                <option value="Nil">Nil</option>
-                                <option value="Negative">Negative (Non-Reactive)</option>
-                                <option value="Positive">Positive (Reactive)</option>
-                                <option value="Trace">Trace</option>
-                                <option value="+">+ (1+)</option>
-                                <option value="++">++ (2+)</option>
-                                <option value="+++">+++ (3+)</option>
-                                <option value="++++">++++ (4+)</option>
-                              </select>
-                            ) : (
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  disabled={isLockedOrAwaiting}
-                                  value={val}
-                                  onChange={(e) => handleResultInput(p.id, e.target.value)}
-                                  placeholder="Result"
-                                  className={`w-full px-2 py-1 border rounded font-mono font-bold text-xs outline-none bg-white disabled:bg-slate-100 transition ${
-                                    isAbnormal 
-                                      ? "border-rose-400 text-rose-950 focus:border-rose-500 bg-rose-50/40" 
-                                      : "border-slate-200 text-slate-900 focus:border-blue-500"
-                                  }`}
-                                />
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="py-2 px-3 font-mono text-slate-500 text-[11px] align-top">
-                            {p.unit || "—"}
-                          </td>
-
-                          <td className="py-2 px-3 text-slate-600 font-mono text-[11px] align-top whitespace-pre-line leading-relaxed">
-                            {p.reference_text || (p.min_range !== null && p.max_range !== null ? `${p.min_range} - ${p.max_range}` : "Normal")}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
             </div>
           );
         })}
-      </div>
-
-      {/* 6. PATHOLOGIST REMARKS BOX */}
-      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs space-y-1.5 text-xs">
-        <label className="font-bold text-slate-700 text-[11px] uppercase tracking-wide flex items-center gap-1.5">
-          <MessageSquare className="w-3.5 h-3.5 text-blue-600" /> Pathologist Clinical Remarks & Interpretation:
-        </label>
-        <textarea
-          rows={2}
-          disabled={isLockedOrAwaiting}
-          value={localRemarks !== null ? localRemarks : (activeOrder.verifierRemarks || "")}
-          onChange={(e) => {
-            setLocalRemarks(e.target.value);
-            if (handleRemarksChange) handleRemarksChange(e.target.value);
-          }}
-          placeholder="e.g. Microscopic findings correlate with acute infection. Clinical correlation advised."
-          className="w-full p-2 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium bg-slate-50 disabled:bg-slate-100 text-slate-800"
-        />
       </div>
 
     </div>
