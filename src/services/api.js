@@ -1,7 +1,7 @@
 import { supabase } from "../supabaseClient";
 
 // ==========================================
-// 1. MASTER DEPARTMENTS & DATA
+// 1. MASTER DEPARTMENTS
 // ==========================================
 export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-HEM", name: "Hematology & Coagulation", icon: "🩸" },
@@ -11,136 +11,296 @@ export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-CTMRI", name: "CT Scan & MRI Imaging", icon: "🧠" },
   { id: "DEP-CARD", name: "Cardiology (ECG & Echo)", icon: "💓" },
   { id: "DEP-MIC", name: "Microbiology & Serology", icon: "🔬" },
-  { id: "DEP-PAT", name: "Clinical Pathology & Urine", icon: "🧫" }
+  { id: "DEP-PAT", name: "Clinical Pathology & Urine", icon: "🧫" },
+  { id: "DEP-HISTO", name: "Histopathology & Cytology", icon: "🔬" }
 ];
 
-// Inside src/services/api.js -> in MASTER_CBC_PARAMETERS:
+// ==========================================
+// 2. STANDARD CLINICAL PARAMETER MODELS
+// ==========================================
 
-const MASTER_CBC_PARAMETERS = [
-  // --- PRIMARY COUNTS & MACHINE DIFFERENTIALS ---
-  { name: "Total Leucocyte Count (WBC)", unit: "10^9/L", min: 4.0, max: 11.0, type: "numeric" },
-  { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric" },
-  { name: "ESR (Westergren Method)", unit: "mm/1st hr", min: 0.0, max: 20.0, type: "numeric" },
-  
-  // 3-PART ANALYZER MACHINE INPUTS (Type your screen numbers here):
-  { name: "Granulocytes (Gran%)", unit: "%", min: 40.0, max: 75.0, type: "numeric" },
-  { name: "Lymphocytes (Lymph%)", unit: "%", min: 20.0, max: 45.0, type: "numeric" },
-  { name: "Mid-cells (Mid%)", unit: "%", min: 2.0, max: 15.0, type: "numeric" }, // <-- YOUR MID% INPUT BOX
-
-  // AUTO-CALCULATED 5-PART DIFFERENTIAL (Calculates live when you type Mid% and Gran%):
-  { name: "Neutrophils", unit: "%", min: 40.0, max: 75.0, type: "numeric" },
-  { name: "Lymphocytes", unit: "%", min: 20.0, max: 45.0, type: "numeric" },
-  { name: "Monocytes", unit: "%", min: 2.0, max: 10.0, type: "numeric" },
-  { name: "Eosinophils", unit: "%", min: 1.0, max: 6.0, type: "numeric" },
-  { name: "Basophils", unit: "%", min: 0.0, max: 1.0, type: "numeric" },
-  { name: "TOTAL CIR. EOSIONOPHIL COUNT", unit: "/cumm", min: 40.0, max: 450.0, type: "numeric" },
-
-  // --- RED BLOOD CELL & INDICES ---
-  { name: "Total Red Blood Cell Count (RBC)", unit: "10^12/L", min: 3.8, max: 5.8, type: "numeric" },
-  { name: "Packed Cell Volume (PCV / Hematocrit)", unit: "%", min: 36.0, max: 50.0, type: "numeric" },
-  { name: "Mean Corpuscular Volume (MCV)", unit: "fL", min: 78.0, max: 98.0, type: "numeric" },
-  { name: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", min: 27.0, max: 32.0, type: "numeric" },
-  { name: "Mean Corpuscular Hb Concentration (MCHC)", unit: "g/dL", min: 31.0, max: 36.0, type: "numeric" },
-  { name: "RDW-SD", unit: "fL", min: 35.0, max: 56.0, type: "numeric" },
-  { name: "RDW-CV", unit: "%", min: 11.5, max: 15.0, type: "numeric" },
-
-  // --- PLATELET INDICES ---
-  { name: "Total Platelet Count", unit: "10^9/L", min: 150.0, max: 450.0, type: "numeric" },
-  { name: "Mean Platelet Volume (MPV)", unit: "fL", min: 7.4, max: 11.5, type: "numeric" },
-  { name: "Platelet Distribution Width (PDW)", unit: "%", min: 10.0, max: 18.0, type: "numeric" },
-  { name: "Plateletcrit (PCT)", unit: "%", min: 0.10, max: 0.28, type: "numeric" },
-  { name: "Platelet Large Cell Ratio (P-LCR)", unit: "%", min: 9.0, max: 45.0, type: "numeric" },
-  { name: "Platelet Large Cell Count (P-LCC)", unit: "10^9/L", min: 13.0, max: 129.0, type: "numeric" }
+export const MASTER_CBC_PARAMETERS = [
+  { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric", defaultRef: "Adult Men: 13.0 - 17.5, Women: 11.5 - 15.5" },
+  { name: "Total Red Blood Cell Count (RBC)", unit: "10^12/L", min: 3.8, max: 5.8, type: "numeric", defaultRef: "Men: 4.5 - 5.8, Women: 3.8 - 5.2" },
+  { name: "Packed Cell Volume (PCV / Hematocrit)", unit: "%", min: 36.0, max: 50.0, type: "numeric", defaultRef: "Men: 40 - 50, Women: 36 - 46" },
+  { name: "ESR (Westergren Method)", unit: "mm/1st hr", min: 0.0, max: 20.0, type: "numeric", defaultRef: "Men: 0 - 10, Women: 0 - 20" },
+  { name: "Mean Corpuscular Volume (MCV)", unit: "fL", min: 78.0, max: 98.0, type: "numeric", defaultRef: "78.0 - 98.0" },
+  { name: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", min: 27.0, max: 32.0, type: "numeric", defaultRef: "27.0 - 32.0" },
+  { name: "Mean Corpuscular Hb Concentration (MCHC)", unit: "g/dL", min: 31.0, max: 36.0, type: "numeric", defaultRef: "31.0 - 36.0" },
+  { name: "RDW-CV", unit: "%", min: 11.5, max: 15.0, type: "numeric", defaultRef: "11.5 - 15.0" },
+  { name: "RDW-SD", unit: "fL", min: 35.0, max: 56.0, type: "numeric", defaultRef: "35.0 - 56.0" },
+  { name: "Total Leucocyte Count (WBC)", unit: "/cumm", min: 4000, max: 11000, type: "numeric", defaultRef: "4,000 - 11,000" },
+  { name: "Granulocytes (Machine Gran%)", unit: "%", min: 40.0, max: 75.0, type: "numeric", defaultRef: "40.0 - 75.0 (Machine Analyzed)" },
+  { name: "Lymphocytes (Machine Lymph%)", unit: "%", min: 20.0, max: 45.0, type: "numeric", defaultRef: "20.0 - 45.0 (Machine Analyzed)" },
+  { name: "Mid-cells (Machine Mid%)", unit: "%", min: 2.0, max: 15.0, type: "numeric", defaultRef: "2.0 - 15.0 (Machine Analyzed)" },
+  { name: "Neutrophils", unit: "%", min: 40.0, max: 75.0, type: "numeric", defaultRef: "40 - 75" },
+  { name: "Lymphocytes", unit: "%", min: 20.0, max: 45.0, type: "numeric", defaultRef: "20 - 45" },
+  { name: "Monocytes", unit: "%", min: 2.0, max: 10.0, type: "numeric", defaultRef: "2 - 10" },
+  { name: "Eosinophils", unit: "%", min: 1.0, max: 6.0, type: "numeric", defaultRef: "1 - 6" },
+  { name: "Basophils", unit: "%", min: 0.0, max: 1.0, type: "numeric", defaultRef: "0 - 1" },
+  { name: "Total Circulating Eosinophils (AEC)", unit: "/cumm", min: 50, max: 500, type: "numeric", defaultRef: "50 - 500" },
+  { name: "Total Platelet Count", unit: "/cumm", min: 150000, max: 450000, type: "numeric", defaultRef: "1,50,000 - 4,50,000" },
+  { name: "Mean Platelet Volume (MPV)", unit: "fL", min: 7.4, max: 11.5, type: "numeric", defaultRef: "7.4 - 11.5" },
+  { name: "Platelet Distribution Width (PDW)", unit: "%", min: 10.0, max: 18.0, type: "numeric", defaultRef: "10.0 - 18.0" }
 ];
-// SILENT AUTO-SEEDER (Runs automatically without user clicks)
-async function ensureSilent5PartCBC(existingTests = []) {
-  const cbcTestId = "T-CBC-5PART";
-  const existingCbc = existingTests.find(
-    (t) =>
-      t.id === cbcTestId ||
-      (t.code || "").toUpperCase() === "CBC" ||
-      (t.name || "").toLowerCase().includes("blood count")
+
+export const MASTER_URINE_PARAMETERS = [
+  { name: "Color", unit: "", min: null, max: null, type: "text", defaultRef: "Straw / Pale Yellow" },
+  { name: "Appearance / Clarity", unit: "", min: null, max: null, type: "text", defaultRef: "Clear" },
+  { name: "Specific Gravity", unit: "", min: 1.005, max: 1.030, type: "numeric", defaultRef: "1.005 – 1.030" },
+  { name: "Reaction / pH", unit: "", min: 5.0, max: 8.0, type: "text", defaultRef: "Acidic (5.5 – 7.0)" },
+  { name: "Sediment", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Albumin / Protein", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
+  { name: "Sugar / Glucose", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
+  { name: "Ketone Bodies", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative / Nil" },
+  { name: "Bilirubin", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Urobilinogen", unit: "", min: null, max: null, type: "text", defaultRef: "Normal (< 1 mg/dL)" },
+  { name: "Nitrite", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Leukocyte Esterase", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Bile Salt", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Bile Pigment", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Pus Cells (WBC)", unit: "/HPF", min: 0, max: 4, type: "text", defaultRef: "0 – 4 /HPF" },
+  { name: "Epithelial Cells", unit: "/HPF", min: 1, max: 5, type: "text", defaultRef: "1 – 5 /HPF" },
+  { name: "Red Blood Cells (RBC)", unit: "/HPF", min: 0, max: 2, type: "text", defaultRef: "Nil (Occasional)" },
+  { name: "Casts", unit: "/LPF", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Crystals", unit: "/HPF", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Calcium Oxalate", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Amorphous Urates / Phosphates", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Bacteria", unit: "", min: null, max: null, type: "text", defaultRef: "Nil / Not Found" },
+  { name: "Yeast Cells / Fungi", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Trichomonas Vaginalis", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" }
+];
+
+export const MASTER_STOOL_PARAMETERS = [
+  { name: "Color", unit: "", min: null, max: null, type: "text", defaultRef: "Yellowish Brown" },
+  { name: "Consistency", unit: "", min: null, max: null, type: "text", defaultRef: "Soft / Formed" },
+  { name: "Mucus", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Blood", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Reaction / pH", unit: "", min: null, max: null, type: "text", defaultRef: "Neutral / Alkaline" },
+  { name: "Occult Blood Test (OBT)", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
+  { name: "Reducing Substance", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative / Nil" },
+  { name: "Pus Cells", unit: "/HPF", min: 0, max: 2, type: "text", defaultRef: "0 - 2 /HPF" },
+  { name: "Red Blood Cells (RBC)", unit: "/HPF", min: 0, max: 0, type: "text", defaultRef: "Nil" },
+  { name: "Protozoa / Cysts", unit: "", min: null, max: null, type: "text", defaultRef: "Not Found / Nil" },
+  { name: "Ova of Helminths", unit: "", min: null, max: null, type: "text", defaultRef: "Not Found / Nil" },
+  { name: "Yeast Cells / Fungi", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
+  { name: "Macrophages", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" }
+];
+
+export const MASTER_WIDAL_PARAMETERS = [
+  { name: "S. typhi 'O' (TO Titer)", unit: "Titer", min: null, max: null, type: "text", defaultRef: "< 1:80 (Negative)" },
+  { name: "S. typhi 'H' (TH Titer)", unit: "Titer", min: null, max: null, type: "text", defaultRef: "< 1:80 (Negative)" },
+  { name: "S. paratyphi 'AH' (AH Titer)", unit: "Titer", min: null, max: null, type: "text", defaultRef: "< 1:80 (Negative)" },
+  { name: "S. paratyphi 'BH' (BH Titer)", unit: "Titer", min: null, max: null, type: "text", defaultRef: "< 1:80 (Negative)" },
+  { name: "Widal Test Impression", unit: "Report", min: null, max: null, type: "text", defaultRef: "Insignificant antibody titer (< 1:80)" }
+];
+
+export const MASTER_LIPID_PARAMETERS = [
+  { name: "Total Cholesterol", unit: "mg/dL", min: 120, max: 200, type: "numeric", defaultRef: "< 200 (Desirable)" },
+  { name: "Triglycerides", unit: "mg/dL", min: 50, max: 150, type: "numeric", defaultRef: "< 150 (Normal)" },
+  { name: "HDL Cholesterol", unit: "mg/dL", min: 40, max: 60, type: "numeric", defaultRef: "> 40 (Optimal)" },
+  { name: "LDL Cholesterol (Calculated)", unit: "mg/dL", min: 60, max: 100, type: "numeric", defaultRef: "< 100 (Optimal)" },
+  { name: "VLDL Cholesterol (Calculated)", unit: "mg/dL", min: 10, max: 30, type: "numeric", defaultRef: "< 30 (Normal)" },
+  { name: "Total Chol / HDL Ratio", unit: "", min: 2.5, max: 4.5, type: "numeric", defaultRef: "< 4.5 (Low Risk)" }
+];
+
+export const MASTER_LFT_PARAMETERS = [
+  { name: "Total Bilirubin", unit: "mg/dL", min: 0.2, max: 1.2, type: "numeric", defaultRef: "0.2 - 1.2" },
+  { name: "Direct (Conjugated) Bilirubin", unit: "mg/dL", min: 0.0, max: 0.3, type: "numeric", defaultRef: "0.0 - 0.3" },
+  { name: "Indirect (Unconjugated) Bilirubin", unit: "mg/dL", min: 0.1, max: 0.9, type: "numeric", defaultRef: "0.1 - 0.9" },
+  { name: "SGPT (ALT)", unit: "U/L", min: 5, max: 45, type: "numeric", defaultRef: "Men: < 45, Women: < 34" },
+  { name: "SGOT (AST)", unit: "U/L", min: 5, max: 40, type: "numeric", defaultRef: "Men: < 40, Women: < 32" },
+  { name: "Alkaline Phosphatase (ALP)", unit: "U/L", min: 35, max: 130, type: "numeric", defaultRef: "35 - 130" },
+  { name: "Total Protein", unit: "g/dL", min: 6.0, max: 8.3, type: "numeric", defaultRef: "6.0 - 8.3" },
+  { name: "Serum Albumin", unit: "g/dL", min: 3.5, max: 5.2, type: "numeric", defaultRef: "3.5 - 5.2" },
+  { name: "Serum Globulin", unit: "g/dL", min: 2.0, max: 3.5, type: "numeric", defaultRef: "2.0 - 3.5" },
+  { name: "A / G Ratio", unit: "", min: 1.1, max: 2.2, type: "numeric", defaultRef: "1.1 - 2.2" }
+];
+
+export const MASTER_ELECTROLYTE_PARAMETERS = [
+  { name: "Serum Sodium (Na+)", unit: "mmol/L", min: 135.0, max: 145.0, type: "numeric", defaultRef: "135.0 - 145.0" },
+  { name: "Serum Potassium (K+)", unit: "mmol/L", min: 3.5, max: 5.1, type: "numeric", defaultRef: "3.5 - 5.1" },
+  { name: "Serum Chloride (Cl-)", unit: "mmol/L", min: 96.0, max: 106.0, type: "numeric", defaultRef: "96.0 - 106.0" },
+  { name: "Serum Bicarbonate (HCO3-)", unit: "mmol/L", min: 22.0, max: 29.0, type: "numeric", defaultRef: "22.0 - 29.0" }
+];
+
+export const MASTER_SEMEN_PARAMETERS = [
+  { name: "Period of Abstinence", unit: "Days", min: 3, max: 7, type: "text", defaultRef: "3 - 5 Days" },
+  { name: "Volume", unit: "mL", min: 1.5, max: 5.0, type: "numeric", defaultRef: "≥ 1.5 mL" },
+  { name: "Color & Appearance", unit: "", min: null, max: null, type: "text", defaultRef: "Greyish White / Opalescent" },
+  { name: "Liquefaction Time", unit: "Minutes", min: 15, max: 30, type: "text", defaultRef: "< 30 Minutes" },
+  { name: "Viscosity", unit: "", min: null, max: null, type: "text", defaultRef: "Normal / Moderate" },
+  { name: "Reaction / pH", unit: "", min: 7.2, max: 8.0, type: "numeric", defaultRef: "7.2 – 8.0 (Alkaline)" },
+  { name: "Total Sperm Count", unit: "million/mL", min: 15.0, max: 200.0, type: "numeric", defaultRef: "≥ 15.0 million/mL" },
+  { name: "Rapid Progressive Motility (Grade A)", unit: "%", min: 25, max: 100, type: "numeric", defaultRef: "≥ 25%" },
+  { name: "Slow Progressive Motility (Grade B)", unit: "%", min: 10, max: 50, type: "numeric", defaultRef: "Grade A + B ≥ 32%" },
+  { name: "Non-Progressive Motility (Grade C)", unit: "%", min: 0, max: 20, type: "numeric", defaultRef: "< 15%" },
+  { name: "Immotile Sperm (Grade D)", unit: "%", min: 0, max: 40, type: "numeric", defaultRef: "< 40%" },
+  { name: "Normal Sperm Morphology", unit: "%", min: 4, max: 100, type: "numeric", defaultRef: "≥ 4% (Strict Kruger Criteria)" },
+  { name: "Pus Cells (WBC)", unit: "/HPF", min: 0, max: 5, type: "text", defaultRef: "< 1 million/mL or 0 - 4 /HPF" }
+];
+
+// ==========================================
+// 3. DESCRIPTIVE NARRATIVE MASTER TEMPLATES
+// ==========================================
+export const DESCRIPTIVE_STANDARD_TEMPLATES = {
+  radiologyChest: 
+`CLINICAL INDICATION: Routine health screening / Respiratory evaluation.
+TECHNIQUE: Standard digital chest radiograph (P/A projection).
+
+FINDINGS:
+- The bony thorax, thoracic spine, and rib cage appear intact with no fracture.
+- Both lung fields are clear with normal vascular markings. No focal consolidation, pneumothorax, or mass lesion detected.
+- Cardiac silhouette is normal in shape and transverse diameter (Cardio-thoracic ratio < 0.50).
+- Both costophrenic and cardiophrenic angles are sharp and clear.
+- Bilateral hemidiaphragms are normal in contour and position.
+- Trachea is centrally placed in the midline.
+
+IMPRESSION:
+Normal chest radiograph (No acute cardiopulmonary abnormality detected).`,
+
+  usgAbdomen: 
+`CLINICAL INDICATION: Abdominal pain / General health assessment.
+TECHNIQUE: Real-time high-resolution abdominal sonography with 3.5 MHz curvilinear probe.
+
+FINDINGS:
+- LIVER: Normal in size (13.5 cm), smooth surface margin, and homogeneous parenchymal echotexture. No focal solid or cystic space-occupying lesion seen. Intrahepatic biliary radicals are not dilated.
+- GALLBLADDER: Normal in size and luminal distension. Wall thickness is normal (< 3 mm). Lumen is clear with no calculus or polyp.
+- COMMON BILE DUCT (CBD): Normal in caliber (4.2 mm).
+- PANCREAS: Normal size and parenchymal echotexture. Main pancreatic duct is not dilated.
+- SPLEEN: Normal in size (9.2 cm) with homogeneous echotexture. No splenomegaly.
+- KIDNEYS: Both kidneys are normal in size, shape, position, and cortical thickness. Corticomedullary differentiation is well-maintained. No calculus, hydronephrosis, or space-occupying lesion detected.
+- URINARY BLADDER: Well-distended with thin, smooth wall. Lumen is clear.
+- PROSTATE / PELVIC ORGANS: Normal anatomical limits for age.
+- PERITONEAL CAVITY: No ascites or enlarged retroperitoneal lymphadenopathy seen.
+
+IMPRESSION:
+Normal ultrasonographic study of whole abdomen.`,
+
+  histopathology: 
+`SPECIMEN: Punch Biopsy / Excisional Tissue Specimen.
+CLINICAL HISTORY & SITE: Suspected lesion / Routine biopsy evaluation.
+
+GROSS EXAMINATION:
+Received a formalin-fixed tissue biopsy measuring 1.2 x 0.8 x 0.4 cm, greyish-white in color and firm in consistency. Cut surface shows homogeneous tissue. Entire specimen processed in a single cassette.
+
+MICROSCOPIC EXAMINATION:
+Sections show tissue fragments lined by stratified squamous epithelium showing unremarkable maturation. The underlying subepithelial stroma shows dense fibrocollagenous tissue with minimal chronic inflammatory infiltrate comprising lymphocytes and plasma cells. No cellular atypia, dysplasia, granuloma, or invasive malignancy identified.
+
+DIAGNOSIS / IMPRESSION:
+Benign fibro-epithelial tissue fragments. Negative for malignancy.`,
+
+  fnacCytology: 
+`SPECIMEN / SITE: Fine Needle Aspiration Cytology (FNAC) of palpable swelling.
+CLINICAL HISTORY: Palpable painless nodule, duration 3 months.
+
+ASPIRATION NOTES:
+Using 23G needle, 0.4 ml of greyish aspirate obtained. Multiple smears prepared, air-dried, and stained with MGG and Pap stains.
+
+MICROSCOPIC EXAMINATION:
+Smears are cellular and show cohesive clusters and sheets of benign epithelial / follicular cells against a clean background containing colloid and occasional bare nuclei. The cells exhibit uniform round-to-oval nuclei, fine chromatin, and moderate cytoplasm. No atypical, dysplastic, or malignant cells seen.
+
+CYTOLOGICAL OPINION:
+Features consistent with benign nodule / hyperplasia. No evidence of malignant cytology.`,
+
+  ecg12Lead: 
+`CLINICAL INDICATION: Chest discomfort / Pre-operative evaluation.
+TECHNIQUE: Standard 12-lead resting electrocardiogram (25 mm/sec, 10 mm/mV).
+
+FINDINGS:
+- Rhythm: Regular Sinus Rhythm
+- Heart Rate: 72 beats per minute
+- P Wave: Normal duration and morphology (0.08 sec)
+- P-R Interval: 0.16 seconds (Normal: 0.12 - 0.20 sec)
+- QRS Complex: 0.08 seconds (Normal: 0.06 - 0.10 sec)
+- Axis: Normal QRS electrical axis (+45°)
+- ST Segment: Isoelectric across all limb and precordial leads
+- T Wave: Normal orientation and amplitude
+- QTc Interval: 410 ms (Normal: < 440 ms)
+
+IMPRESSION:
+Normal 12-Lead Electrocardiogram. No ischemic ST-T changes or arrhythmias detected.`
+};
+
+// ==========================================
+// 4. SILENT SEEDERS & MASTER DATA
+// ==========================================
+
+async function ensureSilentSeedProfile(testId, code, name, deptId, price, sampleType, tubeColor, paramList, existingTests = [], reportType = "tabular") {
+  const existing = existingTests.find(
+    (t) => t.id === testId || (t.code || "").toUpperCase() === code.toUpperCase() || (t.name || "").toLowerCase() === name.toLowerCase()
   );
 
-  const existingParams = existingCbc ? (existingCbc.test_parameters || existingCbc.parameters || []) : [];
-
-  if (existingCbc && existingParams.length >= 20) {
+  const existingParams = existing ? (existing.test_parameters || existing.parameters || []) : [];
+  if (existing && existingParams.length >= paramList.length) {
     return existingTests;
   }
 
+  const targetId = existing?.id || testId;
+
   try {
-    await supabase.from("departments").upsert({
-      id: "DEP-HEM",
-      name: "Hematology & Coagulation",
-      icon: "🩸"
-    });
-
-    const targetId = existingCbc?.id || cbcTestId;
-
     await supabase.from("tests").upsert({
       id: targetId,
-      code: "CBC",
-      name: "Complete Blood Count (CBC) with 5-Part Differential",
-      dept_id: "DEP-HEM",
-      price: 400,
-      sample_type: "Whole Blood",
-      tube_color: "Purple / Lavender (EDTA)",
-      is_profile: true,
+      code: code,
+      name: name,
+      dept_id: deptId,
+      price: price,
+      sample_type: sampleType,
+      tube_color: tubeColor,
+      is_profile: reportType === "tabular",
+      report_type: reportType,
       is_available: true
     });
 
-    if (existingParams.length < 20) {
+    if (existingParams.length < paramList.length) {
       await supabase.from("test_parameters").delete().eq("test_id", targetId);
     }
 
-    const paramRows = MASTER_CBC_PARAMETERS.map((p, idx) => ({
-      id: `P-CBC-${String(idx + 1).padStart(2, "0")}`,
+    const paramRows = paramList.map((p, idx) => ({
+      id: `P-${code}-${String(idx + 1).padStart(2, "0")}`,
       test_id: targetId,
       name: p.name,
-      param_type: p.type,
-      unit: p.unit,
-      min_range: p.min,
-      max_range: p.max
+      param_type: p.type === "qualitative" ? "qualitative" : (p.type === "text" ? "text" : "numeric"),
+      unit: p.unit || "",
+      min_range: p.min !== null && p.min !== undefined ? p.min : null,
+      max_range: p.max !== null && p.max !== undefined ? p.max : null,
+      reference_text: p.defaultRef || p.template_text || null
     }));
 
     await supabase.from("test_parameters").insert(paramRows);
 
-    const { data: updatedCbc } = await supabase
-      .from("tests")
-      .select("*, test_parameters(*)")
-      .eq("id", targetId)
-      .single();
-
-    if (updatedCbc) {
-      return [updatedCbc, ...existingTests.filter((t) => t.id !== targetId)];
+    const { data: updated } = await supabase.from("tests").select("*, test_parameters(*)").eq("id", targetId).single();
+    if (updated) {
+      return [updated, ...existingTests.filter((t) => t.id !== targetId)];
     }
   } catch (err) {
-    console.warn("Silent CBC verification notice:", err.message);
+    console.warn(`Silent seeder notice for ${code}:`, err.message);
   }
 
-  // Fallback in-memory object
-  const inMemoryCbc = {
-    id: cbcTestId,
-    code: "CBC",
-    name: "Complete Blood Count (CBC) with 5-Part Differential",
-    dept_id: "DEP-HEM",
-    price: 400,
-    sample_type: "Whole Blood",
-    tube_color: "Purple / Lavender (EDTA)",
-    is_profile: true,
+  const inMemory = {
+    id: targetId,
+    code: code,
+    name: name,
+    dept_id: deptId,
+    price: price,
+    sample_type: sampleType,
+    tube_color: tubeColor,
+    is_profile: reportType === "tabular",
+    report_type: reportType,
     is_available: true,
-    test_parameters: MASTER_CBC_PARAMETERS.map((p, idx) => ({
-      id: `P-CBC-${String(idx + 1).padStart(2, "0")}`,
-      test_id: cbcTestId,
+    test_parameters: paramList.map((p, idx) => ({
+      id: `P-${code}-${String(idx + 1).padStart(2, "0")}`,
+      test_id: targetId,
       name: p.name,
       param_type: p.type,
-      unit: p.unit,
+      unit: p.unit || "",
       min_range: p.min,
-      max_range: p.max
+      max_range: p.max,
+      reference_text: p.defaultRef || p.template_text || null
     }))
   };
 
-  return [inMemoryCbc, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== "CBC")];
+  return [inMemory, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== code.toUpperCase())];
 }
 
 export async function getMasterData() {
@@ -153,12 +313,88 @@ export async function getMasterData() {
       if (!finalDepts.some((d) => d.id === defDept.id)) finalDepts.push(defDept);
     });
 
-    let updatedTests = await ensureSilent5PartCBC(tests || []);
-    updatedTests = await ensureSilentUrineRME(updatedTests || []);
+    let currentTests = tests || [];
+
+    // Quantitative Profiles
+    currentTests = await ensureSilentSeedProfile(
+      "T-CBC-5PART", "CBC", "Complete Blood Count (CBC) with 5-Part Differential",
+      "DEP-HEM", 400, "Whole Blood", "Purple / Lavender (EDTA)", MASTER_CBC_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-URINE-RME", "URINE-RME", "Urine Routine & Microscopic Examination (R/M/E)",
+      "DEP-PAT", 250, "Clean Catch Urine", "Sterile Urine Cup", MASTER_URINE_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-STOOL-RE", "STOOL-RE", "Stool Routine Examination (R/E)",
+      "DEP-PAT", 250, "Fresh Stool", "Sterile Urine Cup", MASTER_STOOL_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-WIDAL", "WIDAL", "Widal Test (Typhoid Serology)",
+      "DEP-MIC", 350, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_WIDAL_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-LIPID", "LIPID", "Lipid Profile (Full Fasting Panel)",
+      "DEP-BIO", 900, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_LIPID_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-LFT", "LFT", "Liver Function Test (LFT Panel)",
+      "DEP-BIO", 1000, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_LFT_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-ELECTROLYTES", "ELECTROLYTES", "Serum Electrolytes (Na+, K+, Cl-, HCO3-)",
+      "DEP-BIO", 800, "Serum", "Red / Yellow (SST / Plain Clot)", MASTER_ELECTROLYTE_PARAMETERS, currentTests, "tabular"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-SEMEN", "SEMEN-RE", "Semen Routine & Morphological Analysis",
+      "DEP-PAT", 600, "Fresh Specimen", "Sterile Urine Cup", MASTER_SEMEN_PARAMETERS, currentTests, "tabular"
+    );
+
+    // Descriptive Investigations (With built-in narrative templates)
+    currentTests = await ensureSilentSeedProfile(
+      "T-XRAY-CHEST", "XRAY-CHEST", "X-Ray Chest (P/A View)",
+      "DEP-RAD", 500, "Radiological Study", "No Specimen (Imaging)",
+      [{ name: "Chest Radiography Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest }],
+      currentTests, "descriptive"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-USG-ABD", "USG-ABD", "USG of Whole Abdomen",
+      "DEP-USG", 1500, "Ultrasound Protocol", "No Specimen (Imaging)",
+      [{ name: "Abdominal Sonography Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }],
+      currentTests, "descriptive"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-ECG-12", "ECG-12", "12-Lead Electrocardiogram (ECG)",
+      "DEP-CARD", 350, "12-Lead Tracing", "No Specimen (Imaging)",
+      [{ name: "Electrocardiogram Findings", type: "text", unit: "Tracing", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead }],
+      currentTests, "descriptive"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-HISTO-BX", "HISTO-BX", "Histopathology (Biopsy Examination)",
+      "DEP-HISTO", 1800, "Biopsy Specimen", "Sterile Container with 10% Formalin",
+      [{ name: "Histopathological Examination Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.histopathology }],
+      currentTests, "descriptive"
+    );
+
+    currentTests = await ensureSilentSeedProfile(
+      "T-FNAC", "FNAC", "Fine Needle Aspiration Cytology (FNAC)",
+      "DEP-HISTO", 1200, "Aspiration Smear", "Fixed Glass Slides",
+      [{ name: "Cytological Examination Findings", type: "text", unit: "Report", defaultRef: DESCRIPTIVE_STANDARD_TEMPLATES.fnacCytology }],
+      currentTests, "descriptive"
+    );
 
     return { 
       departments: finalDepts, 
-      tests: updatedTests || [] 
+      tests: currentTests || [] 
     };
   } catch (err) {
     console.error("Master data fetch error:", err);
@@ -166,8 +402,7 @@ export async function getMasterData() {
   }
 }
 
-
-// 1-Click Seed Standard Radiology & Imaging Catalog
+// 1-Click Seed Standard Radiology & Modality Catalog
 export async function seedRadiologyCatalog() {
   const radiologyDepts = [
     { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
@@ -191,7 +426,8 @@ export async function seedRadiologyCatalog() {
       sampleType: "Radiological Study",
       tubeColor: "No Specimen (Imaging)",
       isProfile: false,
-      parameters: [{ name: "Chest Radiography Findings", param_type: "text", unit: "Report", min: "", max: "" }]
+      reportType: "descriptive",
+      parameters: [{ name: "Chest Radiography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest }]
     },
     {
       code: "USG-ABD",
@@ -201,7 +437,8 @@ export async function seedRadiologyCatalog() {
       sampleType: "Ultrasound Protocol",
       tubeColor: "No Specimen (Imaging)",
       isProfile: false,
-      parameters: [{ name: "Abdominal Sonography Findings", param_type: "text", unit: "Report", min: "", max: "" }]
+      reportType: "descriptive",
+      parameters: [{ name: "Abdominal Sonography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }]
     },
     {
       code: "CT-BRAIN",
@@ -211,17 +448,8 @@ export async function seedRadiologyCatalog() {
       sampleType: "Non-Contrast CT Head",
       tubeColor: "No Specimen (Imaging)",
       isProfile: false,
-      parameters: [{ name: "Cranial CT Observations", param_type: "text", unit: "Report", min: "", max: "" }]
-    },
-    {
-      code: "MRI-BRAIN",
-      name: "MRI of Brain with Contrast",
-      deptId: "DEP-CTMRI",
-      price: "8500",
-      sampleType: "Multi-Sequence MRI",
-      tubeColor: "No Specimen (Imaging)",
-      isProfile: false,
-      parameters: [{ name: "Neuro MRI Protocol Findings", param_type: "text", unit: "Report", min: "", max: "" }]
+      reportType: "descriptive",
+      parameters: [{ name: "Cranial CT Observations", param_type: "text", unit: "Report", reference_text: "CLINICAL INDICATION: Headache / Neurological deficit.\nTECHNIQUE: Axial non-contrast CT sections.\n\nFINDINGS:\n- Normal parenchymal density across cerebral and cerebellar hemispheres.\n- Ventricles and sulci are normal for age.\n- No evidence of acute hemorrhage, territorial infarct, or mass effect.\n\nIMPRESSION:\nNormal Brain CT Scan." }]
     },
     {
       code: "ECG-12",
@@ -231,7 +459,8 @@ export async function seedRadiologyCatalog() {
       sampleType: "12-Lead Tracing",
       tubeColor: "No Specimen (Imaging)",
       isProfile: false,
-      parameters: [{ name: "Electrocardiogram Findings", param_type: "text", unit: "Tracing", min: "", max: "" }]
+      reportType: "descriptive",
+      parameters: [{ name: "Electrocardiogram Findings", param_type: "text", unit: "Tracing", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead }]
     }
   ];
 
@@ -247,7 +476,7 @@ export async function seedRadiologyCatalog() {
 }
 
 // ==========================================
-// 2. DOCTOR MANAGEMENT API
+// 5. DOCTOR MANAGEMENT
 // ==========================================
 export async function getDoctorsList() {
   try {
@@ -303,7 +532,7 @@ export async function deleteDoctor(docId) {
 }
 
 // ==========================================
-// 3. PATIENT SEARCH & HISTORY
+// 6. PATIENT SEARCH & HISTORY
 // ==========================================
 export async function searchPatients(query) {
   if (!query || query.trim().length < 2) return [];
@@ -350,7 +579,7 @@ export async function getPatientHistory(patientId) {
 }
 
 // ==========================================
-// 4. ON-DEMAND SERVER-SIDE PAGINATED QUERY
+// 7. PAGINATED ORDERS QUERY
 // ==========================================
 export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "", dateTo = "", searchQuery = "" }) {
   const fromIndex = (page - 1) * pageSize;
@@ -389,7 +618,6 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     console.warn("Paginated orders fetch notice:", err.message);
   }
 
-  // Fallback
   try {
     let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
     if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
@@ -412,9 +640,6 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
   }
 }
 
-// ==========================================
-// 5. FETCH ALL ORDERS
-// ==========================================
 export async function getAllOrders() {
   let ordersList = [];
 
@@ -451,6 +676,9 @@ export async function getAllOrders() {
   });
 }
 
+// ==========================================
+// 8. ORDER CREATION WITH MULTI-VIALS
+// ==========================================
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
   const patientId = patientData.id && patientData.id.trim() 
     ? patientData.id.trim() 
@@ -458,7 +686,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   const selectedTests = testCatalog.filter((t) => testIds.includes(t.id));
 
-  // 1. DEPARTMENT-LEVEL PHYSICAL VIAL GROUPING (1 Tube / Sticker per Department)
   const departmentVials = [];
   selectedTests.forEach((t) => {
     let deptId = (t.dept_id || t.deptId || "").toUpperCase();
@@ -470,6 +697,8 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       else if (code.includes("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
       else if (code.includes("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
       else if (code.includes("ECG")) deptId = "DEP-CARD";
+      else if (code.includes("URINE") || code.includes("STOOL")) deptId = "DEP-PAT";
+      else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX")) deptId = "DEP-HISTO";
       else deptId = "DEP-BIO";
     }
 
@@ -478,11 +707,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     if (tubeColor === "Standard") {
       if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
       else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD")) tubeColor = "Imaging Requisition";
+      else if (deptCode.includes("HISTO")) tubeColor = "Formalin Container";
+      else if (deptCode.includes("PAT") && name.includes("URINE")) tubeColor = "Sterile Urine Cup";
       else tubeColor = "Red / Yellow (SST / Plain Clot)";
     }
     const tubeShort = tubeColor.split(" ")[0];
-    
-    // Group by department + tube color
     const key = `${deptCode}-${tubeShort}`;
 
     if (!departmentVials.some((v) => v.key === key)) {
@@ -502,20 +731,15 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   });
 
   const vialsCount = Math.max(1, departmentVials.length);
-
-  // 2. RESERVE EXACT NUMBER OF SEQUENTIAL BARCODES (One for each department)
   const assignedBarcodes = await getNextSequentialBarcode(vialsCount);
   const barcodeList = Array.isArray(assignedBarcodes) ? assignedBarcodes : [assignedBarcodes];
 
-  // Assign barcodes to each department vial
   departmentVials.forEach((v, i) => {
     v.barcode = barcodeList[i];
     v.testBarcode = barcodeList[i];
   });
 
   const primaryBarcode = barcodeList[0];
-  const lastBarcode = barcodeList[barcodeList.length - 1];
-
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
@@ -525,7 +749,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const receiptNo = `RCP-${todayCompact.slice(4)}-${primaryBarcode.slice(-4)}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // 3. Save Patient
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -536,7 +759,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   };
   try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
 
-  // 4. Save Order
   const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
   const finalDiscountPercent = discount || 0;
   const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
@@ -585,7 +807,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       address: `Ref: ${referringDoctor}`
     },
     tests: selectedTests,
-    vials: departmentVials, // Preserves the distinct vials with their barcodes
+    vials: departmentVials,
     order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
     billing: { subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaid, due: finalDue },
     results: {},
@@ -601,8 +823,9 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   return completeOrder;
 }
+
 // ==========================================
-// 7. SETTLE DUE AMOUNT
+// 9. SETTLE DUE & RESULT ENTRY
 // ==========================================
 export async function settleOrderDue(orderId, collectedAmount) {
   const amountToClear = parseFloat(collectedAmount) || 0;
@@ -621,15 +844,11 @@ export async function settleOrderDue(orderId, collectedAmount) {
   return { newPaid, newDue };
 }
 
-// ==========================================
-// 8. TEST RESULT ENTRY & VERIFICATION
 export async function saveTestResult(orderId, parameterId, resultValue, statusFlag = "ENTERED") {
   if (!orderId || !parameterId || String(parameterId).trim() === "" || parameterId === "undefined") {
-    console.warn("Skipping saveTestResult due to invalid parameter ID:", { orderId, parameterId });
     return null;
   }
 
-  // Sanitize: Never save literal "undefined" or "null" string to database
   const cleanValue = (
     resultValue === undefined || 
     resultValue === null || 
@@ -666,13 +885,12 @@ export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByNam
 }
 
 // ==========================================
-// 9. SAMPLE REJECTION & RECOLLECTION WORKFLOW
+// 10. REJECTION & RECOLLECTION WORKFLOW
 // ==========================================
 export async function requestSampleRecollection(orderId, reason = "Hemolyzed Specimen", remarks = "") {
   const fullRemarks = `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim();
   const targetId = String(orderId || "").trim();
 
-  // 1. Supabase Cloud update with safe fallback
   try {
     const { error } = await supabase
       .from("orders")
@@ -684,14 +902,12 @@ export async function requestSampleRecollection(orderId, reason = "Hemolyzed Spe
       .eq("id", targetId);
 
     if (error) {
-      console.warn("Supabase error on reject, retrying with remarks only:", error.message);
       await supabase.from("orders").update({ verifier_remarks: fullRemarks }).eq("id", targetId);
     }
   } catch (err) {
-    console.warn("Supabase cloud notice on reject:", err);
+    console.warn("Supabase notice on reject:", err);
   }
 
-  // 2. Always update local storage immediately
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const updated = local.map((o) =>
@@ -717,7 +933,6 @@ export async function markSampleRecollected(orderId) {
   const cleanRemarks = "New sample recollected. Clinically correlated and verified with quality control standards.";
   const targetId = String(orderId || "").trim();
 
-  // 1. Supabase Cloud update with safe fallback
   try {
     const { error } = await supabase
       .from("orders")
@@ -728,14 +943,12 @@ export async function markSampleRecollected(orderId) {
       .eq("id", targetId);
 
     if (error) {
-      console.warn("Supabase update notice, retrying with remarks only:", error.message);
       await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetId);
     }
   } catch (err) {
-    console.warn("Supabase cloud notice for recollection:", err);
+    console.warn("Supabase notice for recollection:", err);
   }
 
-  // 2. Always update local storage cache immediately (checking both id and orderId)
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const updated = local.map((o) =>
@@ -756,7 +969,7 @@ export async function markSampleRecollected(orderId) {
 }
 
 // ==========================================
-// 10. TEST CATALOG CRUD & REAGENT AVAILABILITY
+// 11. TEST CATALOG CRUD & TEMPLATE SUPPORT
 // ==========================================
 export async function toggleTestAvailability(testId, isAvailable) {
   const { data, error } = await supabase
@@ -771,23 +984,30 @@ export async function toggleTestAvailability(testId, isAvailable) {
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
 
-  const { data: test, error: tErr } = await supabase
-    .from("tests")
-    .insert({
-      id: testId,
-      code: testData.code.trim().toUpperCase(),
-      name: testData.name.trim(),
-      dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
-      price: parseFloat(testData.price) || 0,
-      sample_type: testData.sampleType || testData.sample_type || "Serum",
-      tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-      is_profile: Boolean(testData.isProfile || testData.is_profile),
-      is_available: testData.is_available !== undefined ? testData.is_available : true
-    })
-    .select()
-    .single();
+  const isDescriptive = testData.reportType === "descriptive" || 
+    (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
 
-  if (tErr) throw new Error("Failed to create test: " + tErr.message);
+  const testPayload = {
+    id: testId,
+    code: testData.code.trim().toUpperCase(),
+    name: testData.name.trim(),
+    dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
+    price: parseFloat(testData.price) || 0,
+    sample_type: testData.sampleType || testData.sample_type || "Serum",
+    tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
+    is_available: testData.is_available !== undefined ? testData.is_available : true
+  };
+
+  let test = null;
+  try {
+    const { data, error: tErr } = await supabase.from("tests").insert({ ...testPayload, report_type: isDescriptive ? "descriptive" : "tabular" }).select().single();
+    if (!tErr) test = data;
+    else throw tErr;
+  } catch (e) {
+    const { data: fallbackData } = await supabase.from("tests").insert(testPayload).select().single();
+    test = fallbackData || testPayload;
+  }
 
   if (testData.parameters && testData.parameters.length > 0) {
     const paramRows = testData.parameters
@@ -795,11 +1015,11 @@ export async function createNewTestWithParameters(testData) {
       .map((p, idx) => {
         const minVal = p.min !== "" && p.min !== null && p.min !== undefined && !isNaN(parseFloat(p.min)) ? parseFloat(p.min) : null;
         const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
-        const refText = (p.reference_text || p.ref_text || "").trim();
+        const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
 
-        // Postgres check constraint safety: only 'numeric', 'qualitative', 'text'
         let safeType = p.param_type || "numeric";
         if (safeType === "multirange") safeType = "numeric";
+        if (safeType === "descriptive") safeType = "text";
 
         return {
           id: `P-${testId}-${idx + 1}`,
@@ -816,10 +1036,8 @@ export async function createNewTestWithParameters(testData) {
     if (paramRows.length > 0) {
       const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
       if (insErr) {
-        // Fallback retry without reference_text if column not created yet
         const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
-        const { error: retryErr } = await supabase.from("test_parameters").insert(safeRows);
-        if (retryErr) throw new Error("Failed to save parameters: " + retryErr.message);
+        await supabase.from("test_parameters").insert(safeRows);
       }
     }
   }
@@ -828,24 +1046,26 @@ export async function createNewTestWithParameters(testData) {
 }
 
 export async function updateExistingTest(testId, testData) {
-  // 1. Update Test Master Record
-  const { error: tErr } = await supabase
-    .from("tests")
-    .update({
-      code: testData.code.trim().toUpperCase(),
-      name: testData.name.trim(),
-      dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
-      price: parseFloat(testData.price) || 0,
-      sample_type: testData.sampleType || testData.sample_type || "Serum",
-      tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-      is_profile: Boolean(testData.isProfile || testData.is_profile),
-      is_available: testData.is_available !== undefined ? testData.is_available : true
-    })
-    .eq("id", testId);
+  const isDescriptive = testData.reportType === "descriptive" || 
+    (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
 
-  if (tErr) throw new Error("Failed to update test details: " + tErr.message);
+  const testPayload = {
+    code: testData.code.trim().toUpperCase(),
+    name: testData.name.trim(),
+    dept_id: testData.deptId || testData.dept_id || "DEP-BIO",
+    price: parseFloat(testData.price) || 0,
+    sample_type: testData.sampleType || testData.sample_type || "Serum",
+    tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
+    is_available: testData.is_available !== undefined ? testData.is_available : true
+  };
 
-  // 2. Prepare Clean Parameters (Never NaN)
+  try {
+    await supabase.from("tests").update({ ...testPayload, report_type: isDescriptive ? "descriptive" : "tabular" }).eq("id", testId);
+  } catch (e) {
+    await supabase.from("tests").update(testPayload).eq("id", testId);
+  }
+
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
 
   if (validParams.length > 0) {
@@ -854,12 +1074,13 @@ export async function updateExistingTest(testId, testData) {
       const rawMax = p.max !== undefined && p.max !== "" ? p.max : p.max_range;
       const minVal = rawMin !== "" && rawMin !== null && rawMin !== undefined && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
       const maxVal = rawMax !== "" && rawMax !== null && rawMax !== undefined && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
-      const refText = (p.reference_text || p.ref_text || "").trim();
+      const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
 
       const existingId = p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
 
       let safeType = p.param_type || "numeric";
       if (safeType === "multirange") safeType = "numeric";
+      if (safeType === "descriptive") safeType = "text";
 
       return {
         id: existingId,
@@ -874,13 +1095,10 @@ export async function updateExistingTest(testId, testData) {
     });
 
     await supabase.from("test_parameters").delete().eq("test_id", testId);
-
     const { error: insErr } = await supabase.from("test_parameters").insert(paramRows);
     if (insErr) {
-      console.warn("Insert with reference_text failed, retrying safe insert:", insErr.message);
       const safeRows = paramRows.map(({ reference_text, ...rest }) => rest);
-      const { error: retryErr } = await supabase.from("test_parameters").insert(safeRows);
-      if (retryErr) throw new Error("Failed to save parameters: " + retryErr.message);
+      await supabase.from("test_parameters").insert(safeRows);
     }
   }
 }
@@ -892,7 +1110,7 @@ export async function deleteTest(testId) {
 }
 
 // ==========================================
-// 11. STAFF USERS
+// 12. STAFF & LAB SETTINGS
 // ==========================================
 export async function getStaffUsers() {
   try {
@@ -974,7 +1192,6 @@ export async function getLabSettings() {
       .maybeSingle();
 
     if (!error && data && data.lab_name) {
-      // Merge report_layout: use Supabase's if present, otherwise protect the local layout
       const resolvedLayout = data.report_layout || localLayout || DEFAULT_LAB_SETTINGS.report_layout;
       const mergedData = { ...data, report_layout: resolvedLayout };
 
@@ -1007,13 +1224,11 @@ export async function getLabSettings() {
   };
 }
 
-
 export async function saveLabSettings(settingsData) {
   const layoutObj = settingsData.report_layout !== undefined
     ? settingsData.report_layout
     : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
 
-  // 1. Immediately persist to dedicated local storage so it is NEVER lost
   try {
     if (layoutObj) {
       localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj));
@@ -1040,7 +1255,6 @@ export async function saveLabSettings(settingsData) {
     localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
   } catch (e) {}
 
-  // 2. Attempt saving to Supabase
   try {
     const { data, error } = await supabase.from("lab_settings").upsert(payload).select().single();
     if (!error && data) {
@@ -1049,9 +1263,7 @@ export async function saveLabSettings(settingsData) {
       return data;
     }
 
-    // If Supabase failed because the 'report_layout' column does not exist in schema cache
     if (error) {
-      console.warn("Retrying save without report_layout column in Supabase:", error.message);
       const { report_layout, ...safePayload } = payload;
       const { data: safeData } = await supabase.from("lab_settings").upsert(safePayload).select().single();
       const combined = { ...(safeData || payload), report_layout: layoutObj };
@@ -1064,12 +1276,12 @@ export async function saveLabSettings(settingsData) {
 
   return payload;
 }
+
 export async function getNextSequentialBarcode(count = 1) {
-  const yearPrefix = String(new Date().getFullYear()); // "2026"
+  const yearPrefix = String(new Date().getFullYear());
   let maxFoundSeq = 0;
 
   try {
-    // 1. Fetch recent orders from Supabase to find the absolute highest barcode used
     const { data: recentOrders } = await supabase
       .from("orders")
       .select("barcode, created_at")
@@ -1092,7 +1304,6 @@ export async function getNextSequentialBarcode(count = 1) {
     console.warn("Sequence lookup warning:", err);
   }
 
-  // 2. Check local storage cache counter
   try {
     const localLast = parseInt(localStorage.getItem("apex_last_barcode_seq") || "0", 10);
     if (localLast > maxFoundSeq) {
@@ -1104,140 +1315,13 @@ export async function getNextSequentialBarcode(count = 1) {
   const generatedBarcodes = [];
 
   for (let i = 0; i < count; i++) {
-    const seqStr = String(startSeq + i).padStart(5, "0"); // 5-digit sequence (00001, 00002...)
+    const seqStr = String(startSeq + i).padStart(5, "0");
     generatedBarcodes.push(`${yearPrefix}${seqStr}`);
   }
 
-  // Save the highest reserved sequence to prevent any other order from taking it
   try {
     localStorage.setItem("apex_last_barcode_seq", String(startSeq + count - 1));
   } catch (e) {}
 
   return count === 1 ? generatedBarcodes[0] : generatedBarcodes;
-}
-// Add near top of src/services/api.js:
-
-export const MASTER_URINE_PARAMETERS = [
-  // 1. Physical Examination
-  { name: "Color", unit: "", min: null, max: null, type: "text", defaultRef: "Pale Yellow / Straw" },
-  { name: "Appearance / Clarity", unit: "", min: null, max: null, type: "text", defaultRef: "Clear" },
-  { name: "Specific Gravity", unit: "", min: 1.005, max: 1.030, type: "numeric", defaultRef: "1.005 – 1.030" },
-  { name: "Reaction / pH", unit: "", min: 5.0, max: 8.0, type: "text", defaultRef: "Acidic (5.5 – 7.0)" },
-  { name: "Sediment", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
-
-  // 2. Chemical / Dipstick Examination
-  { name: "Albumin / Protein", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
-  { name: "Sugar / Glucose", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Nil" },
-  { name: "Ketone Bodies", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative / Nil" },
-  { name: "Bilirubin", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
-  { name: "Urobilinogen", unit: "", min: null, max: null, type: "text", defaultRef: "Normal (< 1 mg/dL)" },
-  { name: "Nitrite", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
-  { name: "Leukocyte Esterase", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
-  { name: "Bile Salt", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
-  { name: "Bile Pigment", unit: "", min: null, max: null, type: "qualitative", defaultRef: "Negative" },
-
-  // 3. Microscopic Examination
-  { name: "Pus Cells (WBC)", unit: "/HPF", min: 0, max: 4, type: "text", defaultRef: "0 – 4 /HPF" },
-  { name: "Epithelial Cells", unit: "/HPF", min: 1, max: 5, type: "text", defaultRef: "1 – 5 /HPF" },
-  { name: "Red Blood Cells (RBC)", unit: "/HPF", min: 0, max: 2, type: "text", defaultRef: "Nil (0 – 2 /HPF)" },
-  { name: "Casts", unit: "/LPF", min: null, max: null, type: "text", defaultRef: "Nil" },
-  { name: "Crystals", unit: "/HPF", min: null, max: null, type: "text", defaultRef: "Nil" },
-  { name: "Calcium Oxalate", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
-  { name: "Amorphous Urates / Phosphates", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
-  { name: "Bacteria", unit: "", min: null, max: null, type: "text", defaultRef: "Nil / Not Found" },
-  { name: "Yeast Cells / Fungi", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" },
-  { name: "Trichomonas Vaginalis", unit: "", min: null, max: null, type: "text", defaultRef: "Nil" }
-];
-
-// Silent auto-seeder for Urine R/M/E
-async function ensureSilentUrineRME(existingTests = []) {
-  const urineTestId = "T-URINE-RME";
-  const existingUrine = existingTests.find(
-    (t) =>
-      t.id === urineTestId ||
-      (t.code || "").toUpperCase() === "URINE-RME" ||
-      (t.name || "").toLowerCase().includes("urine r/m/e") ||
-      (t.name || "").toLowerCase().includes("urine routine")
-  );
-
-  const existingParams = existingUrine ? (existingUrine.test_parameters || existingUrine.parameters || []) : [];
-
-  if (existingUrine && existingParams.length >= 18) {
-    return existingTests;
-  }
-
-  try {
-    await supabase.from("departments").upsert({
-      id: "DEP-PAT",
-      name: "Clinical Pathology & Urine",
-      icon: "🧫"
-    });
-
-    const targetId = existingUrine?.id || urineTestId;
-
-    await supabase.from("tests").upsert({
-      id: targetId,
-      code: "URINE-RME",
-      name: "Urine Routine & Microscopic Examination (R/M/E)",
-      dept_id: "DEP-PAT",
-      price: 250,
-      sample_type: "Clean Catch Midstream Urine",
-      tube_color: "Sterile Urine Cup",
-      is_profile: true,
-      is_available: true
-    });
-
-    if (existingParams.length < 18) {
-      await supabase.from("test_parameters").delete().eq("test_id", targetId);
-    }
-
-    const paramRows = MASTER_URINE_PARAMETERS.map((p, idx) => ({
-      id: `P-URN-${String(idx + 1).padStart(2, "0")}`,
-      test_id: targetId,
-      name: p.name,
-      param_type: p.type === "qualitative" ? "qualitative" : "text",
-      unit: p.unit,
-      min_range: p.min,
-      max_range: p.max,
-      reference_text: p.defaultRef
-    }));
-
-    await supabase.from("test_parameters").insert(paramRows);
-
-    const { data: updatedUrine } = await supabase
-      .from("tests")
-      .select("*, test_parameters(*)")
-      .eq("id", targetId)
-      .single();
-
-    if (updatedUrine) {
-      return [updatedUrine, ...existingTests.filter((t) => t.id !== targetId)];
-    }
-  } catch (err) {
-    console.warn("Silent Urine RME verification notice:", err.message);
-  }
-
-  const inMemoryUrine = {
-    id: urineTestId,
-    code: "URINE-RME",
-    name: "Urine Routine & Microscopic Examination (R/M/E)",
-    dept_id: "DEP-PAT",
-    price: 250,
-    sample_type: "Clean Catch Midstream Urine",
-    tube_color: "Sterile Urine Cup",
-    is_profile: true,
-    is_available: true,
-    test_parameters: MASTER_URINE_PARAMETERS.map((p, idx) => ({
-      id: `P-URN-${String(idx + 1).padStart(2, "0")}`,
-      test_id: urineTestId,
-      name: p.name,
-      param_type: p.type,
-      unit: p.unit,
-      min_range: p.min,
-      max_range: p.max,
-      reference_text: p.defaultRef
-    }))
-  };
-
-  return [inMemoryUrine, ...existingTests.filter((t) => (t.code || "").toUpperCase() !== "URINE-RME")];
 }

@@ -62,8 +62,61 @@ export function generateQrSvgLocal(text, size = 52) {
   return generateQrSvgString(text, size);
 }
 
-// 1. SAFE IMAGING DETECTOR (Guarantees Serum Electrolytes, Blood, Urine are NEVER treated as Imaging!)
-export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = "") {
+// Abnormal status verification
+export function checkAbnormalStatus(valStr, min, max, paramType = "numeric") {
+  if (valStr === undefined || valStr === null || valStr === "" || valStr === "—") {
+    return { isAbnormal: false, flag: "" };
+  }
+  const s = String(valStr).trim();
+  const sLow = s.toLowerCase();
+
+  if (paramType === "qualitative" || isNaN(parseFloat(s))) {
+    if (
+      sLow.includes("positive") || sLow.includes("reactive") ||
+      s === "+" || s === "++" || s === "+++" || s === "++++" ||
+      sLow.includes("abundant") || sLow.includes("plenty") || sLow.includes("seen")
+    ) {
+      return { isAbnormal: true, flag: "POS" };
+    }
+    return { isAbnormal: false, flag: "" };
+  }
+
+  const cleanVal = parseFloat(s.replace(/,/g, ""));
+  if (isNaN(cleanVal)) return { isAbnormal: false, flag: "" };
+
+  const hasMin = min !== null && min !== undefined && min !== "" && !isNaN(parseFloat(min));
+  const hasMax = max !== null && max !== undefined && max !== "" && !isNaN(parseFloat(max));
+
+  if (hasMin && cleanVal < parseFloat(min)) return { isAbnormal: true, flag: "L" };
+  if (hasMax && cleanVal > parseFloat(max)) return { isAbnormal: true, flag: "H" };
+
+  return { isAbnormal: false, flag: "" };
+}
+
+function formatResultCell(val, min, max, unit = "", paramType = "numeric") {
+  if (!val || val === "—") {
+    return `<span style="color: #64748b; font-weight: 400;">—</span>`;
+  }
+
+  const { isAbnormal, flag } = checkAbnormalStatus(val, min, max, paramType);
+  const flagHtml = isAbnormal
+    ? `<span style="font-size: 7pt; font-weight: 900; color: #dc2626; margin-left: 3px; font-family: 'Inter', sans-serif;">(${flag})</span>`
+    : "";
+  const textStyle = isAbnormal
+    ? "font-weight: 900; color: #000000; text-decoration: underline;"
+    : "font-weight: 700; color: #000000;";
+
+  return `
+    <span style="${textStyle}; font-family: 'Inter', -apple-system, sans-serif;">${val}</span>
+    ${unit ? `<span style="font-weight: 400; font-size: 7.5pt; color: #333333; margin-left: 2px;">${unit}</span>` : ""}
+    ${flagHtml}
+  `;
+}
+
+// Universal Descriptive Test Detector
+export function isDescriptiveInvestigation(test, deptId = "", deptName = "") {
+  if (!test && !deptId && !deptName) return false;
+
   const d = (deptId || test?.dept_id || test?.deptId || "").toUpperCase();
   const dn = (deptName || "").toUpperCase();
   const s = (test?.sample_type || test?.sampleType || "").toLowerCase();
@@ -72,28 +125,50 @@ export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = 
 
   if (
     s.includes("serum") || s.includes("blood") || s.includes("plasma") ||
-    s.includes("urine") || s.includes("stool") || s.includes("swab") ||
-    d.includes("BIO") || d.includes("HEM") || d.includes("PAT") || d.includes("MIC") ||
-    dn.includes("BIOCHEMISTRY") || dn.includes("HEMATOLOGY") || dn.includes("PATHOLOGY")
+    s.includes("urine") || s.includes("stool") ||
+    d.includes("BIO") || d.includes("HEM")
   ) {
+    if (test?.report_type === "descriptive") return true;
     return false;
   }
 
-  if (d === "DEP-RAD" || d === "DEP-USG" || d === "DEP-CTMRI" || d === "DEP-CARD") return true;
-  if (dn.includes("RADIOLOGY") || dn.includes("ULTRASONO") || dn.includes("IMAGING") || dn.includes("CARDIOLOGY")) return true;
-  if (s.includes("radiological") || s.includes("ultrasound") || s.includes("tracing") || s.includes("no specimen")) return true;
+  if (test?.report_type === "descriptive") return true;
+
+  const rawParams = test?.test_parameters || test?.parameters || [];
+  if (rawParams.length === 1 && (rawParams[0].param_type === "text" || rawParams[0].param_type === "descriptive")) {
+    return true;
+  }
+
+  if (
+    d === "DEP-RAD" || d === "DEP-USG" || d === "DEP-CTMRI" || d === "DEP-CARD" || d === "DEP-HISTO" ||
+    dn.includes("HISTOPATHOLOGY") || dn.includes("CYTOLOGY") || dn.includes("RADIOLOGY") ||
+    dn.includes("ULTRASONO") || dn.includes("IMAGING") || dn.includes("CARDIOLOGY")
+  ) {
+    return true;
+  }
+
+  if (
+    s.includes("radiological") || s.includes("ultrasound") || s.includes("tracing") ||
+    s.includes("biopsy") || s.includes("smear") || s.includes("aspiration") || s.includes("formalin")
+  ) {
+    return true;
+  }
 
   const words = `${c} ${n}`.split(/[^A-Z0-9]+/);
   if (
-    words.includes("XRAY") || words.includes("USG") || words.includes("MRI") ||
-    words.includes("ECG") || words.includes("ECHO") ||
-    n.includes("X-RAY") || n.includes("ULTRASOUND") || n.includes("CT SCAN") ||
-    n.includes("COMPUTED TOMOGRAPHY") || n.includes("ECHOCARDIOGRAM")
+    words.includes("HISTO") || words.includes("FNAC") || words.includes("BIOPSY") ||
+    words.includes("CYTOLOGY") || words.includes("XRAY") || words.includes("USG") ||
+    words.includes("MRI") || words.includes("CT") || words.includes("ECG") || words.includes("ECHO") ||
+    words.includes("ENDOSCOPY") || words.includes("COLONOSCOPY")
   ) {
     return true;
   }
 
   return false;
+}
+
+export function isImagingOrRadiologyInvestigation(test, deptId = "", deptName = "") {
+  return isDescriptiveInvestigation(test, deptId, deptName);
 }
 
 export function getAllOrderVials(order, catalog = []) {
@@ -110,7 +185,8 @@ export function getAllOrderVials(order, catalog = []) {
       name: t.name || fromCat.name || "Investigation",
       dept_id: t.dept_id || t.deptId || fromCat.dept_id || fromCat.deptId || "",
       tube_color: t.tube_color || t.tubeColor || fromCat.tube_color || fromCat.tubeColor || "",
-      sample_type: t.sample_type || t.sampleType || fromCat.sample_type || fromCat.sampleType || ""
+      sample_type: t.sample_type || t.sampleType || fromCat.sample_type || fromCat.sampleType || "",
+      report_type: t.report_type || fromCat.report_type || "tabular"
     };
   });
 
@@ -136,11 +212,12 @@ export function getAllOrderVials(order, catalog = []) {
     let deptId = (test.dept_id || test.deptId || "").toUpperCase();
 
     if (!deptId || deptId === "DEP-GEN") {
-      if (code.includes("CBC") || name.includes("BLOOD COUNT") || name.includes("HEMOGLOBIN")) deptId = "DEP-HEM";
+      if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
       else if (code.includes("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
       else if (code.includes("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
       else if (code.includes("CT") || name.includes("CT SCAN")) deptId = "DEP-CTMRI";
       else if (code.includes("ECG") || name.includes("ELECTROCARDIOGRAM")) deptId = "DEP-CARD";
+      else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX")) deptId = "DEP-HISTO";
       else if (name.includes("URINE") || name.includes("STOOL")) deptId = "DEP-PAT";
       else deptId = "DEP-BIO";
     }
@@ -151,6 +228,7 @@ export function getAllOrderVials(order, catalog = []) {
     if (!tubeColor || tubeColor === "Standard") {
       if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
       else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD") || deptCode.includes("CT")) tubeColor = "Imaging Requisition";
+      else if (deptCode.includes("HISTO")) tubeColor = "Formalin Container";
       else if (deptCode.includes("PAT") && name.includes("URINE")) tubeColor = "Sterile Urine Cup";
       else tubeColor = "Red / Yellow (SST / Plain Clot)";
     }
@@ -221,84 +299,175 @@ export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
 
 function isTestProfile(test) {
   if (!test) return false;
+  if (test.report_type === "descriptive") return false;
   if (test.is_profile === true || test.is_profile === "true" || test.is_profile === 1 || test.isProfile === true) return true;
   const params = test.test_parameters || test.parameters || [];
   return params.length > 1;
 }
 
-// =========================================================================
-// 2. HAEMATOLOGY / CBC FORMATTER (MATCHING IBN SINA HOSPITAL STANDARD)
-// =========================================================================
-export function renderCustomCbcHematologyReport(tests = [], results = {}, patient = {}) {
-  const findVal = (keywords, fallback = "") => {
-    const keys = Array.isArray(keywords) ? keywords : [keywords];
-    for (const test of tests) {
-      const params = test.test_parameters || test.parameters || [];
-      for (const p of params) {
-        const pName = (p.name || "").toLowerCase();
-        if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
-          const res = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
-          if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
+// Value extractor
+function extractResultValue(tests = [], results = {}, keywords = [], fallback = "—") {
+  const keys = Array.isArray(keywords) ? keywords : [keywords];
+  for (const test of tests) {
+    const params = test.test_parameters || test.parameters || [];
+    for (const p of params) {
+      const pName = (p.name || "").toLowerCase().trim();
+      if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
+        const val = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
+        if (val !== undefined && val !== null && String(val).trim() !== "" && String(val).toLowerCase() !== "undefined") {
+          return String(val).trim();
         }
       }
     }
-    for (const rk of Object.keys(results || {})) {
-      const rkLow = rk.toLowerCase();
-      if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
-        const res = results[rk]?.value ?? results[rk];
-        if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
+  }
+  for (const rk of Object.keys(results || {})) {
+    const rkLow = rk.toLowerCase().trim();
+    if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
+      const val = results[rk]?.value ?? results[rk];
+      if (val !== undefined && val !== null && String(val).trim() !== "" && String(val).toLowerCase() !== "undefined") {
+        return String(val).trim();
       }
     }
-    return fallback;
+  }
+  return fallback;
+}
+
+// =========================================================================
+// DYNAMIC PARAMETER RESOLVER (READS LIVE FROM TEST CATALOGUE)
+// =========================================================================
+function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef = "", defaultMin = null, defaultMax = null) {
+  const keys = Array.isArray(keywords) ? keywords : [keywords];
+  for (const test of tests) {
+    const params = test.test_parameters || test.parameters || [];
+    for (const p of params) {
+      const pName = (p.name || "").toLowerCase().trim();
+      if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
+        let refText = (p.reference_text || p.ref_text || "").trim();
+        
+        // If no explicit text, format from min & max range if present
+        if (!refText) {
+          const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "";
+          const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "";
+          if (hasMin && hasMax) refText = `${p.min_range} – ${p.max_range}`;
+          else if (hasMin) refText = `≥ ${p.min_range}`;
+          else if (hasMax) refText = `≤ ${p.max_range}`;
+        }
+
+        const minVal = p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : defaultMin);
+        const maxVal = p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : defaultMax);
+        const unitVal = p.unit !== undefined && p.unit !== null && p.unit !== "" ? p.unit : defaultUnit;
+
+        return {
+          param: p,
+          name: p.name || keys[0],
+          unit: unitVal,
+          ref: refText || defaultRef,
+          min: minVal,
+          max: maxVal
+        };
+      }
+    }
+  }
+
+  return {
+    param: null,
+    name: keys[0],
+    unit: defaultUnit,
+    ref: defaultRef,
+    min: defaultMin,
+    max: defaultMax
   };
+}
 
-  const hb = findVal(["Haemoglobin", "Hemoglobin (Hb)", "Hemoglobin", "HGB", "Hb"], "14.0");
-  const rawRbc = findVal(["Total RBC", "RBC COUNT", "RBC", "Red Blood Cell"], "5.16");
-  const esr = findVal(["ESR", "Erythrocyte Sedimentation Rate", "ESR (Westergren Method)"], "10");
-  const hct = findVal(["PCV/HCT", "HCT/PCV", "Packed Cell Volume", "PCV", "HCT"], "0.44");
-  const mcv = findVal(["MCV", "Mean Corpuscular Volume"], "84");
-  const mch = findVal(["MCH", "Mean Corpuscular Hemoglobin"], "27");
-  const mchc = findVal(["MCHC", "Mean Corpuscular Hb Concentration"], "32");
-  const rdwcv = findVal(["RDW-CV", "RDW CV"], "13");
-  const nrbc = findVal(["NRBC"], "0.0");
+// =========================================================================
+// 1. HAEMATOLOGY / CBC FORMATTER (100% CATALOGUE-SYNCED)
+// =========================================================================
+export function renderCustomCbcHematologyReport(tests = [], results = {}, patient = {}) {
+  const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
+  const getInfo = (keywords, defUnit, defRef, defMin, defMax) => getParamDetails(tests, keywords, defUnit, defRef, defMin, defMax);
 
-  const rawWbc = findVal(["Total WBC", "TOTAL LEUCOCYTE COUNT (WBC)", "WBC COUNT", "WBC"], "11,780");
-  const numWbc = parseFloat(String(rawWbc).replace(/,/g, "")) || 11780;
-  const wbcDisplay = numWbc < 100 ? (numWbc * 1000).toLocaleString() : numWbc.toLocaleString();
+  const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5, Women: 11.5 - 15.5", 11.5, 16.5);
+  const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8, Women: 3.8 - 5.2", 3.8, 5.8);
+  const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50, Women: 36 - 46", 36.0, 50.0);
+  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10, Women: 0 - 20", 0, 20);
+  const mcvInfo = getInfo(["Mean Corpuscular Volume (MCV)", "MCV"], "fL", "78.0 - 98.0", 78.0, 98.0);
+  const mchInfo = getInfo(["Mean Corpuscular Hemoglobin (MCH)", "MCH"], "pg", "27.0 - 32.0", 27.0, 32.0);
+  const mchcInfo = getInfo(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"], "g/dL", "31.0 - 36.0", 31.0, 36.0);
+  const rdwcvInfo = getInfo(["RDW-CV", "RDW CV"], "%", "11.5 - 15.0", 11.5, 15.0);
+  const rdwsdInfo = getInfo(["RDW-SD", "RDW SD"], "fL", "35.0 - 56.0", 35.0, 56.0);
 
-  // Machine Differential Inputs (Gran%, Lymph%, Mid%)
-  const rawLymphPct = findVal(["Lymphocytes", "Lymphocyte", "Lymph%"], "43");
-  const rawGranPct = findVal(["Gran%", "Gran", "Neutrophil", "Neutrophils"], "51");
-  const rawMidPct = findVal(["Mid%", "Mid", "Monocyte", "Monocytes"], "6");
+  const wbcInfo = getInfo(["Total Leucocyte Count (WBC)", "WBC"], "/cumm", "4,000 - 11,000", 4000, 11000);
+  const neutInfo = getInfo(["Neutrophils", "Neutrophil"], "%", "40 - 75", 40.0, 75.0);
+  const lymphInfo = getInfo(["Lymphocytes", "Lymphocyte"], "%", "20 - 45", 20.0, 45.0);
+  const monoInfo = getInfo(["Monocytes", "Monocyte"], "%", "2 - 10", 2.0, 10.0);
+  const eosInfo = getInfo(["Eosinophils", "Eosinophil"], "%", "1 - 6", 1.0, 6.0);
+  const basoInfo = getInfo(["Basophils", "Basophil"], "%", "0 - 1", 0.0, 1.0);
+  const aecInfo = getInfo(["Total Circulating Eosinophils (AEC)", "AEC"], "/cumm", "50 - 500", 50, 500);
 
-  const neut = findVal(["Neutrophils", "Neutrophil"], parseFloat(rawGranPct).toFixed(0));
-  const lymph = findVal(["Lymphocytes", "Lymphocyte"], parseFloat(rawLymphPct).toFixed(0));
-  const mono = findVal(["Monocytes", "Monocyte"], "05");
-  const eos = findVal(["Eosinophils", "Eosinophil"], "01");
-  const baso = findVal(["Basophils", "Basophil"], "00");
-  const others = findVal(["Others"], "00");
+  const pltInfo = getInfo(["Total Platelet Count", "Platelet"], "/cumm", "1,50,000 - 4,50,000", 150000, 450000);
+  const mpvInfo = getInfo(["Mean Platelet Volume (MPV)", "MPV"], "fL", "7.4 - 11.5", 7.4, 11.5);
+  const pdwInfo = getInfo(["Platelet Distribution Width (PDW)", "PDW"], "%", "10.0 - 18.0", 10.0, 18.0);
 
-  // Calculated Circulating Eosinophils (AEC)
-  const calcAec = Math.round((numWbc * (parseFloat(eos) || 1)) / 100);
-  const aec = findVal(["Circulating Eosinophils", "TOTAL CIR. EOSIONOPHIL COUNT", "AEC"], String(calcAec || 118));
+  // Observed Values
+  const hb = getVal(["Hemoglobin (Hb)", "Haemoglobin", "Hb"]);
+  const rbc = getVal(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"]);
+  const pcv = getVal(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"]);
+  const esr = getVal(["ESR (Westergren Method)", "ESR"]);
+  const mcv = getVal(["Mean Corpuscular Volume (MCV)", "MCV"]);
+  const mch = getVal(["Mean Corpuscular Hemoglobin (MCH)", "MCH"]);
+  const mchc = getVal(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"]);
+  const rdwcv = getVal(["RDW-CV", "RDW CV"]);
+  const rdwsd = getVal(["RDW-SD", "RDW SD"]);
 
-  // Platelet Parameters
-  const rawPlt = findVal(["Total Platelet Count", "Platelet Count", "PLT", "Platelet"], "65,000");
-  const numPlt = parseFloat(String(rawPlt).replace(/,/g, "")) || 65000;
-  const pltDisplay = numPlt < 1000 ? (numPlt * 1000).toLocaleString() : numPlt.toLocaleString();
-  const mpv = findVal(["MPV", "Mean Platelet Volume"], "10.1");
+  const rawWbc = getVal(["Total Leucocyte Count (WBC)", "WBC"]);
+  let wbcDisplay = rawWbc;
+  if (rawWbc !== "—") {
+    const numWbc = parseFloat(String(rawWbc).replace(/,/g, ""));
+    if (!isNaN(numWbc)) {
+      wbcDisplay = numWbc < 100 ? (numWbc * 1000).toLocaleString() : numWbc.toLocaleString();
+    }
+  }
 
-  const row = (name, val, unit, ref) => `
+  const neut = getVal(["Neutrophils", "Neutrophil"]);
+  const lymph = getVal(["Lymphocytes", "Lymphocyte"]);
+  const mono = getVal(["Monocytes", "Monocyte"]);
+  const eos = getVal(["Eosinophils", "Eosinophil"]);
+  const baso = getVal(["Basophils", "Basophil"]);
+
+  let aec = getVal(["Total Circulating Eosinophils (AEC)", "AEC"]);
+  if (aec === "—" && wbcDisplay !== "—" && eos !== "—") {
+    const wNum = parseFloat(String(wbcDisplay).replace(/,/g, ""));
+    const eNum = parseFloat(eos);
+    if (!isNaN(wNum) && !isNaN(eNum)) {
+      aec = String(Math.round((wNum * eNum) / 100));
+    }
+  }
+
+  const rawPlt = getVal(["Total Platelet Count", "Platelet"]);
+  let pltDisplay = rawPlt;
+  if (rawPlt !== "—") {
+    const numPlt = parseFloat(String(rawPlt).replace(/,/g, ""));
+    if (!isNaN(numPlt)) {
+      pltDisplay = numPlt < 1000 ? (numPlt * 1000).toLocaleString() : numPlt.toLocaleString();
+    }
+  }
+
+  const mpv = getVal(["Mean Platelet Volume (MPV)", "MPV"]);
+  const pdw = getVal(["Platelet Distribution Width (PDW)", "PDW"]);
+
+  const row = (name, val, info) => `
     <tr>
       <td style="padding: 2.8px 6px; font-size: 8.5pt; color: #000; font-weight: 500;">${name}</td>
-      <td style="padding: 2.8px 6px; font-size: 8.5pt; color: #000; font-weight: 700; font-family: 'Inter', sans-serif;">${val} ${unit ? `<span style="font-weight: 400; font-size: 7.5pt; color: #333; margin-left: 2px;">${unit}</span>` : ''}</td>
-      <td style="padding: 2.8px 6px; font-size: 7.5pt; color: #333; line-height: 1.35;">${ref}</td>
+      <td style="padding: 2.8px 6px; font-size: 8.5pt; vertical-align: top;">
+        ${formatResultCell(val, info.min, info.max, info.unit)}
+      </td>
+      <td style="padding: 2.8px 6px; font-size: 7.5pt; color: #333; line-height: 1.35;">${info.ref}</td>
     </tr>
   `;
 
   const secHeader = (title) => `
     <tr style="background: #f8fafc; border-top: 1px solid #000; border-bottom: 1px solid #000;">
-      <td colspan="3" style="padding: 3.5px 6px; font-size: 8.5pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${title}</td>
+      <td colspan="3" style="padding: 3px 6px; font-size: 8pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${title}</td>
     </tr>
   `;
 
@@ -307,38 +476,36 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
       <table style="width: 100%; border-collapse: collapse;">
         <thead>
           <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; font-size: 8.5pt; background: #fff;">
-            <th style="padding: 4px 6px; text-align: left; width: 40%; font-weight: 700;">Parameter</th>
-            <th style="padding: 4px 6px; text-align: left; width: 28%; font-weight: 700;">Result</th>
+            <th style="padding: 4px 6px; text-align: left; width: 38%; font-weight: 700;">Parameter</th>
+            <th style="padding: 4px 6px; text-align: left; width: 30%; font-weight: 700;">Observed Result</th>
             <th style="padding: 4px 6px; text-align: left; width: 32%; font-weight: 700;">Reference Value</th>
           </tr>
         </thead>
         <tbody>
-          ${secHeader("Red Blood Cells")}
-          ${row("Haemoglobin", hb, "g/dl", "Adult: Men: 15.0±2.0, Women: 13.5±1.5<br>Child: 11.5 - 15.5")}
-          ${row("Total RBC", rawRbc, "million/Cmm.", "Men: 5.0±0.5, Women: 4.3±0.5")}
-          ${row("ESR", esr, "mm (Auto Analyzer)", "Men: 0-10, Women: 0-20")}
-          ${row("PCV/HCT", hct, "l/l", "Men: 0.45 ± 0.05, Women: 0.41 ± 0.05")}
-          ${row("MCV", mcv, "fl", "92±9 (78 - 98)")}
-          ${row("MCH", mch, "pg", "29.5 ±2.5 (27 - 32)")}
-          ${row("MCHC", mchc, "g/dl", "33.0±1.5 (31 - 36)")}
-          ${row("RDW-CV", rdwcv, "%", "12.8±1.2 (11.5 - 15.0)")}
-          ${row("NRBC", nrbc, "%", "0.0")}
+          ${secHeader("Red Blood Cells & Indices")}
+          ${row("Hemoglobin (Hb)", hb, hbInfo)}
+          ${row("Total Red Blood Cell Count (RBC)", rbc, rbcInfo)}
+          ${row("Packed Cell Volume (PCV)", pcv, pcvInfo)}
+          ${row("ESR (Westergren Method)", esr, esrInfo)}
+          ${row("Mean Corpuscular Volume (MCV)", mcv, mcvInfo)}
+          ${row("Mean Corpuscular Hemoglobin (MCH)", mch, mchInfo)}
+          ${row("Mean Corpuscular Hb Conc. (MCHC)", mchc, mchcInfo)}
+          ${row("RDW-CV", rdwcv, rdwcvInfo)}
+          ${rdwsd !== "—" ? row("RDW-SD", rdwsd, rdwsdInfo) : ""}
 
-          ${secHeader("White Blood Cells")}
-          ${row("Total WBC", wbcDisplay, "/Cmm.", "Adult: 4,000 - 11,000<br>Child: 5,000 - 15,000")}
-          ${row("Circulating Eosinophils", aec, "/Cmm.", "50 - 500")}
+          ${secHeader("White Blood Cells & Differential")}
+          ${row("Total Leucocyte Count (WBC)", wbcDisplay, wbcInfo)}
+          ${row("Neutrophils", neut, neutInfo)}
+          ${row("Lymphocytes", lymph, lymphInfo)}
+          ${row("Monocytes", mono, monoInfo)}
+          ${row("Eosinophils", eos, eosInfo)}
+          ${row("Basophils", baso, basoInfo)}
+          ${row("Circulating Eosinophils (AEC)", aec, aecInfo)}
 
-          ${secHeader("Differential Count")}
-          ${row("Neutrophils", neut, "%", "Adult: 40 - 75, Child: 20 - 50")}
-          ${row("Lymphocytes", lymph, "%", "Adult: 20 - 40, Child: 40 - 75")}
-          ${row("Monocytes", mono, "%", "2 - 10")}
-          ${row("Eosinophils", eos, "%", "2 - 6")}
-          ${row("Basophils", baso, "%", "0 - 1")}
-          ${row("Others", others, "%", "00")}
-
-          ${secHeader("Platelet Count:")}
-          ${row("Total Platelet Count", pltDisplay, "/Cmm", "1,50,000 - 4,50,000")}
-          ${row("MPV", mpv, "fl", "8.0 - 9.5 (7.0 - 11.5)")}
+          ${secHeader("Platelet Count & Indices")}
+          ${row("Total Platelet Count", pltDisplay, pltInfo)}
+          ${row("Mean Platelet Volume (MPV)", mpv, mpvInfo)}
+          ${pdw !== "—" ? row("Platelet Distribution Width (PDW)", pdw, pdwInfo) : ""}
         </tbody>
       </table>
     </div>
@@ -346,72 +513,91 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
 }
 
 // =========================================================================
-// 3. URINE R/M/E CLINICAL REPORT FORMATTER
+// 2. URINE R/M/E CLINICAL REPORT (CATALOGUE-SYNCED)
 // =========================================================================
 export function renderCustomUrineRmeReport(tests = [], results = {}) {
-  const findVal = (keywords, fallback = "Nil") => {
-    const keys = Array.isArray(keywords) ? keywords : [keywords];
-    for (const test of tests) {
-      const params = test.test_parameters || test.parameters || [];
-      for (const p of params) {
-        const pName = (p.name || "").toLowerCase();
-        if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
-          const res = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
-          if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
-        }
-      }
-    }
-    for (const rk of Object.keys(results || {})) {
-      const rkLow = rk.toLowerCase();
-      if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
-        const res = results[rk]?.value ?? results[rk];
-        if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
-      }
-    }
-    return fallback;
-  };
+  const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
+  const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
 
-  const color = findVal(["Color"], "Straw");
-  const clarity = findVal(["Appearance", "Clarity"], "Clear");
-  const spGravity = findVal(["Specific Gravity", "Sp. Gravity"], "1.015");
-  const reaction = findVal(["Reaction", "pH"], "Acidic (6.0)");
-  const sediment = findVal(["Sediment"], "Nil");
+  const color = getVal(["Color"]);
+  const colorInfo = getInfo(["Color"], "", "Straw / Pale Yellow");
 
-  const albumin = findVal(["Albumin", "Protein"], "Nil");
-  const sugar = findVal(["Sugar", "Glucose"], "Nil");
-  const ketones = findVal(["Ketone", "Ketones"], "Negative");
-  const bilirubin = findVal(["Bilirubin"], "Negative");
-  const urobilinogen = findVal(["Urobilinogen"], "Normal");
-  const nitrite = findVal(["Nitrite"], "Negative");
-  const bileSalt = findVal(["Bile Salt"], "Negative");
+  const clarity = getVal(["Appearance / Clarity", "Appearance", "Clarity"]);
+  const clarityInfo = getInfo(["Appearance / Clarity", "Appearance", "Clarity"], "", "Clear");
 
-  const pusCells = findVal(["Pus Cells", "Pus", "WBC"], "0 - 2 /HPF");
-  const epithelial = findVal(["Epithelial Cells", "Epithelial"], "1 - 3 /HPF");
-  const rbc = findVal(["Red Blood Cells", "RBC"], "Nil");
-  const casts = findVal(["Casts"], "Nil");
-  const crystals = findVal(["Crystals"], "Nil");
-  const calciumOx = findVal(["Calcium Oxalate"], "Nil");
-  const amorphous = findVal(["Amorphous"], "Nil");
-  const bacteria = findVal(["Bacteria"], "Nil");
+  const spGravity = getVal(["Specific Gravity", "Sp. Gravity"]);
+  const spGravityInfo = getInfo(["Specific Gravity", "Sp. Gravity"], "", "1.005 – 1.030");
 
-  const rowStyle = "padding: 2.8px 6px; font-size: 8.5pt; border-bottom: 1px solid #f1f5f9;";
-  const valStyle = "padding: 2.8px 6px; font-size: 8.5pt; font-weight: 700; color: #000; border-bottom: 1px solid #f1f5f9;";
-  const refStyle = "padding: 2.8px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+  const reaction = getVal(["Reaction / pH", "Reaction", "pH"]);
+  const reactionInfo = getInfo(["Reaction / pH", "Reaction", "pH"], "", "Acidic (5.5 – 7.0)");
+
+  const sediment = getVal(["Sediment"]);
+  const sedimentInfo = getInfo(["Sediment"], "", "Nil");
+
+  const albumin = getVal(["Albumin / Protein", "Albumin", "Protein"]);
+  const albuminInfo = getInfo(["Albumin / Protein", "Albumin", "Protein"], "", "Nil");
+
+  const sugar = getVal(["Sugar / Glucose", "Sugar", "Glucose"]);
+  const sugarInfo = getInfo(["Sugar / Glucose", "Sugar", "Glucose"], "", "Nil");
+
+  const ketones = getVal(["Ketone Bodies", "Ketone", "Ketones"]);
+  const ketonesInfo = getInfo(["Ketone Bodies", "Ketone", "Ketones"], "", "Negative / Nil");
+
+  const bilirubin = getVal(["Bilirubin"]);
+  const bilirubinInfo = getInfo(["Bilirubin"], "", "Negative");
+
+  const urobilinogen = getVal(["Urobilinogen"]);
+  const urobilinogenInfo = getInfo(["Urobilinogen"], "", "Normal (< 1 mg/dL)");
+
+  const nitrite = getVal(["Nitrite"]);
+  const nitriteInfo = getInfo(["Nitrite"], "", "Negative");
+
+  const pusCells = getVal(["Pus Cells (WBC)", "Pus Cells", "Pus"]);
+  const pusCellsInfo = getInfo(["Pus Cells (WBC)", "Pus Cells"], "/HPF", "0 – 4 /HPF");
+
+  const epithelial = getVal(["Epithelial Cells", "Epithelial"]);
+  const epithelialInfo = getInfo(["Epithelial Cells", "Epithelial"], "/HPF", "1 – 5 /HPF");
+
+  const rbc = getVal(["Red Blood Cells (RBC)", "Red Blood Cells", "RBC"]);
+  const rbcInfo = getInfo(["Red Blood Cells (RBC)", "Red Blood Cells"], "/HPF", "Nil (Occasional)");
+
+  const casts = getVal(["Casts"]);
+  const castsInfo = getInfo(["Casts"], "/LPF", "Nil");
+
+  const crystals = getVal(["Crystals"]);
+  const crystalsInfo = getInfo(["Crystals"], "/HPF", "Nil");
+
+  const calciumOx = getVal(["Calcium Oxalate"]);
+  const calciumOxInfo = getInfo(["Calcium Oxalate"], "", "Nil");
+
+  const bacteria = getVal(["Bacteria"]);
+  const bacteriaInfo = getInfo(["Bacteria"], "", "Nil / Not Found");
+
+  const rowStyle = "padding: 2.5px 5px; font-size: 8pt; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+
+  const tableRow = (label, val, info, pType = "text") => `
+    <tr>
+      <td style="${rowStyle}; font-weight: 500;">${label}</td>
+      <td style="${rowStyle};">${formatResultCell(val, info.min, info.max, "", pType)}</td>
+      <td style="${refStyle}">${info.ref}</td>
+    </tr>
+  `;
 
   return `
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
-      <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; margin-bottom: 8px;">
+      <div style="display: grid; grid-template-columns: 1fr 1.15fr; gap: 8px; margin-bottom: 6px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
           <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             I. Physical Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
             <tbody>
-              <tr><td style="${rowStyle}">Color</td><td style="${valStyle}">${color}</td><td style="${refStyle}">Straw / Pale Yellow</td></tr>
-              <tr><td style="${rowStyle}">Appearance</td><td style="${valStyle}">${clarity}</td><td style="${refStyle}">Clear</td></tr>
-              <tr><td style="${rowStyle}">Sp. Gravity</td><td style="${valStyle}">${spGravity}</td><td style="${refStyle}">1.005 – 1.030</td></tr>
-              <tr><td style="${rowStyle}">Reaction / pH</td><td style="${valStyle}">${reaction}</td><td style="${refStyle}">Acidic (5.5 – 7.0)</td></tr>
-              <tr><td style="${rowStyle}">Sediment</td><td style="${valStyle}">${sediment}</td><td style="${refStyle}">Nil</td></tr>
+              ${tableRow("Color", color, colorInfo)}
+              ${tableRow("Appearance", clarity, clarityInfo)}
+              ${tableRow("Sp. Gravity", spGravity, spGravityInfo, "numeric")}
+              ${tableRow("Reaction / pH", reaction, reactionInfo)}
+              ${tableRow("Sediment", sediment, sedimentInfo)}
             </tbody>
           </table>
         </div>
@@ -422,32 +608,65 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
           </div>
           <table style="width: 100%; border-collapse: collapse;">
             <tbody>
-              <tr><td style="${rowStyle}">Albumin / Protein</td><td style="${valStyle}">${albumin}</td><td style="${refStyle}">Nil</td></tr>
-              <tr><td style="${rowStyle}">Sugar / Glucose</td><td style="${valStyle}">${sugar}</td><td style="${refStyle}">Nil</td></tr>
-              <tr><td style="${rowStyle}">Ketone Bodies</td><td style="${valStyle}">${ketones}</td><td style="${refStyle}">Negative</td></tr>
-              <tr><td style="${rowStyle}">Bilirubin</td><td style="${valStyle}">${bilirubin}</td><td style="${refStyle}">Negative</td></tr>
-              <tr><td style="${rowStyle}">Urobilinogen</td><td style="${valStyle}">${urobilinogen}</td><td style="${refStyle}">Normal</td></tr>
-              <tr><td style="${rowStyle}">Nitrite</td><td style="${valStyle}">${nitrite}</td><td style="${refStyle}">Negative</td></tr>
-              <tr><td style="${rowStyle}">Bile Salt & Pigment</td><td style="${valStyle}">${bileSalt}</td><td style="${refStyle}">Negative</td></tr>
+              ${tableRow("Albumin / Protein", albumin, albuminInfo, "qualitative")}
+              ${tableRow("Sugar / Glucose", sugar, sugarInfo, "qualitative")}
+              ${tableRow("Ketone Bodies", ketones, ketonesInfo, "qualitative")}
+              ${tableRow("Bilirubin", bilirubin, bilirubinInfo, "qualitative")}
+              ${tableRow("Urobilinogen", urobilinogen, urobilinogenInfo)}
+              ${tableRow("Nitrite", nitrite, nitriteInfo, "qualitative")}
             </tbody>
           </table>
         </div>
       </div>
 
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 8px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           III. Microscopic Examination (Centrifuged Deposit)
         </div>
         <table style="width: 100%; border-collapse: collapse;">
           <tbody>
-            <tr><td style="${rowStyle}; font-weight: 700; width: 35%;">Pus Cells (WBC)</td><td style="${valStyle}; width: 25%;">${pusCells}</td><td style="${rowStyle}; width: 15%;">/HPF</td><td style="${refStyle}; width: 25%;">0 – 4 /HPF</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Epithelial Cells</td><td style="${valStyle}">${epithelial}</td><td style="${rowStyle}">/HPF</td><td style="${refStyle}">1 – 5 /HPF</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Red Blood Cells (RBC)</td><td style="${valStyle}">${rbc}</td><td style="${rowStyle}">/HPF</td><td style="${refStyle}">Nil (Occasional)</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Casts</td><td style="${valStyle}">${casts}</td><td style="${rowStyle}">/LPF</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Crystals</td><td style="${valStyle}">${crystals}</td><td style="${rowStyle}">/HPF</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Calcium Oxalate</td><td style="${valStyle}">${calciumOx}</td><td style="${rowStyle}">—</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Amorphous Deposit</td><td style="${valStyle}">${amorphous}</td><td style="${rowStyle}">—</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Bacteria</td><td style="${valStyle}">${bacteria}</td><td style="${rowStyle}">—</td><td style="${refStyle}">Nil / Not Found</td></tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700; width: 35%;">Pus Cells (WBC)</td>
+              <td style="${rowStyle}; width: 25%;">${formatResultCell(pusCells, pusCellsInfo.min, pusCellsInfo.max, "", "qualitative")}</td>
+              <td style="${rowStyle}; width: 12%;">${pusCellsInfo.unit || "/HPF"}</td>
+              <td style="${refStyle}; width: 28%;">${pusCellsInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Epithelial Cells</td>
+              <td style="${rowStyle};">${formatResultCell(epithelial, epithelialInfo.min, epithelialInfo.max, "", "qualitative")}</td>
+              <td style="${rowStyle};">${epithelialInfo.unit || "/HPF"}</td>
+              <td style="${refStyle}">${epithelialInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Red Blood Cells (RBC)</td>
+              <td style="${rowStyle};">${formatResultCell(rbc, rbcInfo.min, rbcInfo.max, "", "qualitative")}</td>
+              <td style="${rowStyle};">${rbcInfo.unit || "/HPF"}</td>
+              <td style="${refStyle}">${rbcInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Casts</td>
+              <td style="${rowStyle};">${formatResultCell(casts, null, null, "", "qualitative")}</td>
+              <td style="${rowStyle};">${castsInfo.unit || "/LPF"}</td>
+              <td style="${refStyle}">${castsInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Crystals</td>
+              <td style="${rowStyle};">${formatResultCell(crystals, null, null, "", "qualitative")}</td>
+              <td style="${rowStyle};">${crystalsInfo.unit || "/HPF"}</td>
+              <td style="${refStyle}">${crystalsInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Calcium Oxalate</td>
+              <td style="${rowStyle};">${formatResultCell(calciumOx, null, null, "", "qualitative")}</td>
+              <td style="${rowStyle};">—</td>
+              <td style="${refStyle}">${calciumOxInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Bacteria</td>
+              <td style="${rowStyle};">${formatResultCell(bacteria, null, null, "", "qualitative")}</td>
+              <td style="${rowStyle};">—</td>
+              <td style="${refStyle}">${bacteriaInfo.ref}</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -456,63 +675,66 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
 }
 
 // =========================================================================
-// 4. STOOL R/E CLINICAL REPORT FORMATTER
+// 3. STOOL R/E CLINICAL REPORT (CATALOGUE-SYNCED)
 // =========================================================================
 export function renderCustomStoolRmeReport(tests = [], results = {}) {
-  const findVal = (keywords, fallback = "Nil") => {
-    const keys = Array.isArray(keywords) ? keywords : [keywords];
-    for (const test of tests) {
-      const params = test.test_parameters || test.parameters || [];
-      for (const p of params) {
-        const pName = (p.name || "").toLowerCase();
-        if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
-          const res = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
-          if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
-        }
-      }
-    }
-    for (const rk of Object.keys(results || {})) {
-      const rkLow = rk.toLowerCase();
-      if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
-        const res = results[rk]?.value ?? results[rk];
-        if (res !== undefined && res !== null && String(res).trim() !== "" && String(res).toLowerCase() !== "undefined") return String(res);
-      }
-    }
-    return fallback;
-  };
+  const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
+  const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
 
-  const color = findVal(["Color"], "Yellowish Brown");
-  const consistency = findVal(["Consistency"], "Soft / Formed");
-  const mucus = findVal(["Mucus"], "Nil");
-  const blood = findVal(["Blood"], "Nil");
+  const color = getVal(["Color"]);
+  const colorInfo = getInfo(["Color"], "", "Yellowish Brown");
 
-  const reaction = findVal(["Reaction", "pH"], "Neutral");
-  const obt = findVal(["Occult Blood", "OBT"], "Negative");
-  const redSub = findVal(["Reducing Substance"], "Negative / Nil");
+  const consistency = getVal(["Consistency"]);
+  const consistencyInfo = getInfo(["Consistency"], "", "Soft / Formed");
 
-  const pusCells = findVal(["Pus Cells"], "0 - 2 /HPF");
-  const rbc = findVal(["Red Blood Cells", "RBC"], "Nil");
-  const protozoa = findVal(["Protozoa", "Cysts"], "Not Found / Nil");
-  const ova = findVal(["Ova", "Helminths"], "Not Found / Nil");
-  const yeast = findVal(["Yeast"], "Nil");
+  const mucus = getVal(["Mucus"]);
+  const mucusInfo = getInfo(["Mucus"], "", "Nil");
 
-  const rowStyle = "padding: 3px 6px; font-size: 8.5pt; border-bottom: 1px solid #f1f5f9;";
-  const valStyle = "padding: 3px 6px; font-size: 8.5pt; font-weight: 700; color: #000; border-bottom: 1px solid #f1f5f9;";
-  const refStyle = "padding: 3px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+  const blood = getVal(["Blood"]);
+  const bloodInfo = getInfo(["Blood"], "", "Nil");
+
+  const reaction = getVal(["Reaction / pH", "Reaction", "pH"]);
+  const reactionInfo = getInfo(["Reaction / pH", "Reaction", "pH"], "", "Neutral / Alkaline");
+
+  const obt = getVal(["Occult Blood Test (OBT)", "Occult Blood", "OBT"]);
+  const obtInfo = getInfo(["Occult Blood Test (OBT)", "Occult Blood", "OBT"], "", "Negative");
+
+  const pusCells = getVal(["Pus Cells"]);
+  const pusCellsInfo = getInfo(["Pus Cells"], "/HPF", "0 - 2 /HPF");
+
+  const rbc = getVal(["Red Blood Cells", "RBC"]);
+  const rbcInfo = getInfo(["Red Blood Cells", "RBC"], "/HPF", "Nil");
+
+  const protozoa = getVal(["Protozoa / Cysts", "Protozoa", "Cysts"]);
+  const protozoaInfo = getInfo(["Protozoa / Cysts", "Protozoa", "Cysts"], "", "Not Found / Nil");
+
+  const ova = getVal(["Ova of Helminths", "Ova", "Helminths"]);
+  const ovaInfo = getInfo(["Ova of Helminths", "Ova", "Helminths"], "", "Not Found / Nil");
+
+  const rowStyle = "padding: 2.5px 5px; font-size: 8pt; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 2.5px 5px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+
+  const tableRow = (label, val, info, pType = "text") => `
+    <tr>
+      <td style="${rowStyle}; font-weight: 500;">${label}</td>
+      <td style="${rowStyle};">${formatResultCell(val, info.min, info.max, "", pType)}</td>
+      <td style="${refStyle}">${info.ref}</td>
+    </tr>
+  `;
 
   return `
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
           <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             I. Physical Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
             <tbody>
-              <tr><td style="${rowStyle}">Color</td><td style="${valStyle}">${color}</td><td style="${refStyle}">Yellowish Brown</td></tr>
-              <tr><td style="${rowStyle}">Consistency</td><td style="${valStyle}">${consistency}</td><td style="${refStyle}">Soft / Formed</td></tr>
-              <tr><td style="${rowStyle}">Mucus</td><td style="${valStyle}">${mucus}</td><td style="${refStyle}">Nil</td></tr>
-              <tr><td style="${rowStyle}">Blood</td><td style="${valStyle}">${blood}</td><td style="${refStyle}">Nil</td></tr>
+              ${tableRow("Color", color, colorInfo)}
+              ${tableRow("Consistency", consistency, consistencyInfo)}
+              ${tableRow("Mucus", mucus, mucusInfo, "qualitative")}
+              ${tableRow("Blood", blood, bloodInfo, "qualitative")}
             </tbody>
           </table>
         </div>
@@ -523,25 +745,39 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
           </div>
           <table style="width: 100%; border-collapse: collapse;">
             <tbody>
-              <tr><td style="${rowStyle}">Reaction / pH</td><td style="${valStyle}">${reaction}</td><td style="${refStyle}">Neutral / Acidic</td></tr>
-              <tr><td style="${rowStyle}">Occult Blood Test</td><td style="${valStyle}">${obt}</td><td style="${refStyle}">Negative</td></tr>
-              <tr><td style="${rowStyle}">Reducing Substance</td><td style="${valStyle}">${redSub}</td><td style="${refStyle}">Negative</td></tr>
+              ${tableRow("Reaction / pH", reaction, reactionInfo)}
+              ${tableRow("Occult Blood (OBT)", obt, obtInfo, "qualitative")}
             </tbody>
           </table>
         </div>
       </div>
 
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 8px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           III. Microscopic Examination
         </div>
         <table style="width: 100%; border-collapse: collapse;">
           <tbody>
-            <tr><td style="${rowStyle}; font-weight: 700; width: 40%;">Pus Cells</td><td style="${valStyle}; width: 30%;">${pusCells}</td><td style="${refStyle}; width: 30%;">0 - 2 /HPF</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Red Blood Cells</td><td style="${valStyle}">${rbc}</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Protozoa / Cysts (E. histolytica / Giardia)</td><td style="${valStyle}">${protozoa}</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Ova of Helminths (Ascaris / Hookworm)</td><td style="${valStyle}">${ova}</td><td style="${refStyle}">Nil</td></tr>
-            <tr><td style="${rowStyle}; font-weight: 700;">Yeast Cells / Fungi</td><td style="${valStyle}">${yeast}</td><td style="${refStyle}">Nil</td></tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700; width: 40%;">Pus Cells</td>
+              <td style="${rowStyle}; width: 30%;">${formatResultCell(pusCells, pusCellsInfo.min, pusCellsInfo.max, "", "qualitative")}</td>
+              <td style="${refStyle}; width: 30%;">${pusCellsInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Red Blood Cells</td>
+              <td style="${rowStyle};">${formatResultCell(rbc, rbcInfo.min, rbcInfo.max, "", "qualitative")}</td>
+              <td style="${refStyle}">${rbcInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Protozoa / Cysts</td>
+              <td style="${rowStyle};">${formatResultCell(protozoa, null, null, "", "qualitative")}</td>
+              <td style="${refStyle}">${protozoaInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 700;">Ova of Helminths</td>
+              <td style="${rowStyle};">${formatResultCell(ova, null, null, "", "qualitative")}</td>
+              <td style="${refStyle}">${ovaInfo.ref}</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -550,70 +786,291 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
 }
 
 // =========================================================================
-// 5. RADIOLOGY & IMAGING REPORT FORMATTER
+// 4. WIDAL TEST (SEROLOGY MATRIX)
 // =========================================================================
-function renderRadiologyInvestigationSheet(test, results, deptName) {
-  const rawParams = test.test_parameters || test.parameters || [];
-  const paramId = rawParams[0]?.id || test.id;
-  const rawText = results?.[paramId]?.value || results?.[test.id]?.value || "Normal study. No significant acute abnormality detected.";
-  let indication = "";
-  let findings = rawText;
-  let impression = "";
+export function renderCustomWidalReport(tests = [], results = {}) {
+  const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
+  const getInfo = (keywords, defRef) => getParamDetails(tests, keywords, "Titer", defRef);
 
-  if (rawText.includes("CLINICAL INDICATION:") || rawText.includes("INDICATION:")) {
-    const indMatch = rawText.match(/(?:CLINICAL INDICATION|INDICATION):\s*([\s\S]*?)(?=(?:FINDINGS|OBSERVATIONS|IMPRESSION):|$)/i);
-    if (indMatch) indication = indMatch[1].trim();
-  }
-  if (rawText.includes("IMPRESSION:") || rawText.includes("CONCLUSION:")) {
-    const impMatch = rawText.match(/(?:IMPRESSION|CONCLUSION):\s*([\s\S]*?)$/i);
-    if (impMatch) impression = impMatch[1].trim();
-  }
-  if (rawText.includes("FINDINGS:") || rawText.includes("OBSERVATIONS:")) {
-    const findMatch = rawText.match(/(?:FINDINGS|OBSERVATIONS):\s*([\s\S]*?)(?=(?:IMPRESSION|CONCLUSION):|$)/i);
-    if (findMatch) findings = findMatch[1].trim();
-  } else if (indication || impression) {
-    findings = rawText.replace(/(?:CLINICAL INDICATION|INDICATION):[\s\S]*?(?=(?:FINDINGS|OBSERVATIONS):|$)/i, "")
-                      .replace(/(?:IMPRESSION|CONCLUSION):[\s\S]*$/i, "").trim();
-  }
+  const to = getVal(["S. typhi 'O' (TO Titer)", "TO Titer", "TO"]);
+  const th = getVal(["S. typhi 'H' (TH Titer)", "TH Titer", "TH"]);
+  const ah = getVal(["S. paratyphi 'AH' (AH Titer)", "AH Titer", "AH"]);
+  const bh = getVal(["S. paratyphi 'BH' (BH Titer)", "BH Titer", "BH"]);
+  const imp = getVal(["Widal Test Impression", "Impression"]);
+
+  const toInfo = getInfo(["S. typhi 'O' (TO Titer)", "TO"], "< 1:80 (Negative)");
+  const thInfo = getInfo(["S. typhi 'H' (TH Titer)", "TH"], "< 1:80 (Negative)");
+  const ahInfo = getInfo(["S. paratyphi 'AH' (AH Titer)", "AH"], "< 1:80 (Negative)");
+  const bhInfo = getInfo(["S. paratyphi 'BH' (BH Titer)", "BH"], "< 1:80 (Negative)");
+
+  const dilutions = ["1:20", "1:40", "1:80", "1:160", "1:320"];
+
+  const buildTiterCells = (observedTiter) => {
+    if (!observedTiter || observedTiter === "—") {
+      return dilutions.map(() => `<td style="padding: 4px; text-align: center; border: 1px solid #cbd5e1; font-size: 8pt; color: #94a3b8;">—</td>`).join("");
+    }
+    const cleanObs = observedTiter.replace(/[^0-9]/g, "");
+    const obsNum = parseInt(cleanObs, 10) || 0;
+
+    return dilutions.map((d) => {
+      const dNum = parseInt(d.replace(/[^0-9]/g, ""), 10);
+      const isPositive = obsNum >= dNum && obsNum > 0;
+      return `
+        <td style="padding: 4px; text-align: center; border: 1px solid #000; font-size: 8pt; font-weight: ${isPositive ? '900' : '400'}; color: ${isPositive ? '#000' : '#64748b'};">
+          ${isPositive ? '+' : '-'}
+        </td>
+      `;
+    }).join("");
+  };
+
+  const row = (antigenName, observedVal, info) => `
+    <tr>
+      <td style="padding: 4px 6px; font-weight: 700; border: 1px solid #000; font-size: 8.5pt;">${antigenName}</td>
+      ${buildTiterCells(observedVal)}
+      <td style="padding: 4px 6px; text-align: center; font-weight: 900; border: 1px solid #000; font-size: 8.5pt; font-family: 'Inter', sans-serif;">
+        ${observedVal}
+      </td>
+      <td style="padding: 4px 6px; border: 1px solid #000; font-size: 7.5pt; color: #333;">
+        ${info.ref}
+      </td>
+    </tr>
+  `;
 
   return `
-    <div style="margin: 8px 8mm; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
-      <div style="border-bottom: 1.5px solid #000000; padding: 6px 0; font-weight: 700; font-size: 10pt; text-transform: uppercase; color: #000000; display: flex; justify-content: space-between; align-items: center;">
-        <span>Investigation: ${test.name.toUpperCase()} ${test.code ? `(${test.code})` : ""}</span>
-        <span style="font-size: 8.5pt; color: #000000; font-weight: 600;">${deptName || "Imaging"}</span>
-      </div>
-      <div style="padding: 10px 0 4px 0; font-size: 9.5pt; line-height: 1.65; color: #000000;">
-        ${indication ? `
-          <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #cbd5e1;">
-            <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Clinical Indication:</b>
-            <span style="color: #000000;">${indication}</span>
-          </div>
-        ` : `
-          <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed #cbd5e1;">
-            <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Technique / Protocol:</b>
-            <span style="color: #000000;">${test.sample_type || "Standard Clinical Protocol"}</span>
-          </div>
-        `}
-        <div style="margin-bottom: 12px;">
-          <b style="color: #000000; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Observations & Findings:</b>
-          <div style="white-space: pre-wrap; font-size: 9.5pt; line-height: 1.65; color: #000000; font-weight: 400;">${findings}</div>
-        </div>
-        ${impression ? `
-          <div style="margin-top: 14px; padding: 6px 0 0 0; border-top: 1px solid #cbd5e1;">
-            <b style="color: #000000; text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Radiological Impression:</b>
-            <div style="font-size: 10pt; color: #000000; line-height: 1.5; font-weight: 700;">${impression}</div>
-          </div>
-        ` : ""}
+    <div style="margin: 6px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
+      <table style="width: 100%; border-collapse: collapse; border: 1.5px solid #000;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 1.5px solid #000; font-size: 8pt;">
+            <th style="padding: 4px 6px; text-align: left; border: 1px solid #000; width: 34%;">Antigen Suspension</th>
+            <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:20</th>
+            <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:40</th>
+            <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:80</th>
+            <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:160</th>
+            <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:320</th>
+            <th style="padding: 4px 6px; text-align: center; border: 1px solid #000; width: 14%;">End Titer</th>
+            <th style="padding: 4px 6px; text-align: left; border: 1px solid #000; width: 17%;">Diagnostic Cut-off</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${row("Salmonella typhi 'O' (TO)", to, toInfo)}
+          ${row("Salmonella typhi 'H' (TH)", th, thInfo)}
+          ${row("Salmonella paratyphi 'AH'", ah, ahInfo)}
+          ${row("Salmonella paratyphi 'BH'", bh, bhInfo)}
+        </tbody>
+      </table>
+
+      <div style="margin-top: 8px; padding: 6px 8px; border: 1px solid #000; border-radius: 4px; font-size: 8.5pt;">
+        <span style="font-weight: 800; text-transform: uppercase;">Serological Interpretation:</span>
+        <span style="margin-left: 6px; font-weight: 600;">
+          ${imp !== "—" ? imp : "A single Widal test is suggestive only. Diagnostic titer is ≥ 1:160 for TO and TH."}
+        </span>
       </div>
     </div>
   `;
 }
 
 // =========================================================================
-// 6. MASTER UNIFIED RESULTS TABLE (INTELLIGENT CLINICAL ROUTER)
+// 5. SEMEN ANALYSIS REPORT
+// =========================================================================
+export function renderCustomSemenReport(tests = [], results = {}) {
+  const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
+  const getInfo = (keywords, defUnit, defRef) => getParamDetails(tests, keywords, defUnit, defRef);
+
+  const abstinence = getVal(["Period of Abstinence", "Abstinence"]);
+  const abstinenceInfo = getInfo(["Period of Abstinence", "Abstinence"], "Days", "3 – 5 Days");
+
+  const volume = getVal(["Volume"]);
+  const volumeInfo = getInfo(["Volume"], "mL", "≥ 1.5 mL");
+
+  const color = getVal(["Color & Appearance", "Color"]);
+  const colorInfo = getInfo(["Color & Appearance", "Color"], "", "Greyish White / Opalescent");
+
+  const liq = getVal(["Liquefaction Time", "Liquefaction"]);
+  const liqInfo = getInfo(["Liquefaction Time", "Liquefaction"], "Minutes", "< 30 Minutes");
+
+  const visc = getVal(["Viscosity"]);
+  const viscInfo = getInfo(["Viscosity"], "", "Normal");
+
+  const ph = getVal(["Reaction / pH", "pH"]);
+  const phInfo = getInfo(["Reaction / pH", "pH"], "", "7.2 – 8.0 (Alkaline)");
+
+  const count = getVal(["Total Sperm Count", "Sperm Count"]);
+  const countInfo = getInfo(["Total Sperm Count", "Sperm Count"], "million/mL", "≥ 15.0 million/mL");
+
+  const motA = getVal(["Rapid Progressive Motility (Grade A)", "Grade A"]);
+  const motAInfo = getInfo(["Rapid Progressive Motility (Grade A)", "Grade A"], "%", "≥ 25%");
+
+  const motB = getVal(["Slow Progressive Motility (Grade B)", "Grade B"]);
+  const motBInfo = getInfo(["Slow Progressive Motility (Grade B)", "Grade B"], "%", "Grade A + B ≥ 32%");
+
+  const morph = getVal(["Normal Sperm Morphology", "Morphology"]);
+  const morphInfo = getInfo(["Normal Sperm Morphology", "Morphology"], "%", "≥ 4% (Strict Criteria)");
+
+  const pus = getVal(["Pus Cells (WBC)", "Pus Cells"]);
+  const pusInfo = getInfo(["Pus Cells (WBC)", "Pus Cells"], "/HPF", "< 1 million/mL (0 - 4 /HPF)");
+
+  const rowStyle = "padding: 3px 6px; font-size: 8.5pt; border-bottom: 1px solid #f1f5f9;";
+  const refStyle = "padding: 3px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9;";
+
+  return `
+    <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
+      <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden; margin-bottom: 6px;">
+        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          I. Physical Examination
+        </div>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tbody>
+            <tr><td style="${rowStyle}">Period of Abstinence</td><td style="${rowStyle}">${abstinence}</td><td style="${refStyle}">${abstinenceInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Volume</td><td style="${rowStyle}">${formatResultCell(volume, volumeInfo.min, volumeInfo.max, volumeInfo.unit)}</td><td style="${refStyle}">${volumeInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Color & Appearance</td><td style="${rowStyle}">${color}</td><td style="${refStyle}">${colorInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Liquefaction Time</td><td style="${rowStyle}">${liq}</td><td style="${refStyle}">${liqInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Viscosity</td><td style="${rowStyle}">${visc}</td><td style="${refStyle}">${viscInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Reaction / pH</td><td style="${rowStyle}">${formatResultCell(ph, phInfo.min, phInfo.max)}</td><td style="${refStyle}">${phInfo.ref}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
+        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          II. Microscopic Examination & Motility Profile (WHO Standards)
+        </div>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tbody>
+            <tr>
+              <td style="${rowStyle}; font-weight: 800;">Total Sperm Count</td>
+              <td style="${rowStyle}">${formatResultCell(count, countInfo.min, countInfo.max, countInfo.unit)}</td>
+              <td style="${refStyle}">${countInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}">Rapid Progressive Motility (Grade A)</td>
+              <td style="${rowStyle}">${formatResultCell(motA, motAInfo.min, motAInfo.max, motAInfo.unit)}</td>
+              <td style="${refStyle}">${motAInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}">Slow Progressive Motility (Grade B)</td>
+              <td style="${rowStyle}">${formatResultCell(motB, motBInfo.min, motBInfo.max, motBInfo.unit)}</td>
+              <td style="${refStyle}">${motBInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}; font-weight: 800;">Normal Sperm Morphology</td>
+              <td style="${rowStyle}">${formatResultCell(morph, morphInfo.min, morphInfo.max, morphInfo.unit)}</td>
+              <td style="${refStyle}">${morphInfo.ref}</td>
+            </tr>
+            <tr>
+              <td style="${rowStyle}">Pus Cells (WBC)</td>
+              <td style="${rowStyle}">${formatResultCell(pus, pusInfo.min, pusInfo.max, pusInfo.unit, "qualitative")}</td>
+              <td style="${refStyle}">${pusInfo.ref}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================================
+// 6. UNIFIED DESCRIPTIVE / NARRATIVE STUDY FORMATTER
+// =========================================================================
+export function renderDescriptiveStudySheet(test, results, deptName) {
+  const rawParams = test.test_parameters || test.parameters || [];
+  const param = rawParams[0] || { id: test.id, name: test.name };
+  const rawText = results?.[param.id]?.value ?? 
+                  results?.[test.id]?.value ?? 
+                  param.reference_text ?? 
+                  param.default_template ?? 
+                  "Normal study. No significant abnormality detected.";
+
+  let clinicalIndication = "";
+  let protocolTechnique = "";
+  let findingsBody = rawText;
+  let diagnosticImpression = "";
+
+  if (rawText.includes("CLINICAL INDICATION:") || rawText.includes("INDICATION:") || rawText.includes("CLINICAL HISTORY:")) {
+    const match = rawText.match(/(?:CLINICAL INDICATION|INDICATION|CLINICAL HISTORY):\s*([\s\S]*?)(?=(?:TECHNIQUE|PROTOCOL|SPECIMEN|GROSS EXAMINATION|FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|IMPRESSION|DIAGNOSIS):|$)/i);
+    if (match) clinicalIndication = match[1].trim();
+  }
+
+  if (rawText.includes("TECHNIQUE:") || rawText.includes("PROTOCOL:") || rawText.includes("SPECIMEN:") || rawText.includes("SPECIMEN / SITE:")) {
+    const match = rawText.match(/(?:TECHNIQUE|PROTOCOL|SPECIMEN|SPECIMEN \/ SITE|SITE):\s*([\s\S]*?)(?=(?:GROSS EXAMINATION|FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|IMPRESSION|DIAGNOSIS|CYTOLOGICAL OPINION):|$)/i);
+    if (match) protocolTechnique = match[1].trim();
+  }
+
+  if (rawText.includes("IMPRESSION:") || rawText.includes("DIAGNOSIS:") || rawText.includes("CYTOLOGICAL OPINION:") || rawText.includes("CONCLUSION:")) {
+    const match = rawText.match(/(?:IMPRESSION|DIAGNOSIS|CYTOLOGICAL OPINION|CONCLUSION):\s*([\s\S]*?)$/i);
+    if (match) diagnosticImpression = match[1].trim();
+  }
+
+  if (clinicalIndication || diagnosticImpression || protocolTechnique) {
+    findingsBody = rawText
+      .replace(/(?:CLINICAL INDICATION|INDICATION|CLINICAL HISTORY):[\s\S]*?(?=(?:TECHNIQUE|PROTOCOL|SPECIMEN|GROSS EXAMINATION|FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|IMPRESSION|DIAGNOSIS):|$)/i, "")
+      .replace(/(?:TECHNIQUE|PROTOCOL|SPECIMEN|SPECIMEN \/ SITE|SITE):[\s\S]*?(?=(?:GROSS EXAMINATION|FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|IMPRESSION|DIAGNOSIS|CYTOLOGICAL OPINION):|$)/i, "")
+      .replace(/(?:IMPRESSION|DIAGNOSIS|CYTOLOGICAL OPINION|CONCLUSION):[\s\S]*$/i, "")
+      .trim();
+
+    if (findingsBody.match(/^(?:FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|GROSS EXAMINATION):/i)) {
+      findingsBody = findingsBody.replace(/^(?:FINDINGS|OBSERVATIONS|MICROSCOPIC EXAMINATION|GROSS EXAMINATION):\s*/i, "");
+    }
+  }
+
+  return `
+    <div style="margin: 6px 8mm 2px 8mm; font-family: 'Lora', Georgia, serif; page-break-inside: avoid; color: #000;">
+      <div style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 5px 0; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline;">
+        <div>
+          <span style="font-size: 10.5pt; font-weight: 900; text-transform: uppercase; color: #000;">
+            ${test.name.toUpperCase()}
+          </span>
+          ${test.code ? `<span style="font-size: 8.5pt; font-family: 'Consolas', monospace; font-weight: 700; color: #334155; margin-left: 6px;">(${test.code})</span>` : ""}
+        </div>
+        <span style="font-size: 8pt; font-weight: 800; text-transform: uppercase; color: #334155;">
+          ${deptName || "Clinical Study"}
+        </span>
+      </div>
+
+      ${(clinicalIndication || protocolTechnique || test.sample_type) ? `
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 8.5pt; line-height: 1.45;">
+          ${clinicalIndication ? `
+            <div style="margin-bottom: 3px;">
+              <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Clinical Indication:</b>
+              <span style="margin-left: 4px; color: #000;">${clinicalIndication}</span>
+            </div>
+          ` : ""}
+          ${(protocolTechnique || test.sample_type) ? `
+            <div>
+              <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Specimen / Technique:</b>
+              <span style="margin-left: 4px; color: #000;">${protocolTechnique || test.sample_type}</span>
+            </div>
+          ` : ""}
+        </div>
+      ` : ""}
+
+      <div style="margin-bottom: 10px; padding: 2px 0;">
+        <b style="text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 4px; color: #000; border-bottom: 1px dashed #cbd5e1; padding-bottom: 2px;">
+          Findings & Observations:
+        </b>
+        <div style="white-space: pre-wrap; font-size: 9.5pt; line-height: 1.6; color: #000; font-weight: 400; text-align: justify;">
+          ${findingsBody || rawText}
+        </div>
+      </div>
+
+      ${diagnosticImpression ? `
+        <div style="margin-top: 10px; border: 1.5px solid #000; border-radius: 4px; padding: 6px 8px; background: #fafafa;">
+          <b style="text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px; color: #000;">
+            Diagnostic Impression / Conclusion:
+          </b>
+          <div style="font-size: 9.5pt; line-height: 1.5; color: #000; font-weight: 800;">
+            ${diagnosticImpression}
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+// =========================================================================
+// 7. MASTER UNIFIED RESULTS ROUTER
 // =========================================================================
 export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", deptName = "", patient = {}) {
-  let imagingSheets = "";
+  let descriptiveSheets = "";
 
   const isHematology = (deptId || "").includes("HEM") || 
                        (deptName || "").toLowerCase().includes("hematology") || 
@@ -633,31 +1090,48 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
                     return c.includes("STOOL") || n.includes("stool r/e") || n.includes("stool routine");
                   });
 
-  const nonImagingTests = [];
+  const isWidal = (tests || []).some(t => {
+    const c = (t.code || "").toUpperCase();
+    const n = (t.name || "").toLowerCase();
+    return c.includes("WIDAL") || n.includes("widal");
+  });
+
+  const isSemen = (tests || []).some(t => {
+    const c = (t.code || "").toUpperCase();
+    const n = (t.name || "").toLowerCase();
+    return c.includes("SEMEN") || n.includes("semen");
+  });
+
+  const nonDescriptiveTests = [];
   (tests || []).forEach(test => {
-    if (isImagingOrRadiologyInvestigation(test, deptId, deptName)) {
-      imagingSheets += renderRadiologyInvestigationSheet(test, results, deptName);
+    if (isDescriptiveInvestigation(test, deptId, deptName)) {
+      descriptiveSheets += renderDescriptiveStudySheet(test, results, deptName);
     } else {
-      nonImagingTests.push(test);
+      nonDescriptiveTests.push(test);
     }
   });
 
-  // Clinical Template Routers
-  if (isHematology && nonImagingTests.length > 0) {
-    return renderCustomCbcHematologyReport(nonImagingTests, results, patient) + imagingSheets;
+  if (isHematology && nonDescriptiveTests.length > 0) {
+    return renderCustomCbcHematologyReport(nonDescriptiveTests, results, patient) + descriptiveSheets;
   }
-  if (isUrine && nonImagingTests.length > 0) {
-    return renderCustomUrineRmeReport(nonImagingTests, results) + imagingSheets;
+  if (isUrine && nonDescriptiveTests.length > 0) {
+    return renderCustomUrineRmeReport(nonDescriptiveTests, results) + descriptiveSheets;
   }
-  if (isStool && nonImagingTests.length > 0) {
-    return renderCustomStoolRmeReport(nonImagingTests, results) + imagingSheets;
+  if (isStool && nonDescriptiveTests.length > 0) {
+    return renderCustomStoolRmeReport(nonDescriptiveTests, results) + descriptiveSheets;
+  }
+  if (isWidal && nonDescriptiveTests.length > 0) {
+    return renderCustomWidalReport(nonDescriptiveTests, results) + descriptiveSheets;
+  }
+  if (isSemen && nonDescriptiveTests.length > 0) {
+    return renderCustomSemenReport(nonDescriptiveTests, results) + descriptiveSheets;
   }
 
-  // General Biochemistry & Immunology: Individual tests first -> Profile panels at bottom!
+  // Quantitative Tabular Profiles
   const individualTests = [];
   const profileTests = [];
 
-  nonImagingTests.forEach((test) => {
+  nonDescriptiveTests.forEach((test) => {
     if (isTestProfile(test)) profileTests.push(test);
     else individualTests.push(test);
   });
@@ -732,14 +1206,14 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         refRange = "Negative";
       }
 
-      const valStyle = "font-family: 'Inter', -apple-system, sans-serif; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 8.5pt; color: #000000;";
-
       tableRows += `
         <tr style="border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
           <td style="padding: 3.8px 4px; font-size: 8.5pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
             ${displayName}
           </td>
-          <td style="padding: 3.8px 4px; ${valStyle}; vertical-align: top;">${val}</td>
+          <td style="padding: 3.8px 4px; vertical-align: top;">
+            ${formatResultCell(val, p.min_range, p.max_range, "", p.param_type)}
+          </td>
           <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; vertical-align: top;">${p.unit || test.unit || "—"}</td>
           <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top;">${refRange}</td>
         </tr>
@@ -747,15 +1221,15 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     });
   });
 
-  if (!tableRows && imagingSheets) return imagingSheets;
+  if (!tableRows && descriptiveSheets) return descriptiveSheets;
 
   const standardTable = tableRows ? `
     <table style="width: 92%; border-collapse: collapse; margin: 4px auto 0 auto; font-family: 'Lora', Georgia, serif;">
       <thead>
         <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9pt; background: transparent; page-break-inside: avoid;">
           <th style="padding: 5px 4px; text-align: left; width: 38%; font-weight: 700; border: none;">Investigation / Parameter</th>
-          <th style="padding: 5px 4px; text-align: left; width: 20%; font-weight: 700; border: none;">Observed Result</th>
-          <th style="padding: 5px 4px; text-align: left; width: 14%; font-weight: 700; border: none;">Unit</th>
+          <th style="padding: 5px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
+          <th style="padding: 5px 4px; text-align: left; width: 12%; font-weight: 700; border: none;">Unit</th>
           <th style="padding: 5px 4px; text-align: left; width: 28%; font-weight: 700; border: none;">Biological Ref. Range</th>
         </tr>
       </thead>
@@ -765,11 +1239,11 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     </table>
   ` : "";
 
-  return standardTable + imagingSheets;
+  return standardTable + descriptiveSheets;
 }
 
 // =========================================================================
-// 7. A4 REPORT HTML ENGINE (DUAL SIGNATURES GUARD & MULTI-PAGE CHUNKER)
+// 8. COMPLETE A4 REPORT RENDERER
 // =========================================================================
 export function renderDepartmentReportHtml({
   group,
@@ -791,15 +1265,15 @@ export function renderDepartmentReportHtml({
       : null) ||
     "Self";
 
-  const isImaging = isImagingOrRadiologyInvestigation(null, group.dept?.id, group.dept?.name);
+  const isDescriptive = isDescriptiveInvestigation(group.tests?.[0], group.dept?.id, group.dept?.name);
   const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
   const pageQrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(deptBarcode)}`;
   const pageQrSvg = generateQrSvgString(pageQrUrl, 48);
 
   const techUser = staffList.find((u) => u.role === "technologist") || {
     full_name: "MD. Abdullah AL Tarek",
-    designation: isImaging
-      ? "Senior Medical Radiographer / Imaging Technologist"
+    designation: isDescriptive
+      ? "Senior Medical Technologist / Radiographer"
       : "Medical Technologist (Lab)",
     signature_data: ""
   };
@@ -807,8 +1281,8 @@ export function renderDepartmentReportHtml({
     (u) => u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
   ) || {
     full_name: "Prof. Col. Dr. Md. Monirul Islam",
-    designation: isImaging
-      ? "MBBS, MD / FCPS - Consultant Radiologist & Physician"
+    designation: isDescriptive
+      ? "MBBS, MD / FCPS - Consultant Pathologist & Radiologist"
       : "MBBS, MCPS, DCP, FCPS (Haematology) - Consultant Hematologist",
     signature_data: ""
   };
@@ -824,11 +1298,10 @@ export function renderDepartmentReportHtml({
   const rawDeptName = group.dept?.name || "Clinical Pathology";
   const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
 
-  const sixthSlotDemographics = isImaging
+  const sixthSlotDemographics = isDescriptive
     ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
     : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
 
-  // SIGNATURES BLOCK: ONLY SHOWN WHEN OFFICIALLY VERIFIED!
   const signaturesBlockHtml = isVerified ? `
     <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
       <div style="text-align: center; width: 230px;">
@@ -916,7 +1389,6 @@ export function renderDepartmentReportHtml({
     </div>
   `;
 
-  // Render Sectioned Results (CBC, Urine, Stool, Imaging, or Biochemistry)
   const fullResultsHtml = buildUnifiedResultsTable(
     group.tests || [],
     activeOrder.results || {},
@@ -929,7 +1401,7 @@ export function renderDepartmentReportHtml({
     ? activeOrder.verifierRemarks
     : "Clinically correlated and verified with quality control standards.";
 
-  const remarksHtml = isImaging ? "" : `
+  const remarksHtml = isDescriptive ? "" : `
     <div style="margin-top: 6px; margin-left: 8mm; margin-right: 8mm; font-size: 8.5pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
       <span style="margin-left: 6px; color: #000000; font-style: italic;">${remarksText}</span>
@@ -962,7 +1434,9 @@ export function renderDepartmentReportHtml({
   `;
 }
 
-// 8. PRINT DISPATCH DRIVER
+// =========================================================================
+// 9. PRINT DISPATCH DRIVER
+// =========================================================================
 export function printDepartmentA4Report(
   targetDeptId = "ALL",
   activeOrder,
@@ -1044,7 +1518,9 @@ export function printDepartmentA4Report(
   }, 350);
 }
 
-// 9. A5 MONEY RECEIPT ENGINE (1-16 TESTS FIT ON 1 PAGE WITH FULL CALCULATION)
+// =========================================================================
+// 10. A5 MONEY RECEIPT ENGINE
+// =========================================================================
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
     receiptNo: "RCP-0914-001",
@@ -1126,7 +1602,6 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     return `
       <div style="border: none; padding: 0; min-height: 194mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; font-family: 'Consolas', 'Courier New', Courier, monospace; color: #000; font-size: 8pt; ${!isLast ? 'page-break-after: always;' : ''}">
         <div>
-          <!-- Header -->
           <div style="border-bottom: 2px dashed #000; padding-bottom: 4px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;">
             <div>
               <h1 style="margin: 0; font-size: 11pt; font-weight: 900; letter-spacing: .5px;">${curLabName}</h1>
@@ -1139,7 +1614,6 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             </div>
           </div>
 
-          <!-- Patient Demographics -->
           <div style="border: 1px dashed #000; padding: 4px 6px; margin-bottom: 5px; font-size: 7.5pt; background: #fafafa;">
             <table style="width: 100%; border-collapse: collapse; font-family: inherit;">
               <tr>
@@ -1159,7 +1633,6 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             </table>
           </div>
 
-          <!-- Items Table -->
           <table style="width: 100%; border-collapse: collapse; font-size: 7.5pt; margin-bottom: 4px; font-family: inherit;">
             <thead>
               <tr style="border-top: 1.5px dashed #000; border-bottom: 1.5px dashed #000; font-weight: 900;">
@@ -1171,7 +1644,6 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             <tbody>${itemsHtml}</tbody>
           </table>
 
-          <!-- Full Calculation Box directly under tests -->
           ${isLast ? `
             <div style="display: flex; justify-content: flex-end; margin-top: 4px; padding-top: 2px;">
               <table style="width: 210px; font-size: 7.5pt; border-collapse: collapse; font-family: inherit;">
@@ -1193,7 +1665,6 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
           `}
         </div>
 
-        <!-- Footer / Barcode & Cashier Signature -->
         <div style="margin-top: 6px;">
           <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: center;">
             <div style="text-align: center; width: 130px;">
@@ -1255,7 +1726,9 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   }, 250);
 }
 
-// 10. BARCODE VIAL STICKER PRINT DRIVER (38mm x 25mm)
+// =========================================================================
+// 11. 38mm x 25mm VIAL THERMAL STICKER
+// =========================================================================
 export function printSpecificVialBarcode(vial, onPrintedCallback) {
   if (!vial) return;
   if (onPrintedCallback) onPrintedCallback();

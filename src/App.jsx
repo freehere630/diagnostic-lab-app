@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest,
@@ -33,12 +33,14 @@ import DoctorManagement from "./components/DoctorManagement";
 const MASTER_SAMPLE_TYPES = [
   "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", 
   "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)", 
-  "Radiological Study", "Ultrasound Protocol", "Non-Contrast CT Head", "12-Lead Tracing"
+  "Radiological Study", "Ultrasound Protocol", "Non-Contrast CT Head", "12-Lead Tracing",
+  "Biopsy Specimen", "Aspiration Smear", "Fresh Specimen"
 ];
 
 const MASTER_TUBE_COLORS = [
   "Purple / Lavender (EDTA)", "Red / Yellow (SST / Plain Clot)", 
-  "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup", "No Specimen (Imaging)"
+  "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup", "No Specimen (Imaging)",
+  "Formalin Container", "Fixed Glass Slides"
 ];
 
 export default function App() {
@@ -70,7 +72,7 @@ export default function App() {
   const [dateRange, setDateRange] = useState({ from: todayStr, to: todayStr });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Patient Tracking Portal (Public QR Scan)
+  // Patient Tracking Portal
   const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
@@ -85,7 +87,7 @@ export default function App() {
   const [editingTest, setEditingTest] = useState(null);
   const [newTestForm, setNewTestForm] = useState({ 
     name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum", 
-    tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, 
+    tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
   });
 
@@ -225,6 +227,11 @@ export default function App() {
           const testId = ot.test_id || rawTest.id || ot.id;
           const fromCat = (testCatalog || []).find(t => t.id === testId || (t.code && t.code === rawTest.code)) || {};
 
+          // CRITICAL: Ensure live parameters and reference ranges from testCatalog are merged
+          const catParams = fromCat.test_parameters || fromCat.parameters || [];
+          const rawParams = rawTest.test_parameters || rawTest.parameters || [];
+          const resolvedParams = catParams.length > 0 ? catParams : rawParams;
+
           return {
             ...fromCat,
             ...rawTest,
@@ -234,7 +241,10 @@ export default function App() {
             dept_id: rawTest.dept_id || fromCat.dept_id || rawTest.deptId || fromCat.deptId || "DEP-BIO",
             deptId: rawTest.dept_id || fromCat.dept_id || rawTest.deptId || fromCat.deptId || "DEP-BIO",
             tube_color: rawTest.tube_color || fromCat.tube_color || rawTest.tubeColor || fromCat.tubeColor || "Red / Yellow (SST / Plain Clot)",
-            sample_type: rawTest.sample_type || fromCat.sample_type || "Blood"
+            sample_type: rawTest.sample_type || fromCat.sample_type || "Blood",
+            report_type: rawTest.report_type || fromCat.report_type || "tabular",
+            test_parameters: resolvedParams,
+            parameters: resolvedParams
           };
         }).filter(Boolean);
 
@@ -312,11 +322,7 @@ export default function App() {
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
 
-  // =========================================================================
-  // 3. BULLETPROOF AUTO-SYNC: REALTIME WEBSOCKET + ACTIVE PATIENT 2.5S POLLER
-  // =========================================================================
-  
-  // A. Realtime WebSocket Listener (0ms Instant Push)
+  // Realtime WebSocket Listener
   useEffect(() => {
     if (!currentUser) return;
 
@@ -360,14 +366,14 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // B. Active Patient Direct Results Poller (Syncs active screen every 2.5s)
+  // Poller for Active Order
   useEffect(() => {
     if (!currentUser || !activeOrder) return;
     const currentTargetId = activeOrder.orderId || activeOrder.id;
     if (!currentTargetId) return;
 
     const syncActiveResults = async () => {
-      if (document.hidden) return; // Pauses when tab is minimized to save quota!
+      if (document.hidden) return;
       try {
         const { data: latestResults } = await supabase
           .from('results')
@@ -396,8 +402,6 @@ export default function App() {
     };
 
     const poller = setInterval(syncActiveResults, 2500);
-
-    // Instant sync when switching back into the browser window
     const onFocus = () => {
       syncActiveResults();
       fetchPaginatedOrders(true);
@@ -503,6 +507,18 @@ export default function App() {
         groupKey = "DEP-PAT-URINE";
         groupName = "Clinical Pathology & Urine Analysis";
         groupIcon = "🧫";
+      } else if (code.includes("STOOL") || name.includes("STOOL")) {
+        groupKey = "DEP-PAT-STOOL";
+        groupName = "Clinical Pathology & Stool Examination";
+        groupIcon = "🔬";
+      } else if (code.includes("WIDAL")) {
+        groupKey = "DEP-MIC-WIDAL";
+        groupName = "Microbiology & Serology";
+        groupIcon = "🧪";
+      } else if (code.includes("SEMEN")) {
+        groupKey = "DEP-PAT-SEMEN";
+        groupName = "Clinical Pathology & Andrology";
+        groupIcon = "🔬";
       }
 
       if (!grouped[groupKey]) {
@@ -668,19 +684,63 @@ export default function App() {
     } catch (e) { alert(e.message); } finally { setIsLoading(false); }
   };
 
+  // =========================================================================
+  // FIX: ACCURATE NORMALIZATION OF SAVED PARAMETERS IN EDIT MODAL
+  // =========================================================================
   const handleOpenEditModal = (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
+
     const normalizedParams = rawParams.length > 0
-      ? rawParams.map((p, i) => ({
-          id: p.id || `p-${i + 1}`,
-          name: p.name || "",
-          param_type: p.reference_text || p.ref_text ? "multirange" : (p.param_type || "numeric"),
-          unit: p.unit || "",
-          min: p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : ""),
-          max: p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : ""),
-          reference_text: p.reference_text || p.ref_text || ""
-        }))
-      : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "", reference_text: "" }];
+      ? rawParams.map((p, i) => {
+          let resolvedType = p.param_type || "numeric";
+
+          // 1. If explicitly saved as text/descriptive, it is strictly "text"
+          if (resolvedType === "text" || resolvedType === "descriptive") {
+            resolvedType = "text";
+          }
+          // 2. If qualitative, keep qualitative
+          else if (resolvedType === "qualitative") {
+            resolvedType = "qualitative";
+          }
+          // 3. If numeric in DB, check if it was multirange (has text, but no min/max numbers)
+          else if (resolvedType === "numeric") {
+            const hasMin = p.min_range !== null && p.min_range !== undefined && String(p.min_range).trim() !== "";
+            const hasMax = p.max_range !== null && p.max_range !== undefined && String(p.max_range).trim() !== "";
+            const hasRef = Boolean(p.reference_text && String(p.reference_text).trim() !== "");
+
+            if (!hasMin && !hasMax && hasRef) {
+              resolvedType = "multirange";
+            } else {
+              resolvedType = "numeric";
+            }
+          }
+
+          const minVal = (p.min !== undefined && p.min !== null && p.min !== "")
+            ? String(p.min)
+            : ((p.min_range !== null && p.min_range !== undefined) ? String(p.min_range) : "");
+
+          const maxVal = (p.max !== undefined && p.max !== null && p.max !== "")
+            ? String(p.max)
+            : ((p.max_range !== null && p.max_range !== undefined) ? String(p.max_range) : "");
+
+          const refVal = p.reference_text || p.ref_text || p.default_template || p.template_text || "";
+
+          return {
+            id: p.id || `p-${i + 1}`,
+            name: p.name || "",
+            param_type: resolvedType,
+            unit: p.unit || "",
+            min: minVal,
+            max: maxVal,
+            min_range: minVal,
+            max_range: maxVal,
+            reference_text: refVal
+          };
+        })
+      : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "", min_range: "", max_range: "", reference_text: "" }];
+
+    const isDescriptiveTest = t.report_type === "descriptive" || 
+      normalizedParams.some(p => p.param_type === "text");
 
     setEditingTest({
       ...t,
@@ -689,10 +749,12 @@ export default function App() {
       code: t.code || "",
       deptId: t.dept_id || t.deptId || (departments[0]?.id || "DEP-BIO"),
       dept_id: t.dept_id || t.deptId || (departments[0]?.id || "DEP-BIO"),
-      price: t.price || "",
+      price: t.price !== undefined ? String(t.price) : "",
       sampleType: t.sample_type || t.sampleType || "Serum",
       tubeColor: t.tube_color || t.tubeColor || "Red / Yellow (SST / Plain Clot)",
-      isProfile: t.is_profile !== undefined ? Boolean(t.is_profile) : Boolean(t.isProfile),
+      isProfile: isDescriptiveTest ? false : (t.is_profile !== undefined ? Boolean(t.is_profile) : Boolean(t.isProfile)),
+      reportType: isDescriptiveTest ? "descriptive" : (t.report_type || "tabular"),
+      report_type: isDescriptiveTest ? "descriptive" : (t.report_type || "tabular"),
       is_available: t.is_available !== undefined ? t.is_available : true,
       parameters: normalizedParams
     });
@@ -739,9 +801,9 @@ export default function App() {
       const { departments: depts, tests } = await getMasterData();
       setDepartments(depts || []);
       setTestCatalog(tests || []);
-      alert("✅ Standard Radiology Catalog loaded!");
+      alert("✅ Standard Modality Protocols loaded!");
     } catch (e) {
-      alert("Notice loading radiology tests: " + e.message);
+      alert("Notice loading protocols: " + e.message);
     } finally {
       setIsLoading(false);
     }
