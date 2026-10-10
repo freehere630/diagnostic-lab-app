@@ -39,10 +39,13 @@ function encodeCode128C(numericText) {
 }
 
 export function generateSvgBarcodeHtml(codeText, height = 30) {
-  const pattern = encodeCode128C(codeText || "2026000001");
+  const cleanInput = String(codeText || "2026000001").split(/[\s,]+/)[0];
+  const pattern = encodeCode128C(cleanInput);
+  if (!pattern) return "";
+
   let x = 0;
   let rects = "";
-  const moduleWidth = 4.5;
+  const moduleWidth = 3.8;
   const quietZone = 6;
   x += quietZone;
 
@@ -190,7 +193,8 @@ export function getAllOrderVials(order, catalog = []) {
     };
   });
 
-  if (Array.isArray(order.vials) && order.vials.length > 1) {
+  // Preserve any order vials array if >= 1
+  if (Array.isArray(order.vials) && order.vials.length >= 1) {
     return order.vials.map(v => ({
       deptId: v.deptId || "DEP-GEN",
       deptCode: v.deptCode || "GEN",
@@ -203,7 +207,9 @@ export function getAllOrderVials(order, catalog = []) {
   }
 
   const vials = {};
-  const baseNum = parseInt(String(order.barcode || "202600001").replace(/\D/g, ""), 10) || 202600001;
+  // Extract strictly the first primary barcode to avoid concatenating comma-separated strings
+  const primaryBc = String(order.barcode || "2026000001").split(/[\s,]+/)[0];
+  const baseNum = parseInt(primaryBc.replace(/\D/g, ""), 10) || 2026000001;
   let counter = 0;
 
   for (const test of tests) {
@@ -271,8 +277,8 @@ export function getAllOrderVials(order, catalog = []) {
       deptId: "DEP-GEN",
       deptCode: "GEN",
       tubeColor: "Standard",
-      barcode: order.barcode || "202600001",
-      testBarcode: order.barcode || "202600001",
+      barcode: primaryBc,
+      testBarcode: primaryBc,
       testIds: [],
       testNames: ["General Investigation"]
     }
@@ -282,7 +288,8 @@ export function getAllOrderVials(order, catalog = []) {
 export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
   if (!order) return "";
   const allVials = getAllOrderVials(order);
-  if (allVials.length === 0) return order.barcode || "";
+  const primaryFallback = String(order.barcode || "2026000001").split(/[\s,]+/)[0];
+  if (allVials.length === 0) return primaryFallback;
 
   if (groupTests && groupTests.length > 0) {
     for (const gt of groupTests) {
@@ -305,7 +312,7 @@ export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
     if (matched) return matched.barcode || matched.testBarcode;
   }
 
-  return allVials[0]?.barcode || allVials[0]?.testBarcode || order.barcode;
+  return allVials[0]?.barcode || allVials[0]?.testBarcode || primaryFallback;
 }
 
 function isTestProfile(test) {
@@ -342,7 +349,6 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
   return fallback;
 }
 
-// Dynamic Parameter Resolver with \n to <br> line break support
 function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef = "", defaultMin = null, defaultMax = null) {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
   for (const test of tests) {
@@ -1235,7 +1241,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   return standardTable + descriptiveSheets;
 }
 
-// 8. COMPLETE A4 REPORT RENDERER (WITH DEPARTMENT-SPECIFIC REMARKS)
+// 8. COMPLETE A4 REPORT RENDERER
 export function renderDepartmentReportHtml({
   group,
   activeOrder,
@@ -1520,11 +1526,12 @@ export function printDepartmentA4Report(
   }, 350);
 }
 
-// 10. A5 MONEY RECEIPT ENGINE
+// 10. A5 MONEY RECEIPT ENGINE (SCANNABLE ORDER BARCODE)
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
     receiptNo: "RCP-0914-001",
     date: new Date().toISOString().slice(0, 10),
+    barcode: "2026000001",
     patient: { id: "P-1001", name: "Patient", age: "30", gender: "Male", phone: "N/A", doctor: "Self" },
     tests: [],
     billing: { subTotal: 0, discount: 0, netPayable: 0, paid: 0, due: 0 }
@@ -1538,7 +1545,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
 
   const patientId = activeOrd.patient?.id || "P-1001";
   const orderId = activeOrd.orderId || activeOrd.id || "ORD-001";
-  const barcode = activeOrd.barcode || "";
+  const primaryBarcode = String(activeOrd.barcode || "2026000001").split(/[\s,]+/)[0];
 
   const doctorName = 
     activeOrd.doctor || 
@@ -1546,7 +1553,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     (activeOrd.patient?.address && activeOrd.patient.address.startsWith("Ref: ") ? activeOrd.patient.address.replace("Ref: ", "") : null) || 
     "Self";
 
-  const trackingUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(barcode)}`;
+  const trackingUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(primaryBarcode)}`;
   const scannableTrackingQrSvg = generateQrSvgString(trackingUrl, 48);
 
   const allTests = activeOrd.tests || [];
@@ -1668,8 +1675,8 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         <div style="margin-top: 6px;">
           <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: center;">
             <div style="text-align: center; width: 130px;">
-              ${generateSvgBarcodeHtml(patientId, 26)}
-              <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900;">${patientId}</p>
+              ${generateSvgBarcodeHtml(primaryBarcode, 26)}
+              <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900; letter-spacing: 0.5px;">${primaryBarcode}</p>
             </div>
 
             <div style="text-align: center; width: 85px;">

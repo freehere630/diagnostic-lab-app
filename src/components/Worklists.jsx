@@ -193,13 +193,31 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                       </td>
 
                       {/* Assigned Tests */}
-                      <td className="py-2 px-3">
+                       <td className="py-2 px-3">
                         <div className="flex flex-wrap gap-1 max-w-sm">
-                          {(o.tests || []).map((t, idx) => (
-                            <span key={idx} className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200/60">
-                              {t.code || t.name}
-                            </span>
-                          ))}
+                          {(() => {
+                            const qSearch = (worklistSearch || "").trim().toLowerCase();
+                            const testsForVial = qSearch
+                              ? (o.tests || []).filter((t) =>
+                                  String(t.vialBarcode || "").toLowerCase().includes(qSearch) ||
+                                  String(t.barcode || "").toLowerCase().includes(qSearch)
+                                )
+                              : (deptFilter !== "ALL"
+                                  ? (o.tests || []).filter((t) => (t.dept_id || t.deptId) === deptFilter)
+                                  : o.tests || []);
+
+                            const listToRender = testsForVial.length > 0 ? testsForVial : (o.tests || []);
+
+                            return listToRender.map((t, idx) => (
+                              <span
+                                key={idx}
+                                className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200/60"
+                                title={`Vial: ${t.vialBarcode || o.barcode}`}
+                              >
+                                {t.code || t.name}
+                              </span>
+                            ));
+                          })()}
                         </div>
                       </td>
 

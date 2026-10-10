@@ -1,11 +1,12 @@
 import { supabase } from "../supabaseClient";
 
 // ==========================================
-// 1. MASTER DEPARTMENTS
+// 1. MASTER DEPARTMENTS (Includes DEP-IMM)
 // ==========================================
 export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-HEM", name: "Hematology & Coagulation", icon: "🩸" },
   { id: "DEP-BIO", name: "Clinical Biochemistry", icon: "🧪" },
+  { id: "DEP-IMM", name: "Immunology & Endocrinology", icon: "🧬" },
   { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
   { id: "DEP-USG", name: "Ultrasonography (USG)", icon: "📡" },
   { id: "DEP-CTMRI", name: "CT Scan & MRI Imaging", icon: "🧠" },
@@ -419,7 +420,7 @@ export async function getPatientHistory(patientId) {
 }
 
 // ==========================================
-// 6. PAGINATED ORDERS QUERY (ADVANCED MULTI-BARCODE & RESULTS SEARCH)
+// 6. PAGINATED ORDERS QUERY
 // ==========================================
 export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "", dateTo = "", searchQuery = "" }) {
   const fromIndex = (page - 1) * pageSize;
@@ -441,34 +442,34 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
 
     if (searchQuery && searchQuery.trim()) {
       const q = searchQuery.trim();
+      const cleanDigits = q.replace(/\D/g, "");
 
-      // Look up secondary vial barcodes stored in results table
       let matchedOrderIds = [];
       try {
         const { data: resMatches } = await supabase
           .from("results")
           .select("order_id")
           .or(`parameter_id.ilike.%${q}%,result_value.ilike.%${q}%`)
-          .limit(10);
+          .limit(20);
         if (resMatches && resMatches.length > 0) {
           matchedOrderIds = resMatches.map(r => r.order_id).filter(Boolean);
         }
       } catch (e) {}
 
-      // If secondary barcode belongs to an offset (e.g. 202600002 has base 202600001)
-      const numericDigits = q.replace(/\D/g, "");
-      let candidateBases = [];
-      if (numericDigits.length >= 6) {
-        const numVal = parseInt(numericDigits, 10);
-        for (let offset = 1; offset <= 5; offset++) {
-          candidateBases.push(String(numVal - offset));
+      let orClauses = [
+        `barcode.ilike.%${q}%`,
+        `patient_id.ilike.%${q}%`,
+        `id.ilike.%${q}%`
+      ];
+
+      if (cleanDigits.length >= 8) {
+        const unpadded = cleanDigits.replace(/^0+/, "");
+        if (unpadded !== q) {
+          orClauses.push(`barcode.ilike.%${unpadded}%`);
         }
       }
 
-      let orClauses = [`barcode.ilike.%${q}%`, `patient_id.ilike.%${q}%`, `id.ilike.%${q}%`];
-      candidateBases.forEach(b => orClauses.push(`barcode.ilike.%${b}%`));
       matchedOrderIds.forEach(mId => orClauses.push(`id.eq.${mId}`));
-
       query = query.or(orClauses.join(","));
     }
 
@@ -545,7 +546,7 @@ export async function getAllOrders() {
 }
 
 // ==========================================
-// 7. ORDER CREATION: MULTI-BARCODE & VIAL SYNC
+// 7. ORDER CREATION: INDIVIDUAL VIAL REGISTRATION
 // ==========================================
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
   const patientId = patientData.id && patientData.id.trim() 
@@ -571,6 +572,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     };
   });
 
+  // Group tests into dedicated departmental vials
   const departmentVials = [];
   selectedTests.forEach((t) => {
     let deptId = (t.dept_id || t.deptId || "").toUpperCase();
@@ -579,6 +581,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
     if (!deptId || deptId === "DEP-GEN") {
       if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
+      else if (code.includes("IMM") || deptId.includes("IMM") || name.includes("DSDNA") || name.includes("FT3") || name.includes("FT4") || name.includes("THYROID")) deptId = "DEP-IMM";
       else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE") || deptId.includes("BIO")) deptId = "DEP-BIO";
       else if (code.startsWith("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
       else if (code.startsWith("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
@@ -626,6 +629,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     v.testBarcode = barcodeList[i];
   });
 
+  // Tag every test with its exact vial barcode
   selectedTests.forEach((t) => {
     const matchedVial = departmentVials.find(v => 
       v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)
@@ -635,17 +639,15 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   });
 
   const primaryBarcode = barcodeList[0];
-  const allBarcodesStr = barcodeList.join(", ");
-
   const now = new Date();
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
   
-  const orderId = `ORD-${todayCompact.slice(2)}-${primaryBarcode.slice(-4)}`;
   const receiptNo = `RCP-${todayCompact.slice(4)}-${primaryBarcode.slice(-4)}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
+  // 1. Persist Patient
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -654,38 +656,28 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     phone: patientData.phone || "N/A",
     address: `Ref: ${referringDoctor}`
   };
-  try { await supabase.from("patients").upsert(patientRow); } catch (e) {}
-
-  const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
-  const finalDiscountPercent = discount || 0;
-  const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
-  const finalNet = netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
-  const finalPaid = paidAmount !== undefined ? parseFloat(paidAmount) : finalNet;
-  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
-
-  const orderRow = {
-    id: orderId,
-    patient_id: patientId,
-    barcode: allBarcodesStr,
-    order_date: todayDate,
-    created_at: nowIso,
-    subtotal: subTotal,
-    discount_percent: finalDiscountPercent,
-    net_payable: finalNet,
-    paid_amount: finalPaid,
-    due_amount: finalDue,
-    sample_status: "Order Created",
-    qc_status: "Pending",
-    is_locked: false
-  };
+  
+  try {
+    const { error: patErr } = await supabase.from("patients").upsert(patientRow);
+    if (patErr) {
+      await supabase.from("patients").upsert({
+        id: patientId,
+        name: patientData.name,
+        age: parseInt(patientData.age) || 0,
+        gender: patientData.gender || "Other",
+        phone: patientData.phone || "N/A"
+      });
+    }
+  } catch (e) {
+    console.warn("Patient upsert notice:", e);
+  }
 
   try {
-    const { error: insErr } = await supabase.from("orders").insert(orderRow);
-    if (insErr) {
-      await supabase.from("orders").insert({ ...orderRow, barcode: primaryBarcode });
-    }
+    const localPatients = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
+    localStorage.setItem("apex_local_patients", JSON.stringify([patientRow, ...localPatients.filter(p => p.id !== patientId)]));
   } catch (e) {}
 
+  // Upsert test catalog definitions
   for (const t of selectedTests) {
     try {
       await supabase.from("tests").upsert({
@@ -702,57 +694,132 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     } catch (e) {}
   }
 
-  if (testIds && testIds.length > 0) {
-    const orderTestRows = testIds.map((tid) => ({ order_id: orderId, test_id: tid }));
-    try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
+  const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+  const finalDiscountPercent = discount || 0;
+  const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
+  const finalNet = netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
+  const finalPaid = paidAmount !== undefined ? parseFloat(paidAmount) : finalNet;
+  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
+
+  // =========================================================================
+  // 2. REGISTER EACH VIAL AS ITS OWN INDEPENDENT ORDER IN THE DATABASE!
+  // This guarantees each vial barcode holds and returns ONLY its own tests!
+  // =========================================================================
+  const createdVialOrders = [];
+
+  for (let i = 0; i < departmentVials.length; i++) {
+    const v = departmentVials[i];
+    const vialBarcode = v.barcode;
+    const isMaster = (i === 0);
+
+    const thisOrderId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}`;
+
+    // Strictly filter tests that belong to THIS vial!
+    const testsForThisVial = selectedTests.filter(t => 
+      v.testIds.includes(t.id) || 
+      v.testIds.includes(t.code) || 
+      v.testNames.includes(t.name) || 
+      v.testNames.includes(t.code)
+    );
+
+    const vialSubtotal = testsForThisVial.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+    const vialNet = vialSubtotal - (vialSubtotal * finalDiscountPercent) / 100;
+
+    let vialOrderRow = {
+      id: thisOrderId,
+      patient_id: patientId,
+      barcode: vialBarcode, // Exact single barcode for this specific vial!
+      order_date: todayDate,
+      created_at: nowIso,
+      subtotal: isMaster ? subTotal : vialSubtotal,
+      discount_percent: finalDiscountPercent,
+      net_payable: isMaster ? finalNet : vialNet,
+      paid_amount: isMaster ? finalPaid : vialNet,
+      due_amount: isMaster ? finalDue : 0,
+      sample_status: "Order Created",
+      qc_status: "Pending",
+      is_locked: false
+    };
+
+    let savedThisOrderId = thisOrderId;
+    const { error: insErr } = await supabase.from("orders").insert(vialOrderRow);
+    if (insErr) {
+      console.warn("Vial order insert notice:", insErr.message);
+      const safeId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}-${Date.now().toString().slice(-3)}`;
+      vialOrderRow.id = safeId;
+      await supabase.from("orders").upsert(vialOrderRow);
+      savedThisOrderId = safeId;
+    }
+
+    // Attach ONLY this vial's tests in order_tests table!
+    const vialTestIds = testsForThisVial.map(t => t.id);
+    if (vialTestIds.length > 0) {
+      const orderTestRows = vialTestIds.map(tid => ({ order_id: savedThisOrderId, test_id: tid }));
+      try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
+    }
+
+    // Save vial mapping and specific parameters in results
+    try {
+      await saveTestResult(savedThisOrderId, "SPECIMEN_VIALS", JSON.stringify(departmentVials));
+      await saveTestResult(savedThisOrderId, `VIAL_DEPT_${vialBarcode}`, v.deptId);
+      await saveTestResult(savedThisOrderId, `VIAL_TESTS_${vialBarcode}`, JSON.stringify(v.testNames));
+      for (const t of testsForThisVial) {
+        await saveTestResult(savedThisOrderId, `TEST_VIAL_${t.id}`, vialBarcode);
+      }
+    } catch (e) {}
+
+    const completeVialOrder = {
+      ...vialOrderRow,
+      id: savedThisOrderId,
+      orderId: savedThisOrderId,
+      date: todayDate,
+      createdAt: nowIso,
+      created_at: nowIso,
+      barcode: vialBarcode,
+      allBarcodes: barcodeList,
+      barcodesList: barcodeList,
+      doctor: referringDoctor,
+      receiptNo: receiptNo,
+      patient: {
+        id: patientId,
+        name: patientData.name,
+        age: patientData.age,
+        gender: patientData.gender,
+        phone: patientData.phone,
+        doctor: referringDoctor,
+        address: `Ref: ${referringDoctor}`
+      },
+      tests: isMaster ? selectedTests : testsForThisVial,
+      vialTests: testsForThisVial,
+      vials: departmentVials,
+      order_tests: testsForThisVial.map(t => ({ test_id: t.id, test: t })),
+      billing: { 
+        subTotal: isMaster ? subTotal : vialSubtotal, 
+        discount: finalDiscountPercent, 
+        netPayable: isMaster ? finalNet : vialNet, 
+        paid: isMaster ? finalPaid : vialNet, 
+        due: isMaster ? finalDue : 0 
+      },
+      results: {},
+      qcStatus: "Pending",
+      isLocked: false,
+      verifierRemarks: "",
+      dept_remarks: {},
+      deptRemarks: {}
+    };
+
+    createdVialOrders.push(completeVialOrder);
   }
 
-  // Permanently save the complete multi-vial mapping to Supabase results table
-  try {
-    await saveTestResult(orderId, "SPECIMEN_VIALS", JSON.stringify(departmentVials));
-    for (const v of departmentVials) {
-      await saveTestResult(orderId, `VIAL_BARCODE_${v.barcode}`, v.deptId);
-    }
-  } catch (e) {}
-
-  const completeOrder = {
-    ...orderRow,
-    orderId: orderId,
-    date: todayDate,
-    createdAt: nowIso,
-    created_at: nowIso,
-    barcode: primaryBarcode,
-    allBarcodes: barcodeList,
-    barcodesList: barcodeList,
-    doctor: referringDoctor,
-    receiptNo: receiptNo,
-    patient: {
-      id: patientId,
-      name: patientData.name,
-      age: patientData.age,
-      gender: patientData.gender,
-      phone: patientData.phone,
-      doctor: referringDoctor,
-      address: `Ref: ${referringDoctor}`
-    },
-    tests: selectedTests,
-    vials: departmentVials,
-    order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
-    billing: { subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaid, due: finalDue },
-    results: {},
-    qcStatus: "Pending",
-    isLocked: false,
-    verifierRemarks: "",
-    dept_remarks: {},
-    deptRemarks: {}
-  };
-
+  // Update local storage with all registered vial orders
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    localStorage.setItem("apex_local_orders", JSON.stringify([completeOrder, ...local.filter(o => o.orderId !== orderId && o.id !== orderId)]));
+    const newIds = new Set(createdVialOrders.map(o => o.orderId));
+    localStorage.setItem("apex_local_orders", JSON.stringify([...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))]));
   } catch (e) {}
 
-  return completeOrder;
+  // Return the master order containing the full receipt & test set for printing
+  return createdVialOrders[0];
 }
 
 // ==========================================
@@ -900,7 +967,7 @@ export async function markSampleRecollected(orderId) {
 }
 
 // ==========================================
-// 10. ROBUST TEST CATALOG CRUD & SAFE PARAMETERS UPSERT
+// 10. TEST CATALOG CRUD & PARAMETERS UPSERT
 // ==========================================
 export async function toggleTestAvailability(testId, isAvailable) {
   const { data, error } = await supabase
@@ -1270,6 +1337,9 @@ export async function saveLabSettings(settingsData) {
   return payload;
 }
 
+// ==========================================
+// 12. ROBUST SEQUENTIAL BARCODE GENERATOR
+// ==========================================
 export async function getNextSequentialBarcode(count = 1) {
   const yearPrefix = String(new Date().getFullYear());
   let maxFoundSeq = 0;
@@ -1277,18 +1347,34 @@ export async function getNextSequentialBarcode(count = 1) {
   try {
     const { data: recentOrders } = await supabase
       .from("orders")
-      .select("barcode, created_at")
-      .ilike("barcode", `${yearPrefix}%`)
+      .select("id, barcode, created_at")
       .order("created_at", { ascending: false })
-      .limit(30);
+      .limit(50);
 
     if (recentOrders && recentOrders.length > 0) {
       for (const ord of recentOrders) {
-        const rawDigits = String(ord.barcode || "").replace(/\D/g, "");
-        if (rawDigits.startsWith(yearPrefix)) {
-          const num = parseInt(rawDigits.slice(yearPrefix.length), 10);
-          if (!isNaN(num) && num > maxFoundSeq) {
-            maxFoundSeq = num;
+        // Inspect individual barcodes safely
+        const individualBarcodes = String(ord.barcode || "").split(/[\s,]+/).filter(Boolean);
+        for (const bc of individualBarcodes) {
+          const rawDigits = String(bc).replace(/\D/g, "");
+          if (rawDigits.startsWith(yearPrefix)) {
+            const seqStr = rawDigits.slice(yearPrefix.length);
+            if (seqStr.length >= 1 && seqStr.length <= 8) {
+              const num = parseInt(seqStr, 10);
+              if (!isNaN(num) && num > maxFoundSeq && num < 999999) {
+                maxFoundSeq = num;
+              }
+            }
+          }
+        }
+
+        // Also inspect ID suffix to ensure no collisions
+        if (ord.id && typeof ord.id === "string") {
+          const parts = ord.id.split("-");
+          const lastPart = parts[parts.length - 1];
+          const idNum = parseInt(lastPart, 10);
+          if (!isNaN(idNum) && idNum > maxFoundSeq && idNum < 999999) {
+            maxFoundSeq = idNum;
           }
         }
       }
@@ -1299,7 +1385,7 @@ export async function getNextSequentialBarcode(count = 1) {
 
   try {
     const localLast = parseInt(localStorage.getItem("apex_last_barcode_seq") || "0", 10);
-    if (localLast > maxFoundSeq) {
+    if (localLast > maxFoundSeq && localLast < 999999) {
       maxFoundSeq = localLast;
     }
   } catch (e) {}
@@ -1308,7 +1394,8 @@ export async function getNextSequentialBarcode(count = 1) {
   const generatedBarcodes = [];
 
   for (let i = 0; i < count; i++) {
-    const seqStr = String(startSeq + i).padStart(5, "0");
+    // 6-digit sequence + 4-digit year = 10 digits (even length for Code 128C)
+    const seqStr = String(startSeq + i).padStart(6, "0");
     generatedBarcodes.push(`${yearPrefix}${seqStr}`);
   }
 

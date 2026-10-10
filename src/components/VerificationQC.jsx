@@ -87,17 +87,24 @@ export default function VerificationQC({
       let icon = "🧪";
 
       // 1. Hematology
-      if (code.includes("CBC") || name.includes("BLOOD COUNT") || deptId.includes("HEM")) {
+            if (code.includes("CBC") || name.includes("BLOOD COUNT") || deptId.includes("HEM")) {
         deptId = "DEP-HEM";
         deptName = "Hematology & Coagulation";
         icon = "🩸";
       } 
-      // 2. Clinical Pathology & Urine/Stool
+      // 2. Immunology & Endocrinology
+      else if (deptId.includes("IMM") || code.includes("IMM") || name.includes("DSDNA") || name.includes("FT3") || name.includes("FT4") || name.includes("THYROID")) {
+        deptId = "DEP-IMM";
+        deptName = "Immunology & Endocrinology";
+        icon = "🧬";
+      }
+      // 3. Clinical Pathology & Urine/Stool
       else if (code.includes("URINE") || name.includes("URINE") || code.includes("STOOL") || name.includes("STOOL") || deptId.includes("PAT")) {
         deptId = "DEP-PAT";
         deptName = "Clinical Pathology & Urinalysis";
         icon = "🧫";
-      } 
+      }
+
       // 3. Microbiology & Serology
       else if (code.includes("WIDAL") || deptId.includes("MIC")) {
         deptId = "DEP-MIC";
