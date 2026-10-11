@@ -1,18 +1,6 @@
 import React, { useState } from "react";
-import { FlaskConical, Lock, Mail, ShieldCheck, ArrowRight } from "lucide-react";
-import { getStaffUsers } from "../services/api";
-
-// Master Developer Account (Permanent Fail-Safe Credentials)
-export const MASTER_DEVELOPER = {
-  id: "DEV-001",
-  role: "developer",
-  roleName: "Chief System Developer",
-  email: "rtraju630@gmail.com",
-  password: "raju1234",
-  name: "Md. Raju Sheikh",
-  title: "Chief System Architect & Developer",
-  avatarBg: "bg-indigo-600"
-};
+import { FlaskConical, Lock, Mail, ArrowRight } from "lucide-react";
+import { loginWithEmail } from "../services/authApi";
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState("");
@@ -24,61 +12,31 @@ export default function Login({ onLoginSuccess }) {
     e.preventDefault();
     setErrorMsg("");
     setIsSubmitting(true);
-
-    const inputEmail = email.trim().toLowerCase();
-    const inputPass = password;
-
-    // 1. Check Developer Account
-    if (inputEmail === MASTER_DEVELOPER.email && inputPass === MASTER_DEVELOPER.password) {
-      setIsSubmitting(false);
-      onLoginSuccess(MASTER_DEVELOPER);
-      return;
-    }
-
-    // 2. Check Database Registered Staff
     try {
-      const staffList = await getStaffUsers();
-      const matched = staffList.find(
-        (u) => u.email?.trim().toLowerCase() === inputEmail && u.password === inputPass
-      );
-
-      if (matched) {
-        onLoginSuccess({
-          id: matched.id,
-          role: matched.role,
-          name: matched.full_name,
-          designation: matched.designation,
-          email: matched.email,
-          signature_data: matched.signature_data,
-          avatarBg: 
-            matched.role === "manager" ? "bg-purple-600" :
-            matched.role === "verifier" ? "bg-amber-600" :
-            matched.role === "technologist" ? "bg-emerald-600" : "bg-blue-600"
-        });
-        return;
-      }
+      const user = await loginWithEmail(email, password);
+      onLoginSuccess(user);
     } catch (err) {
-      console.warn("DB login check notice:", err);
+      setErrorMsg(err.message || "Login failed. Please check your credentials.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setIsSubmitting(false);
-    setErrorMsg("Invalid email or password. Please verify credentials.");
   };
 
   return (
     <div className="min-h-screen bg-slate-100/70 flex items-center justify-center p-4 text-slate-900">
       <div className="max-w-sm w-full bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
-        
-        {/* Brand Banner */}
         <div className="p-6 pb-4 text-center">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-2.5 text-white shadow-xs">
             <FlaskConical className="w-5 h-5" />
           </div>
-          <h1 className="text-base font-bold tracking-tight text-slate-900">Apex Clinical LIMS</h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">Laboratory Operating & Reporting System</p>
+          <h1 className="text-base font-bold tracking-tight text-slate-900">
+            Apex Clinical LIMS
+          </h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Laboratory Operating & Reporting System
+          </p>
         </div>
 
-        {/* Credentials Form */}
         <div className="p-6 pt-0 space-y-3.5">
           {errorMsg && (
             <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-[11px] rounded-lg font-semibold text-center">
@@ -88,12 +46,15 @@ export default function Login({ onLoginSuccess }) {
 
           <form onSubmit={handleLogin} className="space-y-3 text-xs">
             <div>
-              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Workstation Email</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">
+                Workstation Email
+              </label>
               <div className="relative">
                 <Mail className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                 <input
                   type="email"
                   required
+                  autoComplete="email"
                   placeholder="name@lab.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -103,12 +64,15 @@ export default function Login({ onLoginSuccess }) {
             </div>
 
             <div>
-              <label className="font-semibold text-slate-600 text-[11px] block mb-1">Password</label>
+              <label className="font-semibold text-slate-600 text-[11px] block mb-1">
+                Password
+              </label>
               <div className="relative">
                 <Lock className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -131,7 +95,6 @@ export default function Login({ onLoginSuccess }) {
             Protected Medical System • ISO 15189:2022 Compliant
           </div>
         </div>
-
       </div>
     </div>
   );

@@ -1169,15 +1169,32 @@ export async function deleteTest(testId) {
   } catch (e) {}
 }
 
-// ==========================================
-// 11. STAFF & LAB SETTINGS
-// ==========================================
+// Reads from staff_profiles (joined conceptually with auth.users).
+// Shape is preserved (id / full_name / role / designation / signature_data)
+// so that Navbar, VerificationQC, UserManagement, and printHelpers keep working.
+function mapStaffProfile(row) {
+  return {
+    id: row.user_id,              // backward-compat alias
+    user_id: row.user_id,
+    full_name: row.full_name,
+    role: row.role,
+    designation: row.designation || "",
+    signature_data: row.signature_data || row.full_name,
+    is_active: row.is_active,
+    created_at: row.created_at,
+  };
+}
+
 export async function getStaffUsers() {
   try {
-    const { data } = await supabase.from("users").select("*").order("created_at");
-    if (data && data.length > 0) {
-      try { localStorage.setItem("apex_local_staff", JSON.stringify(data)); } catch (e) {}
-      return data;
+    const { data, error } = await supabase
+      .from("staff_profiles")
+      .select("*")
+      .order("created_at");
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapStaffProfile);
+      try { localStorage.setItem("apex_local_staff", JSON.stringify(mapped)); } catch (e) {}
+      return mapped;
     }
   } catch (e) {}
 
@@ -1188,29 +1205,8 @@ export async function getStaffUsers() {
   return [];
 }
 
-export async function registerStaffUser(userData) {
-  const staffRow = {
-    full_name: userData.fullName,
-    email: userData.email,
-    password: userData.password,
-    role: userData.role,
-    designation: userData.designation,
-    signature_data: userData.signatureData || userData.fullName,
-    is_active: true
-  };
-  const { data } = await supabase.from("users").insert(staffRow).select().single();
-  
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_staff") || "[]");
-    localStorage.setItem("apex_local_staff", JSON.stringify([data || staffRow, ...local]));
-  } catch (e) {}
-
-  return data;
-}
-
-export async function deleteStaffUser(userId) {
-  await supabase.from("users").delete().eq("id", userId);
-}
+// registerStaffUser and deleteStaffUser now live in services/authApi.js
+// because they must go through the Supabase Edge Functions.
 
 export const DEFAULT_LAB_SETTINGS = {
   id: "MAIN_SETTINGS",

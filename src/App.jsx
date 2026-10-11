@@ -2,11 +2,20 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest,
-  deleteTest, toggleTestAvailability, getStaffUsers, registerStaffUser, deleteStaffUser,
+  deleteTest, toggleTestAvailability, getStaffUsers,
   getLabSettings, saveLabSettings, settleOrderDue,
   getDoctorsList, createOrUpdateDoctor, deleteDoctor, seedRadiologyCatalog,
   markSampleRecollected, requestSampleRecollection
 } from "./services/api";
+
+import {
+  createStaffUser,
+  deleteStaffUser as deleteStaffUserAuth,
+  logout as authLogout,
+  getCurrentSession,
+  fetchProfileForUser,
+  mapUser,
+} from "./services/authApi";
 import { supabase } from "./supabaseClient";
 
 import { 
@@ -121,110 +130,83 @@ export default function App() {
   // 1. Check Public QR Scan Link (Resolves ANY vial barcode)
   useEffect(() => {
     const checkPublicQrScan = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const trackId = params.get("track") || params.get("verify");
-      const barcode = params.get("bc");
-      if (!trackId && !barcode) return;
+  const params = new URLSearchParams(window.location.search);
+  const trackId = params.get("track") || params.get("verify");
+  const barcode = params.get("bc");
+  if (!trackId && !barcode) return;
 
-      setIsVerifyingPublicUrl(true);
-      try {
-        const settings = await getLabSettings();
-        if (settings) setLabSettings(settings);
+  setIsVerifyingPublicUrl(true);
+  try {
+    // Public settings only — full settings are staff-only.
+    // The patient portal reads lab_name / phone / address from labSettings; if
+    // this fails, the component falls back to its built-in defaults.
+    try {
+      const settings = await getLabSettings();
+      if (settings) setLabSettings(settings);
+    } catch (e) {
+      // Anon cannot read lab_settings under RLS — silently ignore
+    }
 
-        const staff = await getStaffUsers();
-        if (staff && staff.length > 0) setStaffList(staff);
+    const { data: rpcData, error: rpcErr } = await supabase.rpc(
+      "lookup_order_by_qr",
+      { p_track_id: trackId || null, p_barcode: barcode || null }
+    );
 
-        let query = supabase.from("orders").select(`
-          *,
-          patient:patients(*),
-          order_tests(*, test:tests(*, test_parameters(*))),
-          results(*)
-        `);
+    if (rpcErr) throw rpcErr;
 
-        if (trackId) {
-          query = query.eq("id", trackId);
-        } else if (barcode) {
-          query = query.or(`barcode.ilike.%${barcode}%,id.ilike.%${barcode}%`);
-        }
+    if (!rpcData) {
+      setVerificationError("Report record not found or invalid certificate.");
+      return;
+    }
 
-        const { data, error } = await query.maybeSingle();
+    // staff array is included in the RPC response; fall back to empty
+    setStaffList(Array.isArray(rpcData.staff) ? rpcData.staff : []);
 
-        if (error || !data) {
-          const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-          const matched = local.find(o => {
-            const vials = o.vials || getAllOrderVials(o);
-            return (
-              o.id === trackId || o.orderId === trackId || 
-              o.barcode === barcode || 
-              (o.allBarcodes && o.allBarcodes.includes(barcode)) ||
-              vials.some(v => v.barcode === barcode)
-            );
-          });
-          if (matched) setPatientTrackingOrder(matched);
-          else setVerificationError("Report record not found or invalid certificate.");
-        } else {
-          const matchedTests = (data.order_tests || []).map(ot => ot.test || ot.tests || ot).filter(Boolean);
-          const resolvedDoc = data.patient?.address?.startsWith("Ref: ") 
-            ? data.patient.address.replace("Ref: ", "") 
-            : (data.patient?.doctor || "Self");
-
-          let resolvedDeptRemarks = {};
-          try {
-            if (data.verifier_remarks && data.verifier_remarks.trim().startsWith("{")) {
-              resolvedDeptRemarks = JSON.parse(data.verifier_remarks);
-            }
-          } catch (e) {}
-
-          (data.results || []).forEach(r => {
-            if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
-              const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
-              if (r.result_value) resolvedDeptRemarks[dId] = r.result_value;
-            }
-          });
-
-          let restoredVials = [];
-          const vialResult = (data.results || []).find(r => r.parameter_id === "SPECIMEN_VIALS");
-          if (vialResult && vialResult.result_value) {
-            try { restoredVials = JSON.parse(vialResult.result_value); } catch (e) {}
-          }
-
-          const primaryBc = String(data.barcode || "").split(/[\s,]+/)[0];
-
-          setPatientTrackingOrder({
-            orderId: data.id,
-            receiptNo: `RCP-${(data.order_date || "").replace(/-/g, "").slice(4)}-${data.id.slice(-4)}`,
-            date: data.order_date,
-            createdAt: data.created_at || data.order_date,
-            barcode: primaryBc,
-            vials: restoredVials.length > 0 ? restoredVials : getAllOrderVials({ ...data, barcode: primaryBc, tests: matchedTests }),
-            doctor: resolvedDoc,
-            patient: { 
-              ...(data.patient || {}), 
-              id: data.patient_id, 
-              name: data.patient?.name || "Patient", 
-              doctor: resolvedDoc 
-            },
-            tests: matchedTests,
-            billing: { paid: data.paid_amount || 0, due: data.due_amount || 0, netPayable: data.net_payable || 0 },
-            results: (data.results || []).reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {}),
-            qcStatus: data.qc_status || "Pending",
-            isLocked: data.is_locked || false,
-            dept_remarks: resolvedDeptRemarks,
-            deptRemarks: resolvedDeptRemarks,
-            verifierRemarks: typeof data.verifier_remarks === "string" && !data.verifier_remarks.startsWith("{") ? data.verifier_remarks : (resolvedDeptRemarks["GLOBAL"] || ""),
-            verifier_remarks: data.verifier_remarks || ""
-          });
-        }
-      } catch (err) {
-        setVerificationError("Failed to load patient report: " + err.message);
-      } finally {
-        setIsVerifyingPublicUrl(false);
-      }
-    };
+    // RPC returns the shape PatientLivePortal expects, plus snake_case mirrors
+    setPatientTrackingOrder(rpcData);
+  } catch (err) {
+    console.error("QR lookup failed:", err);
+    setVerificationError(
+      "Failed to load patient report: " + (err.message || String(err))
+    );
+  } finally {
+    setIsVerifyingPublicUrl(false);
+  }
+};
 
     checkPublicQrScan();
   }, []);
+// Session restore + auth state listener
+useEffect(() => {
+  let mounted = true;
 
+  (async () => {
+    const session = await getCurrentSession();
+    if (!mounted || !session?.user) return;
+    const profile = await fetchProfileForUser(session.user.id);
+    if (!mounted || !profile) return;
+    const user = mapUser(session.user, profile);
+    setCurrentUser(user);
+    const role = (user.role || "").toLowerCase();
+    setActiveTab(
+      role === "receptionist" ? "reception" :
+      role === "technologist" ? "worklists" :
+      role === "verifier" || role === "biochemist" ? "verifier" : "dashboard"
+    );
+  })();
+
+  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (!mounted) return;
+    if (!session) {
+      setCurrentUser(null);
+    }
+  });
+
+  return () => {
+    mounted = false;
+    sub?.subscription?.unsubscribe?.();
+  };
+}, []);
   // 2. Fetch Master Data
   useEffect(() => {
     if (!currentUser) return;
@@ -997,23 +979,31 @@ export default function App() {
     }
   };
 
-  const handleRegisterStaff = async (staffData) => {
-    setIsLoading(true);
-    try {
-      await registerStaffUser(staffData);
-      alert("✅ Staff Member Registered!");
-      setStaffList((await getStaffUsers()) || []);
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
-  };
+const handleRegisterStaff = async (staffData) => {
+  setIsLoading(true);
+  try {
+    await createStaffUser(staffData);
+    alert("✅ Staff Member Registered!");
+    setStaffList((await getStaffUsers()) || []);
+  } catch (e) {
+    alert("Error registering staff: " + (e.message || e));
+  } finally {
+    setIsLoading(false);
+  }
+};
 
-  const handleDeleteStaff = async (userId, userName) => {
-    if (!window.confirm(`Delete staff member "${userName}"?`)) return;
-    setIsLoading(true);
-    try {
-      await deleteStaffUser(userId);
-      setStaffList((await getStaffUsers()) || []);
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
-  };
+const handleDeleteStaff = async (userId, userName) => {
+  if (!window.confirm(`Delete staff member "${userName}"?`)) return;
+  setIsLoading(true);
+  try {
+    await deleteStaffUserAuth(userId);
+    setStaffList((await getStaffUsers()) || []);
+  } catch (e) {
+    alert("Error deleting staff: " + (e.message || e));
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleSaveDoctor = async (docData) => {
     setIsLoading(true);
@@ -1109,7 +1099,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col w-full">
       <Navbar 
         currentUser={currentUser} 
-        onLogout={() => setCurrentUser(null)} 
+        onLogout={async () => { await authLogout(); setCurrentUser(null); }}  
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         mobileMenuOpen={mobileMenuOpen} 
