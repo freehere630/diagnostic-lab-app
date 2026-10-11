@@ -643,8 +643,34 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const nowIso = now.toISOString();
   const todayDate = nowIso.slice(0, 10);
   const todayCompact = todayDate.replace(/-/g, "");
-  
-  const receiptNo = `RCP-${todayCompact.slice(4)}-${primaryBarcode.slice(-4)}`;
+
+  // Receipt numbers are per-visit, not per-barcode.
+  // Look up the highest existing receipt for today and increment by 1.
+  let receiptSeq = 1;
+  try {
+    const { data: recent } = await supabase
+      .from("orders")
+      .select("receipt_no")
+      .eq("order_date", todayDate)
+      .not("receipt_no", "is", null)
+      .order("receipt_no", { ascending: false })
+      .limit(50);
+
+    if (recent && recent.length > 0) {
+      const prefix = `RCP-${todayCompact}-`;
+      for (const r of recent) {
+        const rn = String(r.receipt_no || "");
+        if (rn.startsWith(prefix)) {
+          const seq = parseInt(rn.slice(prefix.length), 10);
+          if (!isNaN(seq) && seq >= receiptSeq) receiptSeq = seq + 1;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Receipt sequence lookup warning:", e);
+  }
+
+  const receiptNo = `RCP-${todayCompact}-${String(receiptSeq).padStart(4, "0")}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
   // 1. Persist Patient
@@ -728,13 +754,14 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     let vialOrderRow = {
       id: thisOrderId,
       patient_id: patientId,
-      barcode: vialBarcode, // Exact single barcode for this specific vial!
+      barcode: vialBarcode,
       order_date: todayDate,
       created_at: nowIso,
+      receipt_no: receiptNo,
       subtotal: isMaster ? subTotal : vialSubtotal,
       discount_percent: finalDiscountPercent,
       net_payable: isMaster ? finalNet : vialNet,
-      paid_amount: isMaster ? finalPaid : vialNet,
+      paid_amount: isMaster ? finalPaid : 0,
       due_amount: isMaster ? finalDue : 0,
       sample_status: "Order Created",
       qc_status: "Pending",
@@ -760,13 +787,19 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
     // Save vial mapping and specific parameters in results
     try {
-      await saveTestResult(savedThisOrderId, "SPECIMEN_VIALS", JSON.stringify(departmentVials));
+      // Store ONLY this vial's own entry — sibling vials live on their
+      // own order rows. Previously the full departmentVials array was
+      // written here, which caused every order to appear to own every
+      // sibling vial's tests.
+      await saveTestResult(savedThisOrderId, "SPECIMEN_VIALS", JSON.stringify([v]));
       await saveTestResult(savedThisOrderId, `VIAL_DEPT_${vialBarcode}`, v.deptId);
       await saveTestResult(savedThisOrderId, `VIAL_TESTS_${vialBarcode}`, JSON.stringify(v.testNames));
       for (const t of testsForThisVial) {
         await saveTestResult(savedThisOrderId, `TEST_VIAL_${t.id}`, vialBarcode);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Vial metadata write failed:", e);
+    }
 
     const completeVialOrder = {
       ...vialOrderRow,
@@ -789,16 +822,17 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
         doctor: referringDoctor,
         address: `Ref: ${referringDoctor}`
       },
-      tests: isMaster ? selectedTests : testsForThisVial,
+      // ALWAYS scoped to this vial — never the full sibling set
+      tests: testsForThisVial,
       vialTests: testsForThisVial,
-      vials: departmentVials,
+      vials: [v],
       order_tests: testsForThisVial.map(t => ({ test_id: t.id, test: t })),
-      billing: { 
-        subTotal: isMaster ? subTotal : vialSubtotal, 
-        discount: finalDiscountPercent, 
-        netPayable: isMaster ? finalNet : vialNet, 
-        paid: isMaster ? finalPaid : vialNet, 
-        due: isMaster ? finalDue : 0 
+      billing: {
+        subTotal: vialSubtotal,
+        discount: finalDiscountPercent,
+        netPayable: vialNet,
+        paid: isMaster ? finalPaid : vialNet,
+        due: isMaster ? finalDue : 0
       },
       results: {},
       qcStatus: "Pending",
@@ -818,8 +852,26 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     localStorage.setItem("apex_local_orders", JSON.stringify([...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))]));
   } catch (e) {}
 
-  // Return the master order containing the full receipt & test set for printing
-  return createdVialOrders[0];
+  // Return a print-ready master order. The caller uses this to render the
+  // A5 receipt, which needs the full test list. Persisted versions (DB +
+  // localStorage) stay scoped per-vial to avoid the sibling-leak bug.
+  const masterForPrint = {
+    ...createdVialOrders[0],
+    tests: selectedTests,
+    order_tests: selectedTests.map(t => ({ test_id: t.id, test: t })),
+    vials: departmentVials,
+    allBarcodes: barcodeList,
+    barcodesList: barcodeList,
+    billing: {
+      subTotal: subTotal,
+      discount: finalDiscountPercent,
+      netPayable: finalNet,
+      paid: finalPaid,
+      due: finalDue
+    }
+  };
+
+  return masterForPrint;
 }
 
 // ==========================================

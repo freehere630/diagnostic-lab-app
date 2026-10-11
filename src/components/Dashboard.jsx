@@ -40,48 +40,91 @@ export default function Dashboard({
   useEffect(() => {
     setLocalOrders(orders);
   }, [orders]);
+  // Group sibling vial-orders (same receiptNo) into one row per visit
+  const visitGroups = useMemo(() => {
+    const groups = new Map();
+    for (const o of localOrders) {
+      const key = o.receiptNo || o.orderId || o.id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
+    }
 
+    return Array.from(groups.values()).map((vials) => {
+      const sorted = [...vials].sort((a, b) =>
+        String(a.barcode || "").localeCompare(String(b.barcode || ""))
+      );
+      const master = sorted[0];
+      const allBarcodes = [];
+      const allTests = [];
+      let totalPaid = 0;
+      let totalDue = 0;
+      let netPayable = 0;
+
+      for (const v of sorted) {
+        const bc = String(v.barcode || "").split(/[\s,]+/)[0];
+        if (bc && !allBarcodes.includes(bc)) allBarcodes.push(bc);
+        for (const t of (v.tests || [])) allTests.push(t);
+
+        // Sum billing across siblings, but count the master's full net only once
+        totalPaid += parseFloat(v.billing?.paid || 0);
+        totalDue  += parseFloat(v.billing?.due  || 0);
+        netPayable = Math.max(netPayable, parseFloat(v.billing?.netPayable || 0));
+      }
+
+      const anyPending = sorted.some((v) => (v.qcStatus || v.qc_status) !== "Verified");
+      const anyRepeat = sorted.some((v) => {
+        const s = (v.sample_status || v.sampleStatus || "").toLowerCase();
+        return s.includes("repeat") && !s.includes("recollected");
+      });
+
+      return {
+        master,
+        vials: sorted,
+        allBarcodes,
+        allTests,
+        totalPaid,
+        totalDue,
+        netPayable,
+        anyPending,
+        anyRepeat,
+        createdAt: master.createdAt || master.created_at || master.date,
+        date: master.date,
+        patient: master.patient,
+        receiptNo: master.receiptNo,
+        isLocked: sorted.every((v) => v.isLocked === true || v.qcStatus === "Verified")
+      };
+    });
+  }, [localOrders]);
   // Universal multi-barcode search: Matches primary, secondary, and test barcodes
   const sortedOrders = useMemo(() => {
     const q = (dashboardSearch || "").trim().toLowerCase();
-    return [...localOrders]
-      .filter((ord) => {
+    return visitGroups
+      .filter((g) => {
         if (!q) return true;
-        const orderVials = getAllOrderVials(ord, testCatalog);
-        const allBarcodes = [
-          ord.barcode,
-          ...(ord.allBarcodes || []),
-          ...(ord.barcodesList || []),
-          ...orderVials.map((v) => v.barcode),
-          ...(ord.vials || []).map((v) => v.barcode),
-          ...(ord.tests || []).map((t) => t.vialBarcode || t.barcode)
-        ].filter(Boolean);
-
         return (
-          allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
-          (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
-          (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q)) ||
-          (ord.patient?.phone && ord.patient.phone.includes(q)) ||
-          (ord.receiptNo && ord.receiptNo.toLowerCase().includes(q))
+          g.allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
+          (g.patient?.name && g.patient.name.toLowerCase().includes(q)) ||
+          (g.patient?.id && String(g.patient.id).toLowerCase().includes(q)) ||
+          (g.patient?.phone && g.patient.phone.includes(q)) ||
+          (g.receiptNo && g.receiptNo.toLowerCase().includes(q))
         );
       })
       .sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
-        const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
+        const timeA = new Date(a.createdAt).getTime() || 0;
+        const timeB = new Date(b.createdAt).getTime() || 0;
         return timeB - timeA;
       });
-  }, [localOrders, dashboardSearch, testCatalog]);
-
+  }, [visitGroups, dashboardSearch]);
   const recollectionOrders = useMemo(() => {
-    return sortedOrders.filter((o) => {
-      const status = (o.sample_status || o.sampleStatus || "").toLowerCase();
-      const remarks = (o.verifierRemarks || o.verifier_remarks || "").toUpperCase();
+    return sortedOrders.filter((g) => {
+      const status = (g.master.sample_status || g.master.sampleStatus || "").toLowerCase();
+      const remarks = (g.master.verifierRemarks || g.master.verifier_remarks || "").toUpperCase();
 
       if (status.includes("recollected") || status === "sample recollected") {
         return false;
       }
 
-      return (
+            return (
         status.includes("repeat collection required") ||
         status === "repeat collection" ||
         (remarks.includes("RECOLLECTION REQUIRED") && !status.includes("recollected"))
@@ -89,14 +132,16 @@ export default function Dashboard({
     });
   }, [sortedOrders]);
 
-  const totalRevenue = sortedOrders.reduce((acc, o) => acc + (o.billing?.paid || 0), 0);
-  const totalDue = sortedOrders.reduce((acc, o) => acc + (o.billing?.due || 0), 0);
-  const pendingQC = sortedOrders.filter((o) => o.qcStatus === "Pending").length;
-  const verifiedCount = sortedOrders.filter((o) => o.qcStatus === "Verified").length;
+  const totalRevenue = sortedOrders.reduce((acc, g) => acc + g.totalPaid, 0);
+  const totalDue = sortedOrders.reduce((acc, g) => acc + g.totalDue, 0);
+  const pendingQC = sortedOrders.filter((g) => g.anyPending).length;
+  const verifiedCount = sortedOrders.filter((g) => !g.anyPending).length;
 
-  const openSettleModal = (ord) => {
-    setSettleOrder(ord);
-    setCollectionAmount(ord.billing?.due || "");
+  const openSettleModal = (g) => {
+    // Find the sibling that actually carries the due balance
+    const withDue = g.vials.find((v) => (v.billing?.due || 0) > 0) || g.master;
+    setSettleOrder(withDue);
+    setCollectionAmount(withDue.billing?.due || g.totalDue || "");
   };
 
   const submitSettlement = () => {
@@ -274,34 +319,37 @@ export default function Dashboard({
                   <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {sortedOrders.map((ord) => {
-                  const hasDue = (ord.billing?.due || 0) > 0;
-                  const statusStr = (ord.sample_status || ord.sampleStatus || "").toLowerCase();
-                  const isRecollection = statusStr.includes("repeat") && !statusStr.includes("recollected");
-                  const orderVials = (ord.vials && ord.vials.length > 0) ? ord.vials : getAllOrderVials(ord, testCatalog);
+                            <tbody className="divide-y divide-slate-100">
+                {sortedOrders.map((g) => {
+                  const masterId = g.master.orderId || g.master.id;
+                  const hasDue = g.totalDue > 0;
+                  const isRecollection = g.anyRepeat;
                   const searchTrimmed = (dashboardSearch || "").trim().toLowerCase();
 
                   return (
                     <tr
-                      key={ord.orderId || ord.id}
+                      key={masterId}
                       className={`hover:bg-slate-50/80 transition group ${isRecollection ? "bg-rose-50/30" : ""}`}
                     >
                       {/* Time */}
                       <td className="py-2 px-3 whitespace-nowrap">
                         <span className="font-mono text-slate-700 font-medium block">
-                          {formatEntryTime(ord.date, ord.createdAt || ord.created_at)}
+                          {formatEntryTime(g.date, g.createdAt)}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{ord.date}</span>
+                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{g.date}</span>
                       </td>
 
-                      {/* Receipt & Registered Specimen Vials */}
+                      {/* Receipt & All Specimen Vials */}
                       <td className="py-2 px-3">
-                        <span className="font-mono font-bold text-slate-800 block text-[11px]">{ord.receiptNo}</span>
-                        
+                        <span className="font-mono font-bold text-slate-800 block text-[11px]">{g.receiptNo}</span>
+
                         <div className="flex flex-wrap gap-1 mt-0.5 max-w-xs">
-                          {orderVials.map((v, vIdx) => {
-                            const isMatchedSearch = searchTrimmed && String(v.barcode).toLowerCase().includes(searchTrimmed);
+                          {g.allBarcodes.map((bc, vIdx) => {
+                            const isMatchedSearch = searchTrimmed && String(bc).toLowerCase().includes(searchTrimmed);
+                            const matchingVial = g.vials.find(v => String(v.barcode || "").split(/[\s,]+/)[0] === bc);
+                            const tubeShort = matchingVial?.vials?.[0]?.tubeColor?.split(" ")[0]
+                              || matchingVial?.tests?.[0]?.tube_color?.split(" ")[0]
+                              || "Vial";
                             return (
                               <span
                                 key={vIdx}
@@ -310,11 +358,11 @@ export default function Dashboard({
                                     ? "bg-blue-600 text-white border-blue-600 font-bold ring-2 ring-blue-300"
                                     : "bg-slate-100 text-slate-700 border-slate-200"
                                 }`}
-                                title={`Department: ${v.deptCode || v.deptId} • Tube: ${v.tubeColor}`}
+                                title={`Vial ${bc}`}
                               >
-                                <span>{v.barcode}</span>
+                                <span>{bc}</span>
                                 <span className={isMatchedSearch ? "text-blue-100" : "text-slate-400"}>
-                                  ({(v.tubeColor || "Vial").split(" ")[0]})
+                                  ({tubeShort})
                                 </span>
                               </span>
                             );
@@ -325,24 +373,24 @@ export default function Dashboard({
                       {/* Patient */}
                       <td className="py-2 px-3">
                         <div className="font-bold text-slate-900 truncate max-w-[160px] sm:max-w-[200px]">
-                          {ord.patient?.name}
+                          {g.patient?.name}
                         </div>
                         <div className="text-[10px] text-blue-600 font-mono font-semibold">
-                          {ord.patient?.id} • {ord.patient?.age || "?"}Y / {ord.patient?.gender || "?"}
+                          {g.patient?.id} • {g.patient?.age || "?"}Y / {g.patient?.gender || "?"}
                         </div>
                       </td>
 
                       {/* Contact */}
                       <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
-                        {ord.patient?.phone || "—"}
+                        {g.patient?.phone || "—"}
                       </td>
 
                       {/* Paid / Due */}
                       <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px]">
-                        <span className="font-semibold text-slate-700">৳{ord.billing?.paid || 0}</span>
+                        <span className="font-semibold text-slate-700">৳{g.totalPaid}</span>
                         {hasDue ? (
                           <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                            Due ৳{ord.billing?.due}
+                            Due ৳{g.totalDue}
                           </span>
                         ) : (
                           <span className="ml-1.5 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
@@ -359,11 +407,11 @@ export default function Dashboard({
                           </span>
                         ) : (
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            ord.qcStatus === "Verified"
+                            g.isLocked
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : "bg-amber-50 text-amber-700 border-amber-200"
                           }`}>
-                            {ord.qcStatus || "Pending"}
+                            {g.isLocked ? "Verified" : "Pending"}
                           </span>
                         )}
                       </td>
@@ -372,7 +420,7 @@ export default function Dashboard({
                       <td className="py-2 px-3 text-right whitespace-nowrap space-x-1">
                         {hasDue && (
                           <button
-                            onClick={() => openSettleModal(ord)}
+                            onClick={() => openSettleModal(g)}
                             className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[11px] font-bold transition inline-flex items-center gap-1 shadow-xs"
                             title="Collect balance"
                           >
@@ -381,7 +429,23 @@ export default function Dashboard({
                         )}
 
                         <button
-                          onClick={() => handlePrintMoneyReceipt(ord)}
+                          onClick={() => {
+                            const fullVisitOrder = {
+                              ...g.master,
+                              tests: g.allTests,
+                              allBarcodes: g.allBarcodes,
+                              barcodesList: g.allBarcodes,
+                              vials: g.vials,
+                              billing: {
+                                ...g.master.billing,
+                                subTotal: g.allTests.reduce(
+                                  (s, t) => s + parseFloat(t.price || 0),
+                                  0
+                                ),
+                              },
+                            };
+                            handlePrintMoneyReceipt(fullVisitOrder);
+                          }}
                           className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
                         >
                           <Receipt className="w-3 h-3" /> Receipt
@@ -389,7 +453,7 @@ export default function Dashboard({
 
                         <button
                           onClick={() => {
-                            setSelectedOrderId(ord.orderId || ord.id);
+                            setSelectedOrderId(masterId);
                             setActiveTab("reports");
                           }}
                           className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded-md text-[11px] font-semibold transition shadow-xs"
@@ -453,18 +517,18 @@ export default function Dashboard({
               </div>
 
               <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 p-1 text-xs">
-                {recollectionOrders.map((ord) => (
-                  <div key={ord.orderId || ord.id} className="p-2 hover:bg-rose-50/50 rounded-lg space-y-1">
+                {recollectionOrders.map((g) => (
+                  <div key={g.master.orderId || g.master.id} className="p-2 hover:bg-rose-50/50 rounded-lg space-y-1">
                     <div className="flex justify-between items-baseline">
-                      <span className="font-bold text-slate-900">{ord.patient?.name}</span>
-                      <span className="font-mono text-blue-600 text-[10px] font-semibold">{ord.patient?.id}</span>
+                      <span className="font-bold text-slate-900">{g.patient?.name}</span>
+                      <span className="font-mono text-blue-600 text-[10px] font-semibold">{g.patient?.id}</span>
                     </div>
                     <div className="text-[10px] text-slate-500 font-mono">
-                      📞 {ord.patient?.phone} • Barcode: {ord.barcode}
+                      📞 {g.patient?.phone} • Barcodes: {g.allBarcodes.join(", ")}
                     </div>
                     <div className="flex gap-1 pt-1">
                       <button
-                        onClick={() => sendRecollectionWhatsApp(ord, "Hemolyzed Specimen")}
+                        onClick={() => sendRecollectionWhatsApp(g.master, "Hemolyzed Specimen")}
                         className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-semibold flex items-center justify-center gap-1"
                       >
                         <MessageCircle className="w-3 h-3" /> WhatsApp
@@ -472,7 +536,7 @@ export default function Dashboard({
                       <button
                         type="button"
                         disabled={actionLoading}
-                        onClick={() => handleMarkRecollectedAction(ord)}
+                        onClick={() => handleMarkRecollectedAction(g.master)}
                         className="py-1 px-2 bg-slate-900 hover:bg-blue-600 text-white rounded text-[10px] font-semibold flex items-center justify-center gap-1 disabled:opacity-50"
                       >
                         <RotateCcw className="w-3.5 h-3.5" /> Recollected

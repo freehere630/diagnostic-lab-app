@@ -4,6 +4,7 @@ import { BarcodeSVG } from "../utils/barcode";
 
 export default function SampleTracking({
   activeOrder,
+  visitOrders = [],
   departmentalVials = [],
   handlePrintSpecificVialBarcode,
   trackingStatus = {}

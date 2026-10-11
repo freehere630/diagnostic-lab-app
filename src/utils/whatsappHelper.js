@@ -128,7 +128,11 @@ Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212
 
 Thank you for your cooperation in ensuring the highest clinical standards.`;
 
-  // DIRECT WHATSAPP WEB URL (Skips landing page completely)
-  const directWaUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-  window.open(directWaUrl, "_blank");
+  // Universal URL — works on desktop web, WhatsApp Desktop app, and mobile
+  const directWaUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+  const opened = window.open(directWaUrl, "_blank");
+  if (!opened) {
+    // Popup blocked — fall back to same-tab navigation
+    window.location.assign(directWaUrl);
+  }
 }

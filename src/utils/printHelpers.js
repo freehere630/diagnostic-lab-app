@@ -38,9 +38,35 @@ function encodeCode128C(numericText) {
   return patternStr;
 }
 
+// Code 128B — for alphanumeric content such as "P-1644".
+// Character value = charCode - 32, valid range 32..127.
+function encodeCode128B(text) {
+  const str = String(text || "");
+  if (!str) return "";
+
+  let checksum = 104;
+  let patternStr = CODE128_PATTERNS[104];
+  let weight = 1;
+
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i) - 32;
+    if (code < 0 || code > 94) continue;
+    checksum += code * weight;
+    patternStr += CODE128_PATTERNS[code];
+    weight++;
+  }
+
+  const checkDigit = checksum % 103;
+  patternStr += CODE128_PATTERNS[checkDigit];
+  patternStr += CODE128_PATTERNS[106];
+  return patternStr;
+}
+
 export function generateSvgBarcodeHtml(codeText, height = 30) {
   const cleanInput = String(codeText || "2026000001").split(/[\s,]+/)[0];
-  const pattern = encodeCode128C(cleanInput);
+  // Pure digits → Code 128C (compact). Anything else → Code 128B (alphanumeric).
+  const isNumeric = /^\d+$/.test(cleanInput);
+  const pattern = isNumeric ? encodeCode128C(cleanInput) : encodeCode128B(cleanInput);
   if (!pattern) return "";
 
   let x = 0;
@@ -98,21 +124,12 @@ export function checkAbnormalStatus(valStr, min, max, paramType = "numeric") {
 
 function formatResultCell(val, min, max, unit = "", paramType = "numeric") {
   if (!val || val === "—") {
-    return `<span style="color: #64748b; font-weight: 400;">—</span>`;
+    return `<span style="color: #000000; font-weight: 400; font-family: 'Lora', Georgia, serif;">—</span>`;
   }
 
-  const { isAbnormal, flag } = checkAbnormalStatus(val, min, max, paramType);
-  const flagHtml = isAbnormal
-    ? `<span style="font-size: 7pt; font-weight: 900; color: #dc2626; margin-left: 3px; font-family: 'Inter', sans-serif;">(${flag})</span>`
-    : "";
-  const textStyle = isAbnormal
-    ? "font-weight: 900; color: #000000; text-decoration: underline;"
-    : "font-weight: 700; color: #000000;";
-
   return `
-    <span style="${textStyle}; font-family: 'Inter', -apple-system, sans-serif;">${val}</span>
-    ${unit ? `<span style="font-weight: 400; font-size: 7.5pt; color: #333333; margin-left: 2px;">${unit}</span>` : ""}
-    ${flagHtml}
+    <span style="font-weight: 700;font-size: 9pt; color: #000000; font-family: 'Lora', Georgia, serif;">${val}</span>
+    ${unit ? `<span style="font-weight: 600; font-size: 7.5pt; color: #333333; margin-left: 2px; font-family: 'Lora', Georgia, serif;">${unit}</span>` : ""}
   `;
 }
 
@@ -193,9 +210,22 @@ export function getAllOrderVials(order, catalog = []) {
     };
   });
 
-  // Preserve any order vials array if >= 1
+  // Preserve any order vials array if >= 1, but scope to this order's own vial
   if (Array.isArray(order.vials) && order.vials.length >= 1) {
-    return order.vials.map(v => ({
+    const primaryBc = String(order.barcode || "").split(/[\s,]+/)[0];
+
+    let vialsToUse = order.vials;
+    if (primaryBc) {
+      const matching = order.vials.filter((v) => {
+        const bc = String(v.barcode || v.testBarcode || "");
+        return !bc || bc === primaryBc;
+      });
+      // Only apply the filter if it left something behind; otherwise trust
+      // what came in (legacy rows without barcode metadata).
+      if (matching.length > 0) vialsToUse = matching;
+    }
+
+    return vialsToUse.map(v => ({
       deptId: v.deptId || "DEP-GEN",
       deptCode: v.deptCode || "GEN",
       tubeColor: v.tubeColor || "Standard",
@@ -472,13 +502,13 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
       <td style="padding: 2.8px 6px; font-size: 8.5pt; vertical-align: top;">
         ${formatResultCell(val, info.min, info.max, info.unit)}
       </td>
-      <td style="padding: 2.8px 6px; font-size: 7.5pt; color: #333; line-height: 1.35; white-space: pre-line;">${info.ref}</td>
+      <td style="padding: 2.8px 6px; font-size: 9pt; color: #000; font-weight: 600; line-height: 1.35; white-space: pre-line;">${info.ref}</td>
     </tr>
   `;
 
   const secHeader = (title) => `
-    <tr style="background: #f8fafc; border-top: 1px solid #000; border-bottom: 1px solid #000;">
-      <td colspan="3" style="padding: 3px 6px; font-size: 8pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${title}</td>
+    <tr style="">
+      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${title}</td>
     </tr>
   `;
 
@@ -1154,7 +1184,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     if (isProfile) {
       tableRows += `
-        <tr style="border-top: 1.5px solid #000000; border-bottom: 1px solid #000000; background: #f8fafc; page-break-inside: avoid;">
+        <tr style="border-top: 1.5px solid #000000; border-bottom: 1px solid #000000; page-break-inside: avoid;">
           <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 8.5pt; color: #000000; text-transform: uppercase;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
             <span style="font-size: 7pt; font-weight: 600; color: #475569; margin-left: 6px; text-transform: none;">[Multi-Parameter Profile]</span>
@@ -1206,7 +1236,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
       }
 
       tableRows += `
-        <tr style="border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
+        <tr style="border-bottom: 1px dotted #e2e8f0; page-break-inside: avoid;">
           <td style="padding: 3.8px 4px; font-size: 8.5pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
             ${displayName}
           </td>
@@ -1229,7 +1259,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
           <th style="padding: 5px 4px; text-align: left; width: 38%; font-weight: 700; border: none;">Investigation / Parameter</th>
           <th style="padding: 5px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
           <th style="padding: 5px 4px; text-align: left; width: 12%; font-weight: 700; border: none;">Unit</th>
-          <th style="padding: 5px 4px; text-align: left; width: 28%; font-weight: 700; border: none;">Biological Ref. Range</th>
+          <th style="padding: 5px 4px; text-align: left; width: 28%; font-weight: 700; border: none;">Reference Range</th>
         </tr>
       </thead>
       <tbody>
@@ -1252,20 +1282,34 @@ export function renderDepartmentReportHtml({
 }) {
   if (!activeOrder || !group) return "";
 
-  const orderId = activeOrder.orderId || activeOrder.id || "";
-  const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
+  // Prefer the sibling vial that actually owns this department
+  const owner = group.ownerOrder || activeOrder;
+  const orderId = owner.orderId || owner.id || activeOrder.orderId || activeOrder.id || "";
+  const isVerified =
+    owner.isLocked === true ||
+    owner.qcStatus === "Verified" ||
+    group.ownerLocked === true;
+
   const doctorName =
+    owner.doctor ||
+    owner.patient?.doctor ||
     activeOrder.doctor ||
     activeOrder.patient?.doctor ||
-    (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ")
-      ? activeOrder.patient.address.replace("Ref: ", "")
+    (owner.patient?.address && owner.patient.address.startsWith("Ref: ")
+      ? owner.patient.address.replace("Ref: ", "")
       : null) ||
     "Self";
 
   const isDescriptive = isDescriptiveInvestigation(group.tests?.[0], group.dept?.id, group.dept?.name);
-  const deptBarcode = getDepartmentVialBarcode(activeOrder, group.dept?.id, group.tests);
+
+  // Barcode: prefer the owner's, fall back to the department lookup
+  const deptBarcode =
+    group.ownerBarcode ||
+    getDepartmentVialBarcode(owner, group.dept?.id, group.tests) ||
+    String(owner.barcode || activeOrder.barcode || "").split(/[\s,]+/)[0];
+
   const pageQrUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(deptBarcode)}`;
-  const pageQrSvg = generateQrSvgString(pageQrUrl, 48);
+  const pageQrSvg = generateQrSvgString(pageQrUrl, 64);
 
   const techUser = staffList.find((u) => u.role === "technologist") || {
     full_name: "MD. Abdullah AL Tarek",
@@ -1298,14 +1342,35 @@ export function renderDepartmentReportHtml({
 
   // RESOLVE SPECIFIC REMARK FOR THIS DEPARTMENT REPORT
   let resolvedDeptRemark = "";
-  if (activeOrder.dept_remarks && activeOrder.dept_remarks[deptId]) {
-    resolvedDeptRemark = activeOrder.dept_remarks[deptId];
-  } else if (activeOrder.deptRemarks && activeOrder.deptRemarks[deptId]) {
-    resolvedDeptRemark = activeOrder.deptRemarks[deptId];
-  } else if (activeOrder.results?.[`DEPT_REMARKS_${deptId}`]?.value) {
-    resolvedDeptRemark = activeOrder.results[`DEPT_REMARKS_${deptId}`].value;
-  } else if (typeof activeOrder.verifierRemarks === "string" && !activeOrder.verifierRemarks.startsWith("{") && activeOrder.verifierRemarks.trim()) {
-    resolvedDeptRemark = activeOrder.verifierRemarks;
+  const remarkSources = [owner, activeOrder].filter(Boolean);
+
+  for (const src of remarkSources) {
+    if (src.dept_remarks && src.dept_remarks[deptId]) {
+      resolvedDeptRemark = src.dept_remarks[deptId];
+      break;
+    }
+    if (src.deptRemarks && src.deptRemarks[deptId]) {
+      resolvedDeptRemark = src.deptRemarks[deptId];
+      break;
+    }
+    const r =
+      src.results?.[`DEPT_REMARKS_${deptId}`]?.value ??
+      src.results?.[`DEPT_REMARKS_${deptId}`];
+    if (r !== undefined && r !== null && String(r).trim() !== "") {
+      resolvedDeptRemark = String(r).trim();
+      break;
+    }
+  }
+
+  if (!resolvedDeptRemark) {
+    for (const src of remarkSources) {
+      if (typeof src.verifierRemarks === "string" &&
+          !src.verifierRemarks.startsWith("{") &&
+          src.verifierRemarks.trim()) {
+        resolvedDeptRemark = src.verifierRemarks;
+        break;
+      }
+    }
   }
 
   if (!resolvedDeptRemark || !resolvedDeptRemark.trim()) {
@@ -1378,24 +1443,44 @@ export function renderDepartmentReportHtml({
     footerHtml = buildReportFooterHtml(labSettings);
   }
 
+  // Formatters for Bill / Delivery time (12-hour clock)
+  const fmtTime = (dateStr) => {
+    if (!dateStr) return "—";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return "—";
+      return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+    } catch (e) { return "—"; }
+  };
+
+  const billTime = fmtTime(owner.created_at || owner.createdAt || owner.date);
+  const deliveryTime = isVerified
+    ? fmtTime(owner.verified_at || owner.verifiedAt || new Date().toISOString())
+    : "Pending";
+
   const patientDetailsHtml = (pageNum = 1, totalPages = 1) => `
-    <div style="padding: 6px 8px; border: 1px solid #000000; border-radius: 5px; margin: 3px 8mm 0px 8mm; font-size: 8.5pt; color: #000000; page-break-inside: avoid;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 8.5pt;">
+    <div style="padding: 6px 8px; border: 1px solid #000000; border-radius: 5px; margin: 3px 8mm 0px 8mm; font-size: 8.5pt; color: #000000; page-break-inside: avoid; font-family: 'Lora', Georgia, serif;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 8.5pt; font-family: 'Lora', Georgia, serif;">
           <tr>
             <td style="padding: 2px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 9pt; font-weight: 700;">${activeOrder.patient?.name || "Patient"}</b></td>
             <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-family: 'Consolas', monospace; font-size: 8.5pt; font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
+            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
           </tr>
           <tr>
             <td style="padding: 2px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600; font-size: 8pt;">${doctorName}</b></td>
             <td style="padding: 2px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
             <td style="padding: 2px 0;">${sixthSlotDemographics}</td>
           </tr>
+          <tr>
+            <td style="padding: 2px 0;"></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Bill Time:</span> <b style="font-weight: 700;">${billTime}</b></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Delivery Time:</span> <b style="font-weight: 700;">${deliveryTime}</b></td>
+          </tr>
         </table>
-        <div style="width: 44px; text-align: center; margin-left: 6px; flex-shrink: 0;">
+        <div style="width: 58px; text-align: center; margin-left: 8px; flex-shrink: 0;">
           ${pageQrSvg}
-          <span style="font-size: 4.5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase;">
+          <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase; font-family: 'Lora', Georgia, serif;">
             ${totalPages > 1 ? `Pg ${pageNum}/${totalPages}` : 'Verify'}
           </span>
         </div>
@@ -1405,16 +1490,16 @@ export function renderDepartmentReportHtml({
 
   const fullResultsHtml = buildUnifiedResultsTable(
     group.tests || [],
-    activeOrder.results || {},
+    owner.results || {},
     group.dept?.id,
     group.dept?.name,
-    activeOrder.patient || {}
+    owner.patient || activeOrder.patient || {}
   );
 
   const remarksHtml = isDescriptive ? "" : `
-    <div style="margin-top: 6px; margin-left: 8mm; margin-right: 8mm; font-size: 8.5pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
+    <div style="margin-top: 25px; margin-left: 8mm; margin-right: 8mm; font-size: 8.5pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
-      <span style="margin-left: 6px; color: #000000; font-style: italic;">${resolvedDeptRemark}</span>
+      <span style="font-weight: 700; margin-left: 6px; color: #000000; font-style: italic;">${resolvedDeptRemark}</span>
     </div>
   `;
 
@@ -1673,20 +1758,26 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         </div>
 
         <div style="margin-top: 6px;">
-          <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: center;">
-            <div style="text-align: center; width: 130px;">
-              ${generateSvgBarcodeHtml(primaryBarcode, 26)}
-              <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900; letter-spacing: 0.5px;">${primaryBarcode}</p>
+          <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: flex-end; gap: 4px;">
+
+            <!-- Patient UHID barcode -->
+            <div style="text-align: center; width: 150px; flex-shrink: 0;">
+              ${generateSvgBarcodeHtml(patientId, 26)}
+              <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900; letter-spacing: 0.5px; font-family: 'Consolas', monospace;">
+                ${patientId}
+              </p>
             </div>
 
-            <div style="text-align: center; width: 85px;">
+            <!-- Live report QR -->
+            <div style="text-align: center; width: 70px; flex-shrink: 0;">
               ${scannableTrackingQrSvg}
               <span style="font-size: 4.5pt; font-weight: bold; display: block; margin-top: 1px;">Scan for Live Report</span>
             </div>
 
-            <div style="text-align: center; width: 110px;">
-              <div style="border-bottom: 1px solid #000; height: 16px; margin-bottom: 2px;"></div>
-              <span style="font-size: 6pt; font-weight: bold;">AUTHORIZED CASHIER</span>
+            <!-- Cashier signature line -->
+            <div style="text-align: center; width: 120px; flex-shrink: 0; align-self: center;">
+              <div style="border-bottom: 1px solid #000; height: 14px; margin-bottom: 2px;"></div>
+              <span style="font-size: 6pt; font-weight: bold; letter-spacing: 0.3px;">AUTHORIZED CASHIER</span>
             </div>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px; font-size: 5.5pt; color: #475569;">

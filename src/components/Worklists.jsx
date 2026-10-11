@@ -1,51 +1,85 @@
 import React, { useState, useMemo } from "react";
-import { Search, Clock, Layers, CheckCircle2, AlertCircle, AlertTriangle } from "lucide-react";
-import { getDepartmentVialBarcode, getAllOrderVials } from "../utils/printHelpers";
+import { Search, Layers, CheckCircle2, AlertCircle, AlertTriangle, Barcode } from "lucide-react";
 
 export default function Worklists({ orders = [], departments = [], setSelectedOrderId, setActiveTab }) {
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [worklistSearch, setWorklistSearch] = useState("");
 
+  // Group sibling vial-orders by receiptNo → one row per patient visit
+  const visitGroups = useMemo(() => {
+    const groups = new Map();
+    for (const o of orders) {
+      const key = o.receiptNo || o.orderId || o.id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
+    }
+
+    return Array.from(groups.values()).map((vials) => {
+      const sorted = [...vials].sort((a, b) =>
+        String(a.barcode || "").localeCompare(String(b.barcode || ""))
+      );
+      const master = sorted[0];
+      const allBarcodes = [];
+      const allTests = [];
+
+      for (const v of sorted) {
+        const bc = String(v.barcode || "").split(/[\s,]+/)[0];
+        if (bc && !allBarcodes.includes(bc)) allBarcodes.push(bc);
+        for (const t of (v.tests || [])) {
+          allTests.push({
+            ...t,
+            _owningOrderId: v.orderId || v.id,
+            _owningBarcode: bc
+          });
+        }
+      }
+
+      const anyPending = sorted.some((v) =>
+        (v.qcStatus || v.qc_status) !== "Verified" && !v.isLocked
+      );
+      const anyRepeat = sorted.some((v) => {
+        const s = (v.sample_status || v.sampleStatus || "").toLowerCase();
+        return s.includes("repeat") && !s.includes("recollected");
+      });
+
+      return {
+        master,
+        vials: sorted,
+        allBarcodes,
+        allTests,
+        anyPending,
+        anyRepeat,
+        createdAt: master.createdAt || master.created_at || master.date,
+        patient: master.patient,
+        receiptNo: master.receiptNo
+      };
+    });
+  }, [orders]);
+
   const sortedAndFiltered = useMemo(() => {
-    return orders
-      .filter((ord) => {
-        const matchDept =
-          deptFilter === "ALL" ||
-          (ord.tests && ord.tests.some((t) => (t.dept_id || t.deptId) === deptFilter));
+    return visitGroups
+      .filter((g) => {
+        const matchDept = deptFilter === "ALL" ||
+          g.allTests.some((t) => (t.dept_id || t.deptId) === deptFilter);
         const q = worklistSearch.trim().toLowerCase();
-        const orderVials = getAllOrderVials(ord);
-        const allBarcodes = [ord.barcode, ...orderVials.map((v) => v.barcode)].filter(Boolean);
-        const matchSearch =
-          !q ||
-          allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
-          (ord.patient?.name && ord.patient.name.toLowerCase().includes(q)) ||
-          (ord.patient?.id && String(ord.patient.id).toLowerCase().includes(q));
+        const matchSearch = !q ||
+          g.allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
+          (g.patient?.name && g.patient.name.toLowerCase().includes(q)) ||
+          (g.patient?.id && String(g.patient.id).toLowerCase().includes(q));
         return matchDept && matchSearch;
       })
       .sort((a, b) => {
-        const statusA = (a.sample_status || a.sampleStatus || "").toLowerCase();
-        const statusB = (b.sample_status || b.sampleStatus || "").toLowerCase();
-        const isRepeatA = statusA.includes("repeat") && !statusA.includes("recollected");
-        const isRepeatB = statusB.includes("repeat") && !statusB.includes("recollected");
-
-        if (isRepeatA && !isRepeatB) return -1;
-        if (!isRepeatA && isRepeatB) return 1;
-
-        const isPendingA = (a.qcStatus || a.qc_status) !== "Verified" && !a.isLocked;
-        const isPendingB = (b.qcStatus || b.qc_status) !== "Verified" && !b.isLocked;
-        if (isPendingA && !isPendingB) return -1;
-        if (!isPendingA && isPendingB) return 1;
-
-        const timeA = new Date(a.createdAt || a.created_at || a.date).getTime() || 0;
-        const timeB = new Date(b.createdAt || b.created_at || b.date).getTime() || 0;
+        if (a.anyRepeat && !b.anyRepeat) return -1;
+        if (!a.anyRepeat && b.anyRepeat) return 1;
+        if (a.anyPending && !b.anyPending) return -1;
+        if (!a.anyPending && b.anyPending) return 1;
+        const timeA = new Date(a.createdAt).getTime() || 0;
+        const timeB = new Date(b.createdAt).getTime() || 0;
         return timeB - timeA;
       });
-  }, [orders, deptFilter, worklistSearch]);
+  }, [visitGroups, deptFilter, worklistSearch]);
 
-  const pendingCount = useMemo(() => {
-    return sortedAndFiltered.filter((o) => (o.qcStatus || o.qc_status) !== "Verified" && !o.isLocked).length;
-  }, [sortedAndFiltered]);
-
+  const pendingCount = useMemo(() => sortedAndFiltered.filter((g) => g.anyPending).length, [sortedAndFiltered]);
   const completedCount = sortedAndFiltered.length - pendingCount;
 
   const formatEntryTime = (dateStr, createdAtStr) => {
@@ -60,11 +94,7 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
 
   return (
     <div className="space-y-3.5 max-w-[1720px] mx-auto text-slate-900">
-      
-      {/* 1. COMPACT TOOLBAR & DEPARTMENT SELECTOR */}
       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        
-        {/* Left: Department Icon & Active Stats */}
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
             <Layers className="w-4 h-4" />
@@ -83,12 +113,11 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
               )}
             </div>
             <p className="text-[10px] text-slate-400">
-              Showing pending specimens on top ({pendingCount} pending • {completedCount} verified)
+              One row per patient visit ({pendingCount} pending • {completedCount} verified)
             </p>
           </div>
         </div>
 
-        {/* Right: Department Select & Search Input */}
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={deptFilter}
@@ -112,17 +141,15 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
             />
           </div>
         </div>
-
       </div>
 
-      {/* 2. DENSE WORKLIST SPECIMEN TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                 <th className="py-2.5 px-3">Time</th>
-                <th className="py-2.5 px-3">Department Vial Barcode(s)</th>
+                <th className="py-2.5 px-3">Specimen Barcode(s)</th>
                 <th className="py-2.5 px-3">Patient (UHID)</th>
                 <th className="py-2.5 px-3">Assigned Tests</th>
                 <th className="py-2.5 px-3">Status</th>
@@ -137,91 +164,73 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                   </td>
                 </tr>
               ) : (
-                sortedAndFiltered.map((o) => {
-                  const isPending = (o.qcStatus || o.qc_status) !== "Verified" && !o.isLocked;
-                  const statusStr = (o.sample_status || o.sampleStatus || "").toLowerCase();
-                  const isRepeat = statusStr.includes("repeat") && !statusStr.includes("recollected");
-                  const orderVials = getAllOrderVials(o);
+                sortedAndFiltered.map((g) => {
+                  const masterId = g.master.orderId || g.master.id;
+                  const isPending = g.anyPending;
+                  const isRepeat = g.anyRepeat;
+
+                  const qSearch = (worklistSearch || "").trim().toLowerCase();
+                  let testsToShow = g.allTests;
+                  if (qSearch) {
+                    testsToShow = g.allTests.filter((t) =>
+                      String(t._owningBarcode || t.vialBarcode || "").toLowerCase().includes(qSearch)
+                    );
+                  }
+                  if (deptFilter !== "ALL") {
+                    testsToShow = g.allTests.filter((t) => (t.dept_id || t.deptId) === deptFilter);
+                  }
 
                   return (
                     <tr
-                      key={o.orderId || o.id}
-                      className={`hover:bg-slate-50/70 transition group ${
-                        isRepeat 
-                          ? "bg-rose-50/40" 
-                          : isPending 
-                            ? "bg-amber-50/20" 
-                            : ""
+                      key={masterId}
+                      className={`hover:bg-slate-50/70 transition ${
+                        isRepeat ? "bg-rose-50/40" : isPending ? "bg-amber-50/20" : ""
                       }`}
                     >
-                      {/* Time */}
                       <td className="py-2 px-3 whitespace-nowrap">
                         <span className="font-mono text-slate-800 font-semibold block text-[11px]">
-                          {formatEntryTime(o.date, o.createdAt || o.created_at)}
+                          {formatEntryTime(g.master.date, g.createdAt)}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{o.date}</span>
+                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{g.master.date}</span>
                       </td>
 
-                      {/* Vial Barcodes */}
                       <td className="py-2 px-3">
-                        {deptFilter === "ALL" ? (
-                          <div className="flex flex-wrap gap-1 max-w-xs">
-                            {orderVials.length > 0 ? (
-                              orderVials.map((v, i) => (
-                                <span 
-                                  key={i} 
-                                  className="font-mono font-bold text-[10px] bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-200"
-                                >
-                                  {v.barcode} <span className="text-[9px] text-slate-400 font-normal">({v.tubeColor?.split(" ")[0]})</span>
-                                </span>
-                              ))
-                            ) : (
-                              <span className="font-mono font-bold text-xs text-blue-600">{o.barcode}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="font-mono font-bold text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
-                            {getDepartmentVialBarcode(o, deptFilter)}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Patient Details */}
-                      <td className="py-2 px-3">
-                        <div className="font-bold text-slate-900 truncate max-w-[150px]">{o.patient?.name}</div>
-                        <div className="text-[10px] text-blue-600 font-mono font-semibold">{o.patient?.id}</div>
-                      </td>
-
-                      {/* Assigned Tests */}
-                       <td className="py-2 px-3">
-                        <div className="flex flex-wrap gap-1 max-w-sm">
-                          {(() => {
-                            const qSearch = (worklistSearch || "").trim().toLowerCase();
-                            const testsForVial = qSearch
-                              ? (o.tests || []).filter((t) =>
-                                  String(t.vialBarcode || "").toLowerCase().includes(qSearch) ||
-                                  String(t.barcode || "").toLowerCase().includes(qSearch)
-                                )
-                              : (deptFilter !== "ALL"
-                                  ? (o.tests || []).filter((t) => (t.dept_id || t.deptId) === deptFilter)
-                                  : o.tests || []);
-
-                            const listToRender = testsForVial.length > 0 ? testsForVial : (o.tests || []);
-
-                            return listToRender.map((t, idx) => (
-                              <span
-                                key={idx}
-                                className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200/60"
-                                title={`Vial: ${t.vialBarcode || o.barcode}`}
-                              >
-                                {t.code || t.name}
-                              </span>
-                            ));
-                          })()}
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {g.allBarcodes.map((bc, i) => (
+                            <span
+                              key={i}
+                              className="font-mono font-bold text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded border border-blue-200 inline-flex items-center gap-0.5"
+                            >
+                              <Barcode className="w-2.5 h-2.5" />
+                              {bc}
+                            </span>
+                          ))}
                         </div>
                       </td>
 
-                      {/* QC Status */}
+                      <td className="py-2 px-3">
+                        <div className="font-bold text-slate-900 truncate max-w-[150px]">{g.patient?.name}</div>
+                        <div className="text-[10px] text-blue-600 font-mono font-semibold">{g.patient?.id}</div>
+                      </td>
+
+                      <td className="py-2 px-3">
+                        <div className="flex flex-wrap gap-1 max-w-sm">
+                          {testsToShow.length === 0 ? (
+                            <span className="text-[10px] text-slate-400 italic">No matching tests</span>
+                          ) : (
+                            testsToShow.map((t, idx) => (
+                              <span
+                                key={idx}
+                                className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200/60"
+                                title={`Vial: ${t._owningBarcode || ""}`}
+                              >
+                                {t.code || t.name}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </td>
+
                       <td className="py-2 px-3 whitespace-nowrap">
                         {isRepeat ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
@@ -229,42 +238,31 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                           </span>
                         ) : (
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            o.qcStatus === "Verified"
+                            !isPending
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : "bg-amber-50 text-amber-700 border-amber-200"
                           }`}>
-                            {o.qcStatus || "Pending"}
+                            {!isPending ? "Verified" : "Pending"}
                           </span>
                         )}
                       </td>
 
-                      {/* Action */}
                       <td className="py-2 px-3 text-right whitespace-nowrap">
-                        {isRepeat ? (
-                          <button
-                            onClick={() => {
-                              setSelectedOrderId(o.orderId || o.id);
-                              setActiveTab("verifier");
-                            }}
-                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-[11px] font-bold shadow-xs inline-flex items-center gap-1 transition active:scale-95"
-                          >
-                            <AlertTriangle className="w-3 h-3" /> Recollect ➔
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setSelectedOrderId(o.orderId || o.id);
-                              setActiveTab("verifier");
-                            }}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition shadow-xs ${
-                              isPending
+                        <button
+                          onClick={() => {
+                            setSelectedOrderId(masterId);
+                            setActiveTab("verifier");
+                          }}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition shadow-xs ${
+                            isRepeat
+                              ? "bg-rose-600 hover:bg-rose-700 text-white"
+                              : isPending
                                 ? "bg-blue-600 hover:bg-blue-700 text-white"
                                 : "bg-slate-900 hover:bg-slate-800 text-white"
-                            }`}
-                          >
-                            {isPending ? "Enter Results ➔" : "Review ➔"}
-                          </button>
-                        )}
+                          }`}
+                        >
+                          {isRepeat ? "Recollect ➔" : isPending ? "Enter Results ➔" : "Review ➔"}
+                        </button>
                       </td>
                     </tr>
                   );
@@ -274,7 +272,6 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
           </table>
         </div>
       </div>
-
     </div>
   );
 }

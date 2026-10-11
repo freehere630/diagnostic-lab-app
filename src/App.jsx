@@ -320,13 +320,27 @@ useEffect(() => {
           };
         }).filter(Boolean);
 
+        const orderPrimaryBc = String(o.barcode || "").split(/[\s,]+/)[0];
+
+        // Defensive: filter any fallback source to only this order's own vial
+        const filterByVial = (arr) => {
+          if (!Array.isArray(arr)) return [];
+          if (!orderPrimaryBc) return arr;
+          return arr.filter((t) => {
+            const tb = t?.vialBarcode || t?.barcode;
+            if (!tb) return true; // no vial info → keep (legacy data)
+            return String(tb) === orderPrimaryBc;
+          });
+        };
+
+        const localMatchTests = filterByVial(localMatch?.tests);
+        const dbFallbackTests = filterByVial(o.tests);
+
         const resolvedTests = (matchedTests && matchedTests.length > 0)
           ? matchedTests
-          : (localMatch?.tests && localMatch.tests.length > 0)
-            ? localMatch.tests
-            : (Array.isArray(o.tests) && o.tests.length > 0)
-              ? o.tests
-              : [];
+          : (localMatchTests.length > 0)
+            ? localMatchTests
+            : dbFallbackTests;
 
         const resolvedDoctor = 
           (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
@@ -361,9 +375,10 @@ useEffect(() => {
 
         return {
           orderId: o.id || o.orderId,
-          receiptNo: o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "").slice(4)}-${String(1001 + idx)}`,
+          receiptNo: o.receipt_no || o.receiptNo || `RCP-${(o.order_date || "").replace(/-/g, "")}-${String(1001 + idx)}`,
           date: o.order_date || o.date || todayStr,
           createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
+          verifiedAt: o.verified_at || o.verifiedAt || null,
           barcode: primaryBarcode,
           allBarcodes: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
           barcodesList: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
@@ -425,6 +440,16 @@ useEffect(() => {
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
 
   const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
+
+// All sibling vial orders from the same reception visit share a receiptNo.
+// This groups them so Worklists/QC can present a single patient-level view.
+const visitOrders = useMemo(() => {
+  if (!activeOrder) return [];
+  const key = activeOrder.receiptNo;
+  if (!key) return [activeOrder];
+  const siblings = orders.filter((o) => o.receiptNo === key);
+  return siblings.length > 0 ? siblings : [activeOrder];
+}, [orders, activeOrder]);
 
   // Realtime WebSocket Listener
   useEffect(() => {
@@ -593,28 +618,53 @@ useEffect(() => {
     }
   };
 
-  const departmentalVials = useMemo(() => {
-    if (!activeOrder?.tests) return [];
-    const resolvedVials = getAllOrderVials(activeOrder, testCatalog);
-    return resolvedVials.map((v) => ({
-      deptCode: v.deptCode || "GEN",
-      testBarcode: v.barcode || v.testBarcode || activeOrder.barcode,
-      patientId: activeOrder.patient?.id || "P-1001",
-      patientName: activeOrder.patient?.name || "Patient",
-      tubeColor: v.tubeColor || "Standard",
-      testNames: v.testNames && v.testNames.length > 0 
-        ? v.testNames 
-        : (activeOrder.tests || [])
-            .filter(t => (t.dept_id || t.deptId || "").replace("DEP-", "") === v.deptCode)
-            .map(t => t.code || t.name)
-    }));
-  }, [activeOrder, testCatalog]);
+const departmentalVials = useMemo(() => {
+  if (!visitOrders || visitOrders.length === 0) return [];
+
+  const collected = [];
+  for (const vo of visitOrders) {
+    const vials = getAllOrderVials(vo, testCatalog);
+    for (const v of vials) {
+      const bc = v.barcode || v.testBarcode;
+      if (!collected.some((c) => c.barcode === bc)) collected.push(v);
+    }
+  }
+
+  return collected.map((v) => ({
+    deptCode: v.deptCode || "GEN",
+    testBarcode: v.barcode || v.testBarcode,
+    patientId: activeOrder?.patient?.id || "P-1001",
+    patientName: activeOrder?.patient?.name || "Patient",
+    tubeColor: v.tubeColor || "Standard",
+    testNames: v.testNames && v.testNames.length > 0 ? v.testNames : []
+  }));
+}, [visitOrders, activeOrder, testCatalog]);
 
   const departmentGroupedReports = useMemo(() => {
-    if (!activeOrder?.tests) return [];
+    // Walk every sibling vial in the visit, not just the active order
+    const sources = (visitOrders && visitOrders.length > 0)
+      ? visitOrders
+      : (activeOrder ? [activeOrder] : []);
+
+    const allTests = [];
+    for (const vo of sources) {
+      const voId = vo.orderId || vo.id;
+      const voBc = String(vo.barcode || "").split(/[\s,]+/)[0];
+      const voLocked = vo.isLocked === true || vo.qcStatus === "Verified";
+      for (const t of (vo.tests || [])) {
+        allTests.push({
+          ...t,
+          _owningOrderId: voId,
+          _owningBarcode: voBc,
+          _owningLocked: voLocked,
+        });
+      }
+    }
+    if (allTests.length === 0) return [];
+
     const grouped = {};
 
-    activeOrder.tests.forEach((test) => {
+    allTests.forEach((test) => {
       const code = (test.code || "").toUpperCase();
       const name = (test.name || "").toUpperCase();
       const baseDeptId = test.dept_id || test.deptId || "DEP-BIO";
@@ -653,14 +703,27 @@ useEffect(() => {
             name: groupName || baseDept.name,
             icon: groupIcon || baseDept.icon || "🔬"
           },
-          tests: []
+          tests: [],
+          ownerOrderId: null,
+          ownerBarcode: null,
+          ownerLocked: false,
+          ownerOrder: null,
         };
       }
       grouped[groupKey].tests.push(test);
+
+      // Lock onto the first test's owning sibling as the department owner
+      if (!grouped[groupKey].ownerOrderId && test._owningOrderId) {
+        const owner = sources.find((o) => (o.orderId || o.id) === test._owningOrderId);
+        grouped[groupKey].ownerOrderId = test._owningOrderId;
+        grouped[groupKey].ownerBarcode = test._owningBarcode;
+        grouped[groupKey].ownerLocked = test._owningLocked;
+        grouped[groupKey].ownerOrder = owner || null;
+      }
     });
 
     return Object.values(grouped);
-  }, [activeOrder, departments]);
+  }, [activeOrder, visitOrders, departments]);
 
   // Order Creation Handler with Instant Receipt Print
   const handleSaveOrderToDb = async () => {
@@ -727,113 +790,183 @@ useEffect(() => {
     }
   };
 
-  const handleResultInput = async (paramId, val) => {
-    if (!activeOrder || activeOrder.isLocked) return;
-    if (!paramId || String(paramId).trim() === "" || paramId === "undefined") return;
+const handleResultInput = async (paramId, val) => {
+  if (!activeOrder) return;
+  if (!paramId || String(paramId).trim() === "" || paramId === "undefined") return;
 
-    const cleanVal = (
-      val === undefined || val === null ||
-      String(val).trim() === "undefined" || String(val).trim() === "null"
-    ) ? "" : String(val).trim();
+  // Route to the sibling order that actually owns this parameter
+  const owner = visitOrders.find((o) => {
+    if (o.isLocked) return false;
+    return (o.tests || []).some((t) => {
+      const params = t.test_parameters || t.parameters || [];
+      return params.some((p) => p.id === paramId);
+    });
+  });
+  const effectiveOrder = owner || activeOrder;
+  const targetOrderId = effectiveOrder.orderId || effectiveOrder.id;
+  if (effectiveOrder.isLocked) return;
 
-    let cleanRemarks = activeOrder.verifierRemarks || "";
-    if (cleanRemarks.toUpperCase().includes("RECOLLECTION REQUIRED")) {
-      cleanRemarks = "New sample recollected. Clinically correlated and verified with internal quality control standards.";
+  const cleanVal = (
+    val === undefined || val === null ||
+    String(val).trim() === "undefined" || String(val).trim() === "null"
+  ) ? "" : String(val).trim();
+
+  let cleanRemarks = effectiveOrder.verifierRemarks || "";
+  if (cleanRemarks.toUpperCase().includes("RECOLLECTION REQUIRED")) {
+    cleanRemarks = "New sample recollected. Clinically correlated and verified with internal quality control standards.";
+  }
+
+  setOrders((prev) =>
+    prev.map((o) =>
+      (o.orderId === targetOrderId || o.id === targetOrderId)
+        ? {
+            ...o,
+            sample_status: "In Analysis",
+            verifierRemarks: cleanRemarks,
+            results: { ...o.results, [paramId]: { value: cleanVal } }
+          }
+        : o
+    )
+  );
+
+  setSaveStatus({ state: "saving", message: "Syncing..." });
+  try {
+    await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
+    if (cleanRemarks !== effectiveOrder.verifierRemarks) {
+      await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetOrderId);
     }
+    setSaveStatus({ state: "saved", message: "Saved" });
+    setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1500);
+  } catch (e) {
+    setSaveStatus({ state: "error", message: "Error: " + e.message });
+  }
+};
+
+const handleRemarksChange = (arg1, arg2) => {
+  if (!activeOrder) return;
+
+  if (arg2 !== undefined) {
+    const deptId = arg1;
+    const text = arg2;
+
+    // Find the sibling order that owns this department
+    const targetOrder = visitOrders.find((o) =>
+      (o.tests || []).some((t) => (t.dept_id || t.deptId) === deptId)
+    ) || activeOrder;
+
+    if (targetOrder.isLocked) return;
+    const targetOrderId = targetOrder.orderId || targetOrder.id;
+    const currentDeptRemarks = {
+      ...(targetOrder.dept_remarks || targetOrder.deptRemarks || {}),
+      [deptId]: text
+    };
 
     setOrders((prev) =>
       prev.map((o) =>
-        o.orderId === activeOrder.orderId
-          ? {
-              ...o,
-              sample_status: "In Analysis",
-              verifierRemarks: cleanRemarks,
-              results: {
-                ...o.results,
-                [paramId]: { value: cleanVal }
-              }
-            }
+        (o.orderId === targetOrderId || o.id === targetOrderId)
+          ? { ...o, dept_remarks: currentDeptRemarks, deptRemarks: currentDeptRemarks }
           : o
       )
     );
 
-    setSaveStatus({ state: "saving", message: "Syncing..." });
-    try {
-      await saveTestResult(activeOrder.orderId, paramId, cleanVal, "ENTERED");
-      if (cleanRemarks !== activeOrder.verifierRemarks) {
-        await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", activeOrder.orderId);
-      }
-      setSaveStatus({ state: "saved", message: "Saved" });
-      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1500);
-    } catch (e) {
-      setSaveStatus({ state: "error", message: "Error: " + e.message });
-    }
-  };
-
-  const handleRemarksChange = (arg1, arg2) => {
-    if (!activeOrder || activeOrder.isLocked) return;
-
-    if (arg2 !== undefined) {
-      const deptId = arg1;
-      const text = arg2;
-      const currentDeptRemarks = { ...(activeOrder.dept_remarks || activeOrder.deptRemarks || {}), [deptId]: text };
-
-      setOrders((prev) =>
-        prev.map((o) =>
-          (o.orderId === activeOrder.orderId || o.id === activeOrder.orderId)
-            ? {
-                ...o,
-                dept_remarks: currentDeptRemarks,
-                deptRemarks: currentDeptRemarks
-              }
-            : o
-        )
-      );
-
-      (async () => {
-        try {
-          await saveTestResult(activeOrder.orderId, `DEPT_REMARKS_${deptId}`, text);
-          await supabase.from("orders").update({ verifier_remarks: JSON.stringify(currentDeptRemarks) }).eq("id", activeOrder.orderId);
-        } catch (e) {}
-      })();
-    } else {
-      const val = arg1;
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.orderId === activeOrder.orderId ? { ...o, verifierRemarks: val } : o
-        )
-      );
-    }
-  };
-
+    (async () => {
+      try {
+        await saveTestResult(targetOrderId, `DEPT_REMARKS_${deptId}`, text);
+        await supabase.from("orders")
+          .update({ verifier_remarks: JSON.stringify(currentDeptRemarks) })
+          .eq("id", targetOrderId);
+      } catch (e) {}
+    })();
+  } else {
+    // Global remark — apply to all unlocked siblings
+    const val = arg1;
+    setOrders((prev) =>
+      prev.map((o) => {
+        const inVisit = visitOrders.some((vo) => (vo.orderId || vo.id) === (o.orderId || o.id));
+        if (!inVisit || o.isLocked) return o;
+        return { ...o, verifierRemarks: val };
+      })
+    );
+  }
+};
   const handleVerifyInDb = async () => {
     if (!activeOrder) return;
+
+    // ----- Pre-flight: block verification if any parameter is empty -----
+    const ordersToVerify = (visitOrders && visitOrders.length > 0) ? visitOrders : [activeOrder];
+    const incompleteReport = [];
+
+    for (const vo of ordersToVerify) {
+      if (vo.isLocked === true || vo.qcStatus === "Verified") continue;
+
+      const missing = [];
+      for (const t of (vo.tests || [])) {
+        const params = t.test_parameters || t.parameters || [];
+        // If a test has no explicit params, treat the test row itself as one param
+        const effectiveParams = params.length > 0
+          ? params
+          : [{ id: t.id, name: t.name || "Result" }];
+
+        for (const p of effectiveParams) {
+          const raw = vo.results?.[p.id]?.value
+            ?? vo.results?.[p.id]
+            ?? vo.results?.[t.id]?.value;
+          const val = raw === undefined || raw === null ? "" : String(raw).trim();
+          if (val === "" || val.toLowerCase() === "undefined" || val.toLowerCase() === "null") {
+            missing.push(`${t.code || t.name} → ${p.name || "Result"}`);
+          }
+        }
+      }
+
+      if (missing.length > 0) {
+        incompleteReport.push({
+          orderId: vo.orderId || vo.id,
+          barcode: String(vo.barcode || "").split(/[\s,]+/)[0],
+          missing,
+        });
+      }
+    }
+
+    if (incompleteReport.length > 0) {
+      const lines = incompleteReport.map(
+        (r) => `• ${r.barcode}: ${r.missing.length} parameter(s) missing\n   ${r.missing.slice(0, 5).join(", ")}${r.missing.length > 5 ? ", …" : ""}`
+      );
+      alert(
+        `⚠ Cannot verify — the following parameters have no result:\n\n${lines.join("\n\n")}\n\nPlease enter every result before verifying.`
+      );
+      return;
+    }
+    // ---------------------------------------------------------------------
+
     setIsLoading(true);
     try {
-      const remarksToSave = typeof activeOrder.verifierRemarks === "string" && activeOrder.verifierRemarks.trim()
-        ? activeOrder.verifierRemarks.trim()
-        : "Clinically correlated and verified with internal quality control standards.";
+      const defaultRemarks = "Clinically correlated and verified with internal quality control standards.";
+      const verifierName = currentUser?.name || "Consultant Pathologist";
 
-      const serializedRemarks = activeOrder.dept_remarks && Object.keys(activeOrder.dept_remarks).length > 0
-        ? JSON.stringify(activeOrder.dept_remarks)
-        : remarksToSave;
+      for (const vo of ordersToVerify) {
+        if (vo.isLocked) continue;
+        const remarksToSave = typeof vo.verifierRemarks === "string" && vo.verifierRemarks.trim()
+          ? vo.verifierRemarks.trim()
+          : defaultRemarks;
+        const serializedRemarks = vo.dept_remarks && Object.keys(vo.dept_remarks).length > 0
+          ? JSON.stringify(vo.dept_remarks)
+          : remarksToSave;
 
-      await verifyAndLockOrder(activeOrder.orderId, serializedRemarks, currentUser?.name || "Consultant Pathologist");
-      
-      setOrders(prev => prev.map(o => o.orderId === activeOrder.orderId ? {
-        ...o,
-        qcStatus: "Verified",
-        isLocked: true,
-        verifierRemarks: remarksToSave,
-        verifier_remarks: serializedRemarks
-      } : o));
+        await verifyAndLockOrder(vo.orderId || vo.id, serializedRemarks, verifierName);
+      }
 
-      alert("✅ Report Verified and Locked!");
+      const verifiedIds = new Set(ordersToVerify.map((o) => o.orderId || o.id));
+      setOrders((prev) => prev.map((o) => {
+        if (!verifiedIds.has(o.orderId || o.id)) return o;
+        return { ...o, qcStatus: "Verified", isLocked: true };
+      }));
+
+      alert("✅ All department reports Verified and Locked!");
       fetchPaginatedOrders(true);
-    } catch (e) { 
-      alert("Verification failed: " + e.message); 
-    } finally { 
-      setIsLoading(false); 
+    } catch (e) {
+      alert("Verification failed: " + e.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1165,6 +1298,7 @@ const handleDeleteStaff = async (userId, userName) => {
         {activeTab === "samples" && (
           <SampleTracking 
             activeOrder={activeOrder} 
+            visitOrders={visitOrders}
             departmentalVials={departmentalVials} 
             handlePrintSpecificVialBarcode={(v) => printSpecificVialBarcode(v, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], barcodePrinted: true } })))} 
             trackingStatus={trackingStatus} 
@@ -1183,6 +1317,7 @@ const handleDeleteStaff = async (userId, userName) => {
         {activeTab === "verifier" && (
           <VerificationQC
             activeOrder={activeOrder}
+            visitOrders={visitOrders}
             handleResultInput={handleResultInput}
             handleRemarksChange={handleRemarksChange}
             handleVerifyInDb={handleVerifyInDb}
@@ -1213,7 +1348,14 @@ const handleDeleteStaff = async (userId, userName) => {
             } 
             staffList={staffList} 
             labSettings={labSettings} 
-            onOpenVerificationModal={() => setPatientTrackingOrder(activeOrder)} 
+            onOpenVerificationModal={() => {
+              const fullVisit = {
+                ...activeOrder,
+                tests: (visitOrders || [activeOrder]).flatMap(v => v.tests || []),
+                allBarcodes: (visitOrders || [activeOrder]).map(v => String(v.barcode || "").split(/[\s,]+/)[0]).filter(Boolean),
+              };
+              setPatientTrackingOrder(fullVisit);
+            }}
             handleSettleDue={handleSettleDue}
             handleRemarksChange={handleRemarksChange}
           />

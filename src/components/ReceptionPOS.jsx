@@ -119,8 +119,9 @@ export default function ReceptionPOS({
   const discountAmount = (subTotal * discountVal) / 100;
   const netPayable = Math.max(0, subTotal - discountAmount);
   
-  const currentPaid = paidVal !== undefined ? paidVal : netPayable;
-  const currentDue = Math.max(0, netPayable - currentPaid);
+// in the useMemo area:
+const currentPaid = paidVal !== undefined ? paidVal : 0;
+const currentDue = Math.max(0, netPayable - currentPaid);
 
   useEffect(() => {
     if (paidVal === undefined || paidVal === null) {

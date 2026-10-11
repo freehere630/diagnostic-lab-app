@@ -240,6 +240,11 @@ export default function ReportsPrint({
                         <span className="text-[10px] text-slate-400 block truncate">
                           {group.tests.map(t => t.code || t.name).join(", ")}
                         </span>
+                        {group.ownerBarcode && (
+                          <span className="text-[9px] text-slate-500 font-mono block truncate">
+                            Vial: {group.ownerBarcode}
+                          </span>
+                        )}
                       </div>
                     </button>
 

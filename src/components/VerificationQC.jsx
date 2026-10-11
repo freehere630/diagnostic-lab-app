@@ -11,6 +11,7 @@ import { getDepartmentVialBarcode, checkAbnormalStatus, isDescriptiveInvestigati
 
 export default function VerificationQC({
   activeOrder,
+  visitOrders = [],
   handleResultInput,
   handleRemarksChange,
   handleVerifyInDb,
@@ -44,11 +45,21 @@ export default function VerificationQC({
   }
 
   // Safe tests resolution
-  const resolvedOrderTests = useMemo(() => {
-    const rawTests = activeOrder.tests || activeOrder.order_tests || [];
-    return (Array.isArray(rawTests) ? rawTests : []).map(t => {
+const sourceOrders = useMemo(() => {
+  return (visitOrders && visitOrders.length > 0) ? visitOrders : (activeOrder ? [activeOrder] : []);
+}, [visitOrders, activeOrder]);
+
+const resolvedOrderTests = useMemo(() => {
+  const combined = [];
+  for (const vo of sourceOrders) {
+    const rawTests = vo.tests || vo.order_tests || [];
+    const orderPrimaryBc = String(vo.barcode || "").split(/[\s,]+/)[0];
+    const orderLocked = vo.isLocked === true || vo.qcStatus === "Verified";
+    const orderId = vo.orderId || vo.id;
+
+    for (const t of (Array.isArray(rawTests) ? rawTests : [])) {
       const raw = t.test || t.tests || t;
-      return {
+      combined.push({
         ...raw,
         id: t.test_id || raw.id || t.id,
         name: raw.name || "Investigation",
@@ -56,24 +67,57 @@ export default function VerificationQC({
         dept_id: raw.dept_id || raw.deptId || "DEP-BIO",
         deptId: raw.dept_id || raw.deptId || "DEP-BIO",
         test_parameters: raw.test_parameters || raw.parameters || [],
-        parameters: raw.test_parameters || raw.parameters || []
-      };
-    });
-  }, [activeOrder]);
+        parameters: raw.test_parameters || raw.parameters || [],
+        _owningOrderId: orderId,
+        _owningBarcode: orderPrimaryBc,
+        _owningLocked: orderLocked
+      });
+    }
+  }
+  return combined;
+}, [sourceOrders]);
 
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
 
-  const isVerified = activeOrder.isLocked === true || activeOrder.qcStatus === "Verified";
-  const currentStatus = (localStatus || activeOrder.sample_status || activeOrder.sampleStatus || "").toLowerCase();
-  const currentRemarks = (activeOrder.verifierRemarks || "").toUpperCase();
-
-  const isAwaitingRecollection = !isVerified && (
-    (currentStatus.includes("repeat") && !currentStatus.includes("recollected")) ||
-    (currentRemarks.includes("RECOLLECTION REQUIRED") && !currentStatus.includes("recollected"))
+  const isVerified = sourceOrders.length > 0 && sourceOrders.every(
+    (o) => o.isLocked === true || o.qcStatus === "Verified"
   );
 
-  const isLockedOrAwaiting = isVerified || isAwaitingRecollection;
+  const isOrderAwaitingRecollection = (orderId) => {
+    const o = sourceOrders.find((so) => (so.orderId || so.id) === orderId);
+    if (!o) return false;
+    const s = (o.sample_status || o.sampleStatus || "").toLowerCase();
+    const r = (o.verifierRemarks || "").toUpperCase();
+    return (
+      (s.includes("repeat") && !s.includes("recollected")) ||
+      (r.includes("RECOLLECTION REQUIRED") && !s.includes("recollected"))
+    );
+  };
+
+  const isTestLocked = (test) => {
+    if (!test) return false;
+    return test._owningLocked || isOrderAwaitingRecollection(test._owningOrderId);
+  };
+
+  const getDeptOwnerOrder = (deptId) => {
+    return sourceOrders.find((o) =>
+      (o.tests || []).some((t) => (t.dept_id || t.deptId) === deptId)
+    ) || activeOrder;
+  };
+
+  const isDeptLocked = (deptId) => {
+    const owner = getDeptOwnerOrder(deptId);
+    if (!owner) return false;
+    if (owner.isLocked === true || owner.qcStatus === "Verified") return true;
+    return isOrderAwaitingRecollection(owner.orderId || owner.id);
+  };
+
+  // Global flags for the top-level banners
+  const isLockedOrAwaiting = isVerified;
+  const isAwaitingRecollection = sourceOrders.some((o) =>
+    isOrderAwaitingRecollection(o.orderId || o.id)
+  );
 
   // Department grouping
   const departmentGroups = useMemo(() => {
@@ -177,7 +221,53 @@ export default function VerificationQC({
       };
     });
   }, [resolvedOrderTests, activeOrder.results]);
+  // Global completeness — used to disable the Verify button
+  const verificationStatus = useMemo(() => {
+    let totalRequired = 0;
+    let totalFilled = 0;
+    const pendingByDept = {};
 
+    for (const dept of departmentGroups) {
+      let deptTotal = 0;
+      let deptFilled = 0;
+
+      for (const test of dept.tests) {
+        const params = (test.test_parameters && test.test_parameters.length > 0)
+          ? test.test_parameters
+          : (test.parameters && test.parameters.length > 0)
+            ? test.parameters
+            : [{ id: test.id, name: test.name }];
+
+        for (const p of params) {
+          deptTotal++;
+          const ownerId = test._owningOrderId;
+          const owner = sourceOrders.find((o) => (o.orderId || o.id) === ownerId) || activeOrder;
+          const raw =
+            owner.results?.[p.id]?.value ??
+            owner.results?.[p.id] ??
+            owner.results?.[test.id]?.value ??
+            owner.results?.[test.id];
+          const val = raw === undefined || raw === null ? "" : String(raw).trim();
+          if (val !== "" && val.toLowerCase() !== "undefined" && val.toLowerCase() !== "null") {
+            deptFilled++;
+          }
+        }
+      }
+
+      totalRequired += deptTotal;
+      totalFilled += deptFilled;
+      if (deptTotal > deptFilled) {
+        pendingByDept[dept.id] = { pending: deptTotal - deptFilled, total: deptTotal };
+      }
+    }
+
+    return {
+      isComplete: totalRequired > 0 && totalFilled === totalRequired,
+      totalRequired,
+      totalFilled,
+      pendingByDept,
+    };
+  }, [departmentGroups, sourceOrders, activeOrder]);
   const findParam = (test, keywords) => {
     const keys = Array.isArray(keywords) ? keywords : [keywords];
     const params = test?.test_parameters || test?.parameters || [];
@@ -188,21 +278,45 @@ export default function VerificationQC({
   };
 
   const getParamCurrentVal = (test, paramId) => {
-    return activeOrder.results?.[paramId]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
+    // Prefer the sibling order that actually owns this test
+    const ownerId = test?._owningOrderId;
+    if (ownerId) {
+      const owner = sourceOrders.find((o) => (o.orderId || o.id) === ownerId);
+      if (owner) {
+        const v =
+          owner.results?.[paramId]?.value ??
+          owner.results?.[test.id]?.value ??
+          owner.results?.[paramId] ??
+          owner.results?.[test.id];
+        if (v !== undefined && v !== null && String(v).trim() !== "") {
+          return String(v).trim();
+        }
+      }
+    }
+    // Fallback: active order
+    const fallback =
+      activeOrder.results?.[paramId]?.value ??
+      activeOrder.results?.[test.id]?.value ??
+      activeOrder.results?.[paramId] ??
+      activeOrder.results?.[test.id];
+    return (fallback !== undefined && fallback !== null) ? String(fallback).trim() : "";
   };
 
   const getDeptRemark = (deptId) => {
-    if (activeOrder.dept_remarks && activeOrder.dept_remarks[deptId]) {
-      return activeOrder.dept_remarks[deptId];
+    // Look across every sibling — the owning order may not be activeOrder
+    for (const o of sourceOrders) {
+      if (o.dept_remarks && o.dept_remarks[deptId]) return o.dept_remarks[deptId];
+      if (o.deptRemarks && o.deptRemarks[deptId]) return o.deptRemarks[deptId];
+      const r =
+        o.results?.[`DEPT_REMARKS_${deptId}`]?.value ??
+        o.results?.[`DEPT_REMARKS_${deptId}`];
+      if (r !== undefined && r !== null && String(r).trim() !== "") return String(r).trim();
     }
-    if (activeOrder.deptRemarks && activeOrder.deptRemarks[deptId]) {
-      return activeOrder.deptRemarks[deptId];
-    }
-    if (activeOrder.results?.[`DEPT_REMARKS_${deptId}`]?.value) {
-      return activeOrder.results[`DEPT_REMARKS_${deptId}`].value;
-    }
-    if (typeof activeOrder.verifierRemarks === "string" && !activeOrder.verifierRemarks.startsWith("{")) {
-      return activeOrder.verifierRemarks;
+    // Global fallback
+    for (const o of sourceOrders) {
+      if (typeof o.verifierRemarks === "string" && !o.verifierRemarks.startsWith("{")) {
+        return o.verifierRemarks;
+      }
     }
     return "";
   };
@@ -468,12 +582,18 @@ export default function VerificationQC({
   };
 
   const handleRejectInstant = async () => {
-    if (!window.confirm("Reject this specimen as Hemolyzed and request repeat collection?")) return;
+    if (!window.confirm("Reject this specimen as Hemolyzed and request repeat collection?\n\nClick OK to also send the patient a WhatsApp notice.")) return;
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
     setLocalStatus("Repeat Collection Required");
     try {
       await handleRejectSample(targetId, "Hemolyzed Specimen");
+      // Open WhatsApp with the recollection message
+      try {
+        sendRecollectionWhatsApp(activeOrder, "Hemolyzed Specimen", labSettings);
+      } catch (waErr) {
+        console.warn("WhatsApp open failed:", waErr);
+      }
     } catch (e) {}
   };
 
@@ -508,7 +628,32 @@ export default function VerificationQC({
           </button>
         </div>
       )}
-
+      {/* Verification gate banner — shows when not all results are entered */}
+      {!isVerified && !isAwaitingRecollection && !verificationStatus.isComplete && (
+        <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="font-bold text-xs text-amber-950 uppercase tracking-tight">
+                Verification blocked — {verificationStatus.totalRequired - verificationStatus.totalFilled} result(s) missing
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Every parameter must have a value before the report can be verified.
+                {" "}
+                {Object.entries(verificationStatus.pendingByDept).map(([deptId, info], i) => {
+                  const d = departmentGroups.find(g => g.id === deptId);
+                  return (
+                    <span key={deptId} className="inline-block mr-2">
+                      {i > 0 ? " • " : ""}
+                      <b>{d?.name?.split(" ")[0] || deptId}</b>: {info.pending}/{info.total}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 2. COMPACT PATIENT & VIAL HEADER */}
       <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div className="space-y-1">
@@ -523,19 +668,26 @@ export default function VerificationQC({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-            <span className="flex items-center gap-1">
-              <Barcode className="w-3.5 h-3.5 text-slate-400" />
-              {resolvedOrderTests.reduce((acc, t) => {
-                const code = getDepartmentVialBarcode(activeOrder, t.dept_id || t.deptId);
-                const tube = (t.tube_color || "Vial").split(" ")[0];
-                if (!acc.some((x) => x.code === code)) acc.push({ code, tube });
-                return acc;
-              }, []).map((v, i) => (
-                <span key={i} className="font-mono font-semibold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-200 text-[10px] mr-1">
-                  {v.tube}: {v.code}
-                </span>
-              ))}
-            </span>
+            <span className="flex items-center gap-1 flex-wrap">
+  <Barcode className="w-3.5 h-3.5 text-slate-400" />
+  {sourceOrders.map((o) => {
+    const bc = String(o.barcode || "").split(/[\s,]+/)[0];
+    if (!bc) return null;
+    const isLocked = o.isLocked === true || o.qcStatus === "Verified";
+    return (
+      <span
+        key={bc}
+        className={`font-mono font-semibold px-1.5 py-0.2 rounded border text-[10px] ${
+          isLocked
+            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+            : "bg-slate-100 text-slate-800 border-slate-200"
+        }`}
+      >
+        {bc}
+      </span>
+    );
+  })}
+</span>
             <span className="text-slate-300">•</span>
             <span>Ref: <b className="text-slate-700">{activeOrder.patient?.doctor || activeOrder.doctor || "Self"}</b></span>
           </div>
@@ -562,11 +714,24 @@ export default function VerificationQC({
             <button
               type="button"
               onClick={onVerifyClick}
-              disabled={isLockedOrAwaiting || isLoading}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs active:scale-95"
+              disabled={
+                isLockedOrAwaiting ||
+                isLoading ||
+                (!isVerified && !verificationStatus.isComplete)
+              }
+              title={
+                !isVerified && !verificationStatus.isComplete
+                  ? `${verificationStatus.totalRequired - verificationStatus.totalFilled} result(s) still missing`
+                  : ""
+              }
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs active:scale-95"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              {activeOrder.isLocked ? "Report Verified & Signed" : "Verify & Complete Report"}
+              {isVerified
+                ? "Report Verified & Signed"
+                : verificationStatus.isComplete
+                  ? "Verify & Complete Report"
+                  : `Complete All Results (${verificationStatus.totalFilled}/${verificationStatus.totalRequired})`}
             </button>
           ) : (
             <div className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-500 rounded-lg text-xs font-semibold flex items-center gap-1">
