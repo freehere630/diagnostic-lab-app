@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
   verifyAndLockOrder, createNewTestWithParameters, updateExistingTest,
@@ -60,7 +60,12 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState({ state: "idle", message: "" });
-
+  // Per-parameter debounce timers for result writes
+  const resultWriteTimers = useRef({});
+    // Cooldown per parameter — ignore realtime events for params we just wrote
+  // ourselves. Prevents a late-arriving stale event from overwriting newer
+  // local state.
+  const recentlyWrittenRef = useRef({});
   // Core Master States
   const [departments, setDepartments] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
@@ -121,7 +126,7 @@ export default function App() {
         )
       );
 
-      fetchPaginatedOrders(true);
+      // No hard refetch — in-place update keeps the current patient on screen.
     } catch (e) {
       console.warn("Reject background notice:", e);
     }
@@ -439,7 +444,19 @@ useEffect(() => {
     fetchPaginatedOrders();
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
 
-  const activeOrder = useMemo(() => orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId) || orders[0] || null, [orders, selectedOrderId]);
+  // Cache the last active order so a transient miss in the fresh fetch
+// doesn't silently swap the QC screen to a different patient.
+const lastActiveOrderRef = useRef(null);
+
+const activeOrder = useMemo(() => {
+  const found = orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId);
+  if (found) {
+    lastActiveOrderRef.current = found;
+    return found;
+  }
+  // Not in the current `orders` slice — keep the previous active order.
+  return lastActiveOrderRef.current || orders[0] || null;
+}, [orders, selectedOrderId]);
 
 // All sibling vial orders from the same reception visit share a receiptNo.
 // This groups them so Worklists/QC can present a single patient-level view.
@@ -464,15 +481,28 @@ const visitOrders = useMemo(() => {
           const newResult = payload.new;
           if (!newResult) return;
 
+          const paramId = newResult.parameter_id;
+
+          // Skip if we recently wrote this parameter ourselves. Late-arriving
+          // realtime events from earlier keystrokes would otherwise overwrite
+          // the newer local value and make typed input appear to vanish.
+          if (recentlyWrittenRef.current[paramId] && Date.now() < recentlyWrittenRef.current[paramId]) {
+            return;
+          }
+          // Expire stale entries so the map doesn't grow forever
+          if (recentlyWrittenRef.current[paramId]) {
+            delete recentlyWrittenRef.current[paramId];
+          }
+
           setOrders((prev) =>
             prev.map((ord) => {
               const matches = ord.orderId === newResult.order_id || ord.id === newResult.order_id;
               if (matches) {
-                const isDeptRemark = newResult.parameter_id && newResult.parameter_id.startsWith("DEPT_REMARKS_");
+                const isDeptRemark = paramId && paramId.startsWith("DEPT_REMARKS_");
                 let updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
 
                 if (isDeptRemark) {
-                  const dId = newResult.parameter_id.replace("DEPT_REMARKS_", "");
+                  const dId = paramId.replace("DEPT_REMARKS_", "");
                   updatedDeptRemarks[dId] = newResult.result_value;
                 }
 
@@ -482,7 +512,7 @@ const visitOrders = useMemo(() => {
                   deptRemarks: updatedDeptRemarks,
                   results: {
                     ...ord.results,
-                    [newResult.parameter_id]: { value: newResult.result_value }
+                    [paramId]: { value: newResult.result_value }
                   }
                 };
               }
@@ -493,9 +523,40 @@ const visitOrders = useMemo(() => {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          fetchPaginatedOrders(true);
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          // Patch the specific order in-place. Do NOT refetch the whole list —
+          // that wipes any input the user is currently typing into.
+          const changed = payload.new;
+          if (!changed?.id) return;
+
+          setOrders((prev) =>
+            prev.map((ord) => {
+              if (ord.orderId !== changed.id && ord.id !== changed.id) return ord;
+              return {
+                ...ord,
+                sample_status: changed.sample_status ?? ord.sample_status,
+                sampleStatus: changed.sample_status ?? ord.sampleStatus,
+                qcStatus: changed.qc_status ?? ord.qcStatus,
+                qc_status: changed.qc_status ?? ord.qc_status,
+                isLocked: changed.is_locked ?? ord.isLocked,
+                is_locked: changed.is_locked ?? ord.is_locked,
+                verifierRemarks:
+                  typeof changed.verifier_remarks === "string" && !changed.verifier_remarks.startsWith("{")
+                    ? changed.verifier_remarks
+                    : ord.verifierRemarks,
+                verifier_remarks: changed.verifier_remarks ?? ord.verifier_remarks,
+                paid_amount: changed.paid_amount ?? ord.paid_amount,
+                due_amount: changed.due_amount ?? ord.due_amount,
+                verified_at: changed.verified_at ?? ord.verified_at,
+                billing: {
+                  ...(ord.billing || {}),
+                  paid: changed.paid_amount != null ? parseFloat(changed.paid_amount) : ord.billing?.paid,
+                  due: changed.due_amount != null ? parseFloat(changed.due_amount) : ord.billing?.due,
+                },
+              };
+            })
+          );
         }
       )
       .subscribe();
@@ -528,11 +589,19 @@ const visitOrders = useMemo(() => {
                 const updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
 
                 latestResults.forEach((r) => {
+                  // Skip params with a pending debounced write — the local
+                  // value is newer than what the DB has right now.
+                  if (resultWriteTimers.current && resultWriteTimers.current[r.parameter_id]) return;
+
+                  // Skip params we wrote within the cooldown window.
+                  if (recentlyWrittenRef.current[r.parameter_id] && Date.now() < recentlyWrittenRef.current[r.parameter_id]) {
+                    return;
+                  }
+
                   if (updatedResults[r.parameter_id]?.value !== r.result_value) {
                     updatedResults[r.parameter_id] = { value: r.result_value };
                     changed = true;
-                  }
-                  if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
+                  }      if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
                     const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
                     if (updatedDeptRemarks[dId] !== r.result_value) {
                       updatedDeptRemarks[dId] = r.result_value;
@@ -550,7 +619,7 @@ const visitOrders = useMemo(() => {
       } catch (err) {}
     };
 
-    const poller = setInterval(syncActiveResults, 2500);
+    const poller = setInterval(syncActiveResults, 8000);
     const onFocus = () => {
       syncActiveResults();
       fetchPaginatedOrders(true);
@@ -562,6 +631,15 @@ const visitOrders = useMemo(() => {
       window.removeEventListener('focus', onFocus);
     };
   }, [currentUser, activeOrder?.orderId, activeOrder?.id]);
+  // Clear pending result-write timers when the active order changes
+  useEffect(() => {
+    return () => {
+      if (resultWriteTimers.current) {
+        Object.values(resultWriteTimers.current).forEach(clearTimeout);
+        resultWriteTimers.current = {};
+      }
+    };
+  }, [selectedOrderId]);
 
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
@@ -830,16 +908,37 @@ const handleResultInput = async (paramId, val) => {
   );
 
   setSaveStatus({ state: "saving", message: "Syncing..." });
-  try {
-    await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
-    if (cleanRemarks !== effectiveOrder.verifierRemarks) {
-      await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetOrderId);
-    }
-    setSaveStatus({ state: "saved", message: "Saved" });
-    setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1500);
-  } catch (e) {
-    setSaveStatus({ state: "error", message: "Error: " + e.message });
+
+  // Debounce DB writes per parameter. The optimistic setOrders above is
+  // already instant, so the UI stays responsive. Only the network write
+  // is delayed, to prevent fast typing from racing older values onto
+  // the DB after newer ones.
+  if (!resultWriteTimers.current) resultWriteTimers.current = {};
+  if (resultWriteTimers.current[paramId]) {
+    clearTimeout(resultWriteTimers.current[paramId]);
   }
+
+  resultWriteTimers.current[paramId] = setTimeout(async () => {
+    try {
+      // Mark cooldown BEFORE the write so any event produced by this write
+      // is ignored when it comes back through Realtime.
+      recentlyWrittenRef.current[paramId] = Date.now() + 3000;
+
+      await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
+      if (cleanRemarks !== effectiveOrder.verifierRemarks) {
+        await supabase
+          .from("orders")
+          .update({ verifier_remarks: cleanRemarks })
+          .eq("id", targetOrderId);
+      }
+      setSaveStatus({ state: "saved", message: "Saved" });
+      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1200);
+    } catch (e) {
+      setSaveStatus({ state: "error", message: "Error: " + e.message });
+    } finally {
+      delete resultWriteTimers.current[paramId];
+    }
+  }, 500);   // 350ms after the last keystroke for this param
 };
 
 const handleRemarksChange = (arg1, arg2) => {
@@ -962,7 +1061,8 @@ const handleRemarksChange = (arg1, arg2) => {
       }));
 
       alert("✅ All department reports Verified and Locked!");
-      fetchPaginatedOrders(true);
+      // No hard refetch — the in-place state update already reflects the
+      // verified status. Realtime + poller keep the rest of the list fresh.
     } catch (e) {
       alert("Verification failed: " + e.message);
     } finally {
@@ -1243,13 +1343,18 @@ const handleDeleteStaff = async (userId, userName) => {
       />
       
       {saveStatus.state !== "idle" && (
-        <div className={`py-1 px-3 text-[11px] text-center font-semibold transition ${
-          saveStatus.state === "saving" ? "bg-amber-500 text-white" : 
-          saveStatus.state === "error" ? "bg-rose-600 text-white" : "bg-emerald-600 text-white"
-        }`}>
-          {saveStatus.message}
-        </div>
-      )}
+  <div
+    className={`fixed top-16 right-4 z-[60] py-1.5 px-3 text-[11px] font-semibold rounded-lg shadow-lg transition ${
+      saveStatus.state === "saving"
+        ? "bg-amber-500 text-white"
+        : saveStatus.state === "error"
+          ? "bg-rose-600 text-white"
+          : "bg-emerald-600 text-white"
+    }`}
+  >
+    {saveStatus.message}
+  </div>
+)}
 
       <main className="w-full max-w-[1720px] mx-auto px-3 sm:px-4 py-3 sm:py-4 flex-1">
         {activeTab === "dashboard" && (

@@ -430,6 +430,17 @@ export default function Dashboard({
 
                         <button
                           onClick={() => {
+                            setSelectedOrderId(masterId);
+                            setActiveTab("samples");
+                          }}
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[11px] font-semibold transition inline-flex items-center gap-1"
+                          title="Open vials & barcode labels"
+                        >
+                          <Barcode className="w-3 h-3" /> Vials
+                        </button>
+
+                        <button
+                          onClick={() => {
                             const fullVisitOrder = {
                               ...g.master,
                               tests: g.allTests,

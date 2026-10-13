@@ -1,5 +1,5 @@
 import { generateQrSvgString } from "./qrcode";
-import { buildReportHeaderHtml, buildReportFooterHtml } from "./reportLayout";
+import { buildReportHeaderHtml, buildReportFooterHtml, getReportLayout } from "./reportLayout";
 
 // GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
@@ -128,7 +128,7 @@ function formatResultCell(val, min, max, unit = "", paramType = "numeric") {
   }
 
   return `
-    <span style="font-weight: 700;font-size: 9pt; color: #000000; font-family: 'Lora', Georgia, serif;">${val}</span>
+    <span style="font-weight: 700; font-size: 9pt; color: #000000; font-family: 'Lora', Georgia, serif;">${val}</span>
     ${unit ? `<span style="font-weight: 600; font-size: 7.5pt; color: #333333; margin-left: 2px; font-family: 'Lora', Georgia, serif;">${unit}</span>` : ""}
   `;
 }
@@ -498,8 +498,8 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
 
   const row = (name, val, info) => `
     <tr>
-      <td style="padding: 2.8px 6px; font-size: 8.5pt; color: #000; font-weight: 500;">${name}</td>
-      <td style="padding: 2.8px 6px; font-size: 8.5pt; vertical-align: top;">
+      <td style="padding: 2.8px 6px; font-size: 9pt; color: #000; font-weight: 500;">${name}</td>
+      <td style="padding: 2.8px 6px; font-size: 9pt; vertical-align: top;">
         ${formatResultCell(val, info.min, info.max, info.unit)}
       </td>
       <td style="padding: 2.8px 6px; font-size: 9pt; color: #000; font-weight: 600; line-height: 1.35; white-space: pre-line;">${info.ref}</td>
@@ -516,7 +516,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
     <div style="width: 92%; margin: 4px auto 0 auto; font-family: 'Lora', Georgia, serif;">
       <table style="width: 100%; border-collapse: collapse;">
         <thead>
-          <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; font-size: 8.5pt; background: #fff;">
+          <tr style=" border-bottom: 1.5px solid #000; font-size: 9pt; background: #fff;">
             <th style="padding: 4px 6px; text-align: left; width: 38%; font-weight: 700;">Parameter</th>
             <th style="padding: 4px 6px; text-align: left; width: 30%; font-weight: 700;">Observed Result</th>
             <th style="padding: 4px 6px; text-align: left; width: 32%; font-weight: 700;">Reference Value</th>
@@ -860,9 +860,9 @@ export function renderCustomWidalReport(tests = [], results = {}) {
 
   const row = (antigenName, observedVal, info) => `
     <tr>
-      <td style="padding: 4px 6px; font-weight: 700; border: 1px solid #000; font-size: 8.5pt;">${antigenName}</td>
+      <td style="padding: 4px 6px; font-weight: 700; border: 1px solid #000; font-size: 9pt;">${antigenName}</td>
       ${buildTiterCells(observedVal)}
-      <td style="padding: 4px 6px; text-align: center; font-weight: 900; border: 1px solid #000; font-size: 8.5pt; font-family: 'Inter', sans-serif;">
+      <td style="padding: 4px 6px; text-align: center; font-weight: 900; border: 1px solid #000; font-size: 9pt; font-family: 'Inter', sans-serif;">
         ${observedVal}
       </td>
       <td style="padding: 4px 6px; border: 1px solid #000; font-size: 7.5pt; color: #333; white-space: pre-line;">
@@ -894,7 +894,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
         </tbody>
       </table>
 
-      <div style="margin-top: 8px; padding: 6px 8px; border: 1px solid #000; border-radius: 4px; font-size: 8.5pt;">
+      <div style="margin-top: 8px; padding: 6px 8px; border: 1px solid #000; border-radius: 4px; font-size: 9pt;">
         <span style="font-weight: 800; text-transform: uppercase;">Serological Interpretation:</span>
         <span style="margin-left: 6px; font-weight: 600;">
           ${imp !== "—" ? imp : "A single Widal test is suggestive only. Diagnostic titer is ≥ 1:160 for TO and TH."}
@@ -942,7 +942,7 @@ export function renderCustomSemenReport(tests = [], results = {}) {
   const pus = getVal(["Pus Cells (WBC)", "Pus Cells"]);
   const pusInfo = getInfo(["Pus Cells (WBC)", "Pus Cells"], "/HPF", "< 1 million/mL (0 - 4 /HPF)");
 
-  const rowStyle = "padding: 3px 6px; font-size: 8.5pt; border-bottom: 1px solid #f1f5f9;";
+  const rowStyle = "padding: 3px 6px; font-size: 9pt; border-bottom: 1px solid #f1f5f9;";
   const refStyle = "padding: 3px 6px; font-size: 7.5pt; color: #555; border-bottom: 1px solid #f1f5f9; white-space: pre-line;";
 
   return `
@@ -1050,7 +1050,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
           <span style="font-size: 10.5pt; font-weight: 900; text-transform: uppercase; color: #000;">
             ${test.name.toUpperCase()}
           </span>
-          ${test.code ? `<span style="font-size: 8.5pt; font-family: 'Consolas', monospace; font-weight: 700; color: #334155; margin-left: 6px;">(${test.code})</span>` : ""}
+          ${test.code ? `<span style="font-size: 9pt; font-family: 'Consolas', monospace; font-weight: 700; color: #334155; margin-left: 6px;">(${test.code})</span>` : ""}
         </div>
         <span style="font-size: 8pt; font-weight: 800; text-transform: uppercase; color: #334155;">
           ${deptName || "Clinical Study"}
@@ -1058,7 +1058,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
       </div>
 
       ${(clinicalIndication || protocolTechnique || test.sample_type) ? `
-        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 8.5pt; line-height: 1.45;">
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 9pt; line-height: 1.45;">
           ${clinicalIndication ? `
             <div style="margin-bottom: 3px;">
               <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Clinical Indication:</b>
@@ -1075,7 +1075,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
       ` : ""}
 
       <div style="margin-bottom: 10px; padding: 2px 0;">
-        <b style="text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 4px; color: #000; border-bottom: 1px dashed #cbd5e1; padding-bottom: 2px;">
+        <b style="text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 4px; color: #000; border-bottom: 1px dashed #cbd5e1; padding-bottom: 2px;">
           Findings & Observations:
         </b>
         <div style="white-space: pre-wrap; font-size: 9.5pt; line-height: 1.6; color: #000; font-weight: 400; text-align: justify;">
@@ -1085,7 +1085,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
 
       ${diagnosticImpression ? `
         <div style="margin-top: 10px; border: 1.5px solid #000; border-radius: 4px; padding: 6px 8px; background: #fafafa;">
-          <b style="text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px; color: #000;">
+          <b style="text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px; color: #000;">
             Diagnostic Impression / Conclusion:
           </b>
           <div style="font-size: 9.5pt; line-height: 1.5; color: #000; font-weight: 800;">
@@ -1185,7 +1185,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     if (isProfile) {
       tableRows += `
         <tr style="border-top: 1.5px solid #000000; border-bottom: 1px solid #000000; page-break-inside: avoid;">
-          <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 8.5pt; color: #000000; text-transform: uppercase;">
+          <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 9pt; color: #000000; text-transform: uppercase;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
             <span style="font-size: 7pt; font-weight: 600; color: #475569; margin-left: 6px; text-transform: none;">[Multi-Parameter Profile]</span>
           </td>
@@ -1237,14 +1237,14 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
       tableRows += `
         <tr style="border-bottom: 1px dotted #e2e8f0; page-break-inside: avoid;">
-          <td style="padding: 3.8px 4px; font-size: 8.5pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
+          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
             ${displayName}
           </td>
           <td style="padding: 3.8px 4px; vertical-align: top;">
             ${formatResultCell(val, p.min_range, p.max_range, "", p.param_type)}
           </td>
-          <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; vertical-align: top;">${p.unit || test.unit || "—"}</td>
-          <td style="padding: 3.8px 4px; font-size: 8pt; color: #000000; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top; white-space: pre-line;">${refRange}</td>
+          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; vertical-align: top;">${p.unit || test.unit || "—"}</td>
+          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top; white-space: pre-line;">${refRange}</td>
         </tr>
       `;
     });
@@ -1281,6 +1281,16 @@ export function renderDepartmentReportHtml({
   isPreview = false
 }) {
   if (!activeOrder || !group) return "";
+
+  // ---- Layout-derived pad reserves (designer px → mm) ----
+  // The designer canvas is A4 at 96 DPI: 96px = 25.4mm
+  const PX_TO_MM = 25.4 / 96;
+  const layout = getReportLayout(labSettings);
+  const headerHeightPx = (layout?.header?.height) || 132;
+  const footerHeightPx = (layout?.footer?.height) || 72;
+  const headerHeightMm = (headerHeightPx * PX_TO_MM).toFixed(1);
+  const footerHeightMm = (footerHeightPx * PX_TO_MM).toFixed(1);
+  const contentHeightMm = (297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm)).toFixed(1);
 
   // Prefer the sibling vial that actually owns this department
   const owner = group.ownerOrder || activeOrder;
@@ -1386,14 +1396,14 @@ export function renderDepartmentReportHtml({
       <div style="text-align: center; width: 230px;">
         ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
         <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
-          <div style="font-weight: 700; font-size: 8.5pt; color: #000000;">${techUser.full_name}</div>
+          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${techUser.full_name}</div>
           <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
         </div>
       </div>
       <div style="text-align: center; width: 230px;">
         ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
         <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
-          <div style="font-weight: 700; font-size: 8.5pt; color: #000000;">${verifierUser.full_name}</div>
+          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${verifierUser.full_name}</div>
           <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
         </div>
       </div>
@@ -1417,10 +1427,10 @@ export function renderDepartmentReportHtml({
   if (usePadMode) {
     if (isPreview) {
       headerHtml = `
-        <div style="height: 38mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
+        <div style="height: ${headerHeightMm}mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
           <div>
             <span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${(labSettings?.lab_name || "AL FATTAH DIAGNOSTIC").toUpperCase()}</span>
-            <p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: 38mm Reserved Margin ]</p>
+            <p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: ${headerHeightMm}mm Reserved Margin ]</p>
           </div>
           <span style="background: #e2e8f0; color: #334155; font-weight: 800; font-size: 7pt; padding: 2px 6px; border-radius: 4px;">PAD MODE</span>
         </div>
@@ -1434,8 +1444,8 @@ export function renderDepartmentReportHtml({
   if (usePadMode) {
     if (isPreview) {
       footerHtml = `
-        <div style="height: 21mm; margin-top: 4px; border-top: 1.5px dashed #cbd5e1; background: #f8fafc; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 7.5pt; box-sizing: border-box;">
-          [ Pre-Printed Pad Footer: 21mm Reserved Margin ]
+        <div style="height: ${footerHeightMm}mm; margin-top: 4px; border-top: 1.5px dashed #cbd5e1; background: #f8fafc; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 7.5pt; box-sizing: border-box;">
+          [ Pre-Printed Pad Footer: ${footerHeightMm}mm Reserved Margin ]
         </div>
       `;
     }
@@ -1459,9 +1469,9 @@ export function renderDepartmentReportHtml({
     : "Pending";
 
   const patientDetailsHtml = (pageNum = 1, totalPages = 1) => `
-    <div style="padding: 6px 8px; border: 1px solid #000000; border-radius: 5px; margin: 3px 8mm 0px 8mm; font-size: 8.5pt; color: #000000; page-break-inside: avoid; font-family: 'Lora', Georgia, serif;">
+    <div style="padding: 6px 8px; border: 1px solid #000000; border-radius: 5px; margin: 3px 8mm 0px 8mm; font-size: 9pt; color: #000000; page-break-inside: avoid; font-family: 'Lora', Georgia, serif;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-        <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 8.5pt; font-family: 'Lora', Georgia, serif;">
+        <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9pt; font-family: 'Lora', Georgia, serif;">
           <tr>
             <td style="padding: 2px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 9pt; font-weight: 700;">${activeOrder.patient?.name || "Patient"}</b></td>
             <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
@@ -1497,7 +1507,7 @@ export function renderDepartmentReportHtml({
   );
 
   const remarksHtml = isDescriptive ? "" : `
-    <div style="margin-top: 25px; margin-left: 8mm; margin-right: 8mm; font-size: 8.5pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
+    <div style="margin-top: 25px; margin-left: 8mm; margin-right: 8mm; font-size: 9pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
       <span style="font-weight: 700; margin-left: 6px; color: #000000; font-style: italic;">${resolvedDeptRemark}</span>
     </div>
@@ -1505,7 +1515,9 @@ export function renderDepartmentReportHtml({
 
   const pageHeightCss = isPreview
     ? 'min-height: 297mm; height: 297mm;'
-    : (usePadMode ? 'min-height: 238mm; height: 238mm; max-height: 238mm;' : 'min-height: 297mm; height: 297mm;');
+    : (usePadMode
+        ? `min-height: ${contentHeightMm}mm; height: ${contentHeightMm}mm; max-height: ${contentHeightMm}mm;`
+        : 'min-height: 297mm; height: 297mm;');
 
   return `
     <div style="padding: 0; margin: 0; ${pageHeightCss} display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; font-family: 'Lora', Georgia, serif; background: #ffffff; color: #000000; width: 100%;">
@@ -1541,6 +1553,14 @@ export function printDepartmentA4Report(
 ) {
   if (!activeOrder) return;
   if (onPrintedCallback) onPrintedCallback();
+
+  // Pad-mode reserves follow the layout designer's header/footer heights.
+  const PX_TO_MM = 25.4 / 96;
+  const _layout = getReportLayout(labSettings);
+  const _headerPx = (_layout?.header?.height) || 132;
+  const _footerPx = (_layout?.footer?.height) || 72;
+  const _headerMm = (_headerPx * PX_TO_MM).toFixed(1);
+  const _footerMm = (_footerPx * PX_TO_MM).toFixed(1);
 
   const deptGroupsToPrint = targetDeptId === "ALL"
     ? departmentGroupedReports
@@ -1578,8 +1598,8 @@ export function printDepartmentA4Report(
           @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600;700;800;900&display=swap');
           @page {
             size: A4 portrait;
-            margin-top: ${usePadMode ? '38mm' : '0mm'};
-            margin-bottom: ${usePadMode ? '21mm' : '0mm'};
+            margin-top: ${usePadMode ? _headerMm + 'mm' : '0mm'};
+            margin-bottom: ${usePadMode ? _footerMm + 'mm' : '0mm'};
             margin-left: 0mm;
             margin-right: 0mm;
           }
@@ -1741,7 +1761,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
               <table style="width: 210px; font-size: 7.5pt; border-collapse: collapse; font-family: inherit;">
                 <tr><td>SUBTOTAL:</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.subTotal || 0}</td></tr>
                 <tr><td>DISCOUNT (${activeOrd.billing?.discount || 0}%):</td><td style="text-align: right;">- ৳ ${(((activeOrd.billing?.subTotal || 0) * (activeOrd.billing?.discount || 0)) / 100).toFixed(0)}</td></tr>
-                <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 8.5pt;">
+                <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 9pt;">
                   <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${activeOrd.billing?.netPayable || 0}</td>
                 </tr>
                 <tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.paid || 0}</td></tr>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ShieldCheck, CloudUpload, Lock, MessageSquare,
   AlertOctagon, CheckCircle2, AlertTriangle, RotateCcw, FlaskConical,
@@ -303,7 +303,10 @@ const resolvedOrderTests = useMemo(() => {
   };
 
   const getDeptRemark = (deptId) => {
-    // Look across every sibling — the owning order may not be activeOrder
+    // 1) Local shadow — what the user is typing right now
+    if (localDeptRemarks[deptId] !== undefined) return localDeptRemarks[deptId];
+
+    // 2) Persisted value from any sibling order
     for (const o of sourceOrders) {
       if (o.dept_remarks && o.dept_remarks[deptId]) return o.dept_remarks[deptId];
       if (o.deptRemarks && o.deptRemarks[deptId]) return o.deptRemarks[deptId];
@@ -312,7 +315,8 @@ const resolvedOrderTests = useMemo(() => {
         o.results?.[`DEPT_REMARKS_${deptId}`];
       if (r !== undefined && r !== null && String(r).trim() !== "") return String(r).trim();
     }
-    // Global fallback
+
+    // 3) Global fallback
     for (const o of sourceOrders) {
       if (typeof o.verifierRemarks === "string" && !o.verifierRemarks.startsWith("{")) {
         return o.verifierRemarks;
@@ -321,14 +325,39 @@ const resolvedOrderTests = useMemo(() => {
     return "";
   };
 
+  // Local shadow so typing is instant. Committed to the DB on blur.
+  const [localDeptRemarks, setLocalDeptRemarks] = useState({});
+
+  // Clear the shadow when switching orders
+  useEffect(() => {
+    setLocalDeptRemarks({});
+  }, [activeOrder?.orderId, activeOrder?.id]);
+
+  // Called on every keystroke — updates the local shadow only. No DB traffic.
   const handleUpdateDeptRemark = (deptId, text) => {
     if (isLockedOrAwaiting) return;
-    if (handleRemarksChange) {
-      handleRemarksChange(deptId, text);
-    }
-    handleResultInput(`DEPT_REMARKS_${deptId}`, text);
+    setLocalDeptRemarks((prev) => ({ ...prev, [deptId]: text }));
   };
 
+  // Called on blur — commits the shadow to the DB once.
+  const commitDeptRemark = (deptId) => {
+    const text = localDeptRemarks[deptId];
+    if (text === undefined) return;
+    try {
+      if (handleRemarksChange) {
+        handleRemarksChange(deptId, text);
+      }
+    } catch (e) {
+      console.warn("Remark save failed:", e);
+    } finally {
+      // Drop the shadow so we fall back to the persisted value next render.
+      setLocalDeptRemarks((prev) => {
+        const next = { ...prev };
+        delete next[deptId];
+        return next;
+      });
+    }
+  };
   const DEPARTMENT_REMARK_PRESETS = {
     "DEP-HEM": [
       { label: "Normal Blood Picture", text: "Normocytic normochromic blood picture. Red blood cell morphology and platelets appear within normal limits." },
@@ -558,6 +587,18 @@ const resolvedOrderTests = useMemo(() => {
 
   const onVerifyClick = async () => {
     if (activeOrder.isLocked) return;
+
+    // Commit any pending remark shadows before verifying
+    Object.keys(localDeptRemarks).forEach((deptId) => {
+      const text = localDeptRemarks[deptId];
+      if (text !== undefined && handleRemarksChange) {
+        handleRemarksChange(deptId, text);
+      }
+    });
+    setLocalDeptRemarks({});
+    // Give the DB writes a moment to land
+    await new Promise((r) => setTimeout(r, 400));
+
     try {
       await handleVerifyInDb();
     } catch (e) {
@@ -1161,6 +1202,7 @@ const resolvedOrderTests = useMemo(() => {
                   disabled={isLockedOrAwaiting}
                   value={deptRemarkVal}
                   onChange={(e) => handleUpdateDeptRemark(deptGroup.id, e.target.value)}
+                  onBlur={() => commitDeptRemark(deptGroup.id)}
                   placeholder={`Clinical interpretation specific to ${deptGroup.name} report...`}
                   className="w-full p-2 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium bg-white disabled:bg-slate-100 text-slate-800 leading-relaxed shadow-inner"
                 />
