@@ -229,7 +229,7 @@ export default function TestManager({
   // Add parameter row in Create New Test
   const addCreateParameterRow = () => {
     const isDescriptive = testFormatMode === "descriptive";
-    const newParamId = `P-${(newTestForm.code || "NEW").toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Date.now().toString().slice(-4)}`;
+    const newParamId = `P-${(newTestForm.code || "NEW").toUpperCase.replace(/[^A-Z0-9]/g, "")}-${Date.now().toString().slice(-4)}`;
     
     setNewTestForm({
       ...newTestForm,
@@ -264,7 +264,7 @@ export default function TestManager({
   const addEditParameterRow = () => {
     if (!editingTest) return;
     const isDescriptiveTest = editingTest.reportType === "descriptive" || editingTest.report_type === "descriptive";
-    const newParamId = `P-${(editingTest.code || editingTest.id || "EDIT").toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Date.now().toString().slice(-4)}`;
+    const newParamId = `P-${(editingTest.code || editingTest.id || "EDIT").replace(/[^A-Z0-9]/g, "")}-${Date.now().toString().slice(-4)}`;
     
     setEditingTest({
       ...editingTest,
