@@ -1057,7 +1057,9 @@ export async function toggleTestAvailability(testId, isAvailable) {
 }
 
 export async function createNewTestWithParameters(testData) {
-  const testId = `T-${testData.code.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Math.floor(100 + Math.random() * 900)}`;
+  // ID keeps its uppercase+alphanumeric sanitization (stable identifier).
+  // The display CODE preserves whatever case the user typed.
+  const testId = `T-${testData.code.replace(/[^A-Za-z0-9]/g, "").toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
   const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
     (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
@@ -1070,7 +1072,7 @@ export async function createNewTestWithParameters(testData) {
 
   const testPayload = {
     id: testId,
-    code: testData.code.trim().toUpperCase(),
+    code: testData.code.trim(),          // ← keep user's original casing
     name: testData.name.trim(),
     dept_id: deptId,
     price: parseFloat(testData.price) || 0,
@@ -1142,7 +1144,7 @@ export async function updateExistingTest(testId, testData) {
   } catch (e) {}
 
   const testPayload = {
-    code: testData.code.trim().toUpperCase(),
+    code: testData.code.trim(),          // ← keep user's original casing
     name: testData.name.trim(),
     dept_id: deptId,
     price: parseFloat(testData.price) || 0,

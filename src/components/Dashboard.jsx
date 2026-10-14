@@ -1,9 +1,9 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import {
   Receipt, DollarSign, CheckCircle2,
   X, ChevronLeft, ChevronRight, Clock,
   MessageCircle, RotateCcw, AlertTriangle, ChevronDown,
-  Barcode
+  Barcode, Search
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
@@ -36,7 +36,42 @@ export default function Dashboard({
   const [actionLoading, setActionLoading] = useState(false);
   const [isBubbleOpen, setIsBubbleOpen] = useState(false);
   const [localOrders, setLocalOrders] = useState(orders);
+// ---- SEARCH BAR STATE ----
+const [searchInput, setSearchInput] = useState(dashboardSearch || "");
+const searchRef = useRef(null);
 
+// Debounce: push searchInput → dashboardSearch after 300ms,
+// and reset the page to 1 so a search never lands on an empty page.
+useEffect(() => {
+  const t = setTimeout(() => {
+    if (searchInput !== dashboardSearch) {
+      setDashboardSearch(searchInput);
+      setCurrentPage?.(1);
+    }
+  }, 300);
+  return () => clearTimeout(t);
+}, [searchInput, dashboardSearch, setDashboardSearch, setCurrentPage]);
+
+// Sync external changes back into the input (e.g. parent clears it)
+useEffect(() => {
+  if (dashboardSearch !== searchInput) {
+    setSearchInput(dashboardSearch || "");
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [dashboardSearch]);
+
+// Keyboard shortcuts: "/" or Ctrl/Cmd+K focuses the search box
+useEffect(() => {
+  const onKey = (e) => {
+    const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+    if (!inField && (e.key === "/" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"))) {
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, []);
   useEffect(() => {
     setLocalOrders(orders);
   }, [orders]);
@@ -232,7 +267,66 @@ export default function Dashboard({
         </div>
       </div>
 
+{/* 2b. SEARCH BAR */}
+<div className="bg-white px-3 py-2 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-2.5">
+  <div className="relative flex-1 min-w-0">
+    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+    <input
+      ref={searchRef}
+      type="text"
+      value={searchInput}
+      onChange={(e) => setSearchInput(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          setSearchInput("");
+          setDashboardSearch("");
+          setCurrentPage?.(1);
+          e.currentTarget.blur();
+        }
+      }}
+      placeholder="Search by patient name, UHID, phone, receipt number, or barcode…"
+      className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition font-medium text-slate-800 placeholder:text-slate-400"
+      spellCheck={false}
+      autoComplete="off"
+    />
 
+    {searchInput && (
+      <button
+        type="button"
+        onClick={() => {
+          setSearchInput("");
+          setDashboardSearch("");
+          setCurrentPage?.(1);
+          searchRef.current?.focus();
+        }}
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition"
+        title="Clear search (Esc)"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    )}
+  </div>
+
+  {searchInput.trim() ? (
+    <span className="text-[11px] font-semibold whitespace-nowrap shrink-0">
+      <span className="text-blue-600 font-bold">{sortedOrders.length}</span>
+      <span className="text-slate-400 mx-0.5">/</span>
+      <span className="text-slate-700">{visitGroups.length}</span>
+      <span className="text-slate-400 font-normal ml-1">matched</span>
+    </span>
+  ) : (
+    <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap shrink-0 hidden sm:inline">
+      {visitGroups.length} visit{visitGroups.length !== 1 ? "s" : ""} on this page
+    </span>
+  )}
+
+  <kbd
+    className="hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono font-bold text-slate-500 border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 shrink-0"
+    title="Focus search"
+  >
+    Ctrl K
+  </kbd>
+</div>
 
       {/* 3. PATIENT QUEUE TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

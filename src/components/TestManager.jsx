@@ -398,7 +398,7 @@ export default function TestManager({
             <label className="font-semibold text-slate-600 text-[11px] block mb-1">Short Code *</label>
             <input
               type="text"
-              placeholder="e.g. HISTO-BX"
+              placeholder="e.g. Histo-BX"
               value={newTestForm.code}
               onChange={(e) => setNewTestForm({ ...newTestForm, code: e.target.value })}
               className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-mono font-bold"
