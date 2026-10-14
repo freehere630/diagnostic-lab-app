@@ -22,17 +22,41 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
       const allBarcodes = [];
       const allTests = [];
 
+      // Count total vs filled parameters across every vial in the visit
+      let totalParams = 0;
+      let filledParams = 0;
+
       for (const v of sorted) {
         const bc = String(v.barcode || "").split(/[\s,]+/)[0];
         if (bc && !allBarcodes.includes(bc)) allBarcodes.push(bc);
+
         for (const t of (v.tests || [])) {
           allTests.push({
             ...t,
             _owningOrderId: v.orderId || v.id,
             _owningBarcode: bc
           });
+
+          const params = t.test_parameters || t.parameters || [];
+          const effectiveParams = params.length > 0
+            ? params
+            : [{ id: t.id, name: t.name || "Result" }];
+
+          for (const p of effectiveParams) {
+            totalParams++;
+            const raw =
+              v.results?.[p.id]?.value ??
+              v.results?.[p.id] ??
+              v.results?.[t.id]?.value;
+            const val = raw === undefined || raw === null ? "" : String(raw).trim();
+            if (val !== "" && val.toLowerCase() !== "undefined" && val.toLowerCase() !== "null") {
+              filledParams++;
+            }
+          }
         }
       }
+
+      const allResultsFilled = totalParams > 0 && filledParams >= totalParams;
 
       const anyPending = sorted.some((v) =>
         (v.qcStatus || v.qc_status) !== "Verified" && !v.isLocked
@@ -49,6 +73,9 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
         allTests,
         anyPending,
         anyRepeat,
+        totalParams,
+        filledParams,
+        allResultsFilled,
         createdAt: master.createdAt || master.created_at || master.date,
         patient: master.patient,
         receiptNo: master.receiptNo
@@ -236,13 +263,17 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Required
                           </span>
+                        ) : !isPending ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            Verified
+                          </span>
+                        ) : g.allResultsFilled ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            Ready to Verify
+                          </span>
                         ) : (
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            !isPending
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-amber-50 text-amber-700 border-amber-200"
-                          }`}>
-                            {!isPending ? "Verified" : "Pending"}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-700 border-amber-200">
+                            Pending ({g.filledParams}/{g.totalParams})
                           </span>
                         )}
                       </td>
@@ -256,12 +287,20 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
                           className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition shadow-xs ${
                             isRepeat
                               ? "bg-rose-600 hover:bg-rose-700 text-white"
-                              : isPending
-                                ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                : "bg-slate-900 hover:bg-slate-800 text-white"
+                              : !isPending
+                                ? "bg-slate-900 hover:bg-slate-800 text-white"
+                                : g.allResultsFilled
+                                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  : "bg-blue-600 hover:bg-blue-700 text-white"
                           }`}
                         >
-                          {isRepeat ? "Recollect ➔" : isPending ? "Enter Results ➔" : "Review ➔"}
+                          {isRepeat
+                            ? "Recollect ➔"
+                            : !isPending
+                              ? "Review ➔"
+                              : g.allResultsFilled
+                                ? "Verify ➔"
+                                : "Enter Results ➔"}
                         </button>
                       </td>
                     </tr>

@@ -1,14 +1,18 @@
 import React from "react";
 import {
-  CheckCircle2, Clock, Printer, Download, Building2, Lock, Phone, ArrowLeft
+  CheckCircle2, Clock, Download, Building2, Lock, Phone, ArrowLeft
 } from "lucide-react";
 import {
   printDepartmentA4Report,
+  downloadDepartmentReportPdf,
   buildUnifiedResultsTable,
   isImagingOrRadiologyInvestigation
 } from "../utils/printHelpers";
 
 export default function PatientLivePortal({ order, labSettings, staffList = [] }) {
+  const [downloadState, setDownloadState] = React.useState("idle");
+  // 'idle' | 'preparing' | 'rendering' | 'done'
+
   if (!order) return null;
 
   const isReady = order.qcStatus === "Verified" || order.isLocked === true;
@@ -50,12 +54,33 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
     return Object.values(grouped);
   }, [order]);
 
-  const handlePrintOrDownload = () => {
+  const handleDownloadPdf = async () => {
     if (!canViewResults) {
       alert("Report download is locked pending settlement of the due balance.");
       return;
     }
-    printDepartmentA4Report("ALL", order, departmentGroupedReports, staffList, labSettings);
+    if (downloadState !== "idle") return;
+
+    try {
+      setDownloadState("preparing");
+      await downloadDepartmentReportPdf({
+        targetDeptId: "ALL",
+        activeOrder: order,
+        departmentGroupedReports,
+        staffList,
+        labSettings,
+        onProgress: (status) => {
+          if (status === null) setDownloadState("idle");
+          else if (status.includes("Preparing")) setDownloadState("preparing");
+          else if (status.includes("Rendering")) setDownloadState("rendering");
+        },
+      });
+      setDownloadState("done");
+      setTimeout(() => setDownloadState("idle"), 1500);
+    } catch (err) {
+      console.error(err);
+      setDownloadState("idle");
+    }
   };
 
   return (
@@ -89,10 +114,29 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
             </div>
 
             <button
-              onClick={handlePrintOrDownload}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition shrink-0"
+              onClick={handleDownloadPdf}
+              disabled={downloadState !== "idle"}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition shrink-0"
             >
-              <Download className="w-3.5 h-3.5" /> Download
+              {downloadState === "preparing" ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Preparing…
+                </>
+              ) : downloadState === "rendering" ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Rendering…
+                </>
+              ) : downloadState === "done" ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Downloaded
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" /> Download PDF
+                </>
+              )}
             </button>
           </div>
         ) : isReady && hasDue ? (
@@ -202,10 +246,29 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
 
         {canViewResults ? (
           <button
-            onClick={handlePrintOrDownload}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition"
+            onClick={handleDownloadPdf}
+            disabled={downloadState !== "idle"}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition"
           >
-            <Printer className="w-3.5 h-3.5" /> Print Report (PDF)
+            {downloadState === "preparing" ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Preparing…
+              </>
+            ) : downloadState === "rendering" ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Rendering…
+              </>
+            ) : downloadState === "done" ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5" /> Downloaded
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" /> Download PDF
+              </>
+            )}
           </button>
         ) : (
           <button

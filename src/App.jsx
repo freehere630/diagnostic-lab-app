@@ -5,7 +5,7 @@ import {
   deleteTest, toggleTestAvailability, getStaffUsers,
   getLabSettings, saveLabSettings, settleOrderDue,
   getDoctorsList, createOrUpdateDoctor, deleteDoctor, seedRadiologyCatalog,
-  markSampleRecollected, requestSampleRecollection
+  markSampleRecollected, requestSampleRecollection,
 } from "./services/api";
 
 import {
@@ -16,17 +16,18 @@ import {
   fetchProfileForUser,
   mapUser,
 } from "./services/authApi";
+
 import { supabase } from "./supabaseClient";
 
-import { 
-  printMoneyReceiptA5, 
-  printSpecificVialBarcode, 
+import {
+  printMoneyReceiptA5,
+  printSpecificVialBarcode,
   printDepartmentA4Report,
-  getAllOrderVials
+  getAllOrderVials,
 } from "./utils/printHelpers";
 
 import Login from "./components/Login";
-import Navbar from "./components/Navbar";
+import AppLayout from "./components/AppLayout";
 import Dashboard from "./components/Dashboard";
 import ReceptionPOS from "./components/ReceptionPOS";
 import SampleTracking from "./components/SampleTracking";
@@ -38,42 +39,47 @@ import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
 import PatientLivePortal from "./components/PatientLivePortal";
 import DoctorManagement from "./components/DoctorManagement";
-
+// Format a Date as YYYY-MM-DD in the USER'S local timezone.
+// Never use `toISOString().slice(0,10)` — that's UTC and shifts the date
+// by one day for eastern timezones (Bangladesh = UTC+6) between 00:00–06:00.
+const toLocalDateStr = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const MASTER_SAMPLE_TYPES = [
-  "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)", 
-  "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)", 
+  "Whole Blood", "Serum", "Plasma (Fluoride)", "Plasma (Citrate)",
+  "Clean Catch Urine", "Fresh Stool", "Swab (Throat / Nasal)",
   "Radiological Study", "Ultrasound Protocol", "Non-Contrast CT Head", "12-Lead Tracing",
-  "Biopsy Specimen", "Aspiration Smear", "Fresh Specimen"
+  "Biopsy Specimen", "Aspiration Smear", "Fresh Specimen",
 ];
 
 const MASTER_TUBE_COLORS = [
-  "Purple / Lavender (EDTA)", "Red / Yellow (SST / Plain Clot)", 
+  "Purple / Lavender (EDTA)", "Red / Yellow (SST / Plain Clot)",
   "Grey (Fluoride Oxalate)", "Light Blue (Citrate)", "Sterile Urine Cup", "No Specimen (Imaging)",
-  "Formalin Container", "Fixed Glass Slides"
+  "Formalin Container", "Fixed Glass Slides",
 ];
 
 export default function App() {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = toLocalDateStr();
 
+  // ============================================================
+  // 1. STATE — every useState lives here, before any effect
+  // ============================================================
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState({ state: "idle", message: "" });
-  // Per-parameter debounce timers for result writes
-  const resultWriteTimers = useRef({});
-    // Cooldown per parameter — ignore realtime events for params we just wrote
-  // ourselves. Prevents a late-arriving stale event from overwriting newer
-  // local state.
-  const recentlyWrittenRef = useRef({});
-  // Core Master States
+
+  // Core master data
   const [departments, setDepartments] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [doctorsList, setDoctorsList] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
 
-  // Orders & Pagination
+  // Orders & pagination
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [trackingStatus, setTrackingStatus] = useState({});
@@ -81,138 +87,296 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Date Filter Defaults
-  const [activePreset, setActivePreset] = useState("TODAY");
-  const [dateRange, setDateRange] = useState({ from: todayStr, to: todayStr });
+  // Date filter — restore from sessionStorage so the state survives Chrome
+  // discarding a background tab (which wipes all React state on restore).
+  const readSavedDateFilter = () => {
+    try {
+      const raw = sessionStorage.getItem("apex_date_filter");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.from && parsed?.to && parsed?.preset) return parsed;
+      }
+    } catch (e) { /* fall through to defaults */ }
+    return { from: todayStr, to: todayStr, preset: "TODAY" };
+  };
+  const initialDateFilter = readSavedDateFilter();
+
+  const [activePreset, setActivePreset] = useState(initialDateFilter.preset);
+  const [dateRange, setDateRange] = useState({
+    from: initialDateFilter.from,
+    to: initialDateFilter.to,
+  });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Patient Tracking Portal
+  // Patient tracking portal
   const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
 
-  // POS Form
+  // POS form
   const [selectedTestIds, setSelectedTestIds] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
   const [paidVal, setPaidVal] = useState(undefined);
-  const [patientForm, setPatientForm] = useState({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
-
-  // Test Manager States
-  const [editingTest, setEditingTest] = useState(null);
-  const [newTestForm, setNewTestForm] = useState({ 
-    name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum", 
-    tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
-    parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
+  const [patientForm, setPatientForm] = useState({
+    id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self",
   });
 
-  // Rejection Handler
-  const handleRejectSample = async (orderId, reason = "Hemolyzed Specimen") => {
-    if (!orderId) return;
-    try {
-      const res = await requestSampleRecollection(orderId, reason);
-      const cleanRemarks = res?.fullRemarks || `[RECOLLECTION REQUIRED: ${reason}]`;
+  // Test manager
+  const [editingTest, setEditingTest] = useState(null);
+  const [newTestForm, setNewTestForm] = useState({
+    name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum",
+    tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
+    parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }],
+  });
 
-      setOrders((prev) =>
-        prev.map((o) =>
-          (o.orderId === orderId || o.id === orderId)
-            ? {
-                ...o,
-                sample_status: "Repeat Collection Required",
-                sampleStatus: "Repeat Collection Required",
-                verifierRemarks: cleanRemarks,
-                verifier_remarks: cleanRemarks
-              }
-            : o
-        )
-      );
+  // ============================================================
+  // 2. REFS — before any effect
+  // ============================================================
+  const lastActiveOrderRef = useRef(null);
+  const resultWriteTimers = useRef({});
+  const recentlyWrittenRef = useRef({});
 
-      // No hard refetch — in-place update keeps the current patient on screen.
-    } catch (e) {
-      console.warn("Reject background notice:", e);
+  // ============================================================
+  // 3. MEMOS — derived state
+  // ============================================================
+  const activeOrder = useMemo(() => {
+    const found = orders.find(
+      (o) => o.orderId === selectedOrderId || o.id === selectedOrderId
+    );
+    if (found) {
+      lastActiveOrderRef.current = found;
+      return found;
     }
-  };
+    return lastActiveOrderRef.current || orders[0] || null;
+  }, [orders, selectedOrderId]);
 
-  // 1. Check Public QR Scan Link (Resolves ANY vial barcode)
+  const visitOrders = useMemo(() => {
+    if (!activeOrder) return [];
+    const key = activeOrder.receiptNo;
+    if (!key) return [activeOrder];
+    const siblings = orders.filter((o) => o.receiptNo === key);
+    return siblings.length > 0 ? siblings : [activeOrder];
+  }, [orders, activeOrder]);
+
+  const departmentalVials = useMemo(() => {
+    if (!visitOrders || visitOrders.length === 0) return [];
+    const collected = [];
+    for (const vo of visitOrders) {
+      const vials = getAllOrderVials(vo, testCatalog);
+      for (const v of vials) {
+        const bc = v.barcode || v.testBarcode;
+        if (!collected.some((c) => c.barcode === bc)) collected.push(v);
+      }
+    }
+    return collected.map((v) => ({
+      deptCode: v.deptCode || "GEN",
+      testBarcode: v.barcode || v.testBarcode,
+      patientId: activeOrder?.patient?.id || "P-1001",
+      patientName: activeOrder?.patient?.name || "Patient",
+      tubeColor: v.tubeColor || "Standard",
+      testNames: v.testNames && v.testNames.length > 0 ? v.testNames : [],
+    }));
+  }, [visitOrders, activeOrder, testCatalog]);
+
+  const departmentGroupedReports = useMemo(() => {
+    const sources = (visitOrders && visitOrders.length > 0)
+      ? visitOrders
+      : (activeOrder ? [activeOrder] : []);
+
+    const allTests = [];
+    for (const vo of sources) {
+      const voId = vo.orderId || vo.id;
+      const voBc = String(vo.barcode || "").split(/[\s,]+/)[0];
+      const voLocked = vo.isLocked === true || vo.qcStatus === "Verified";
+      for (const t of (vo.tests || [])) {
+        allTests.push({
+          ...t,
+          _owningOrderId: voId,
+          _owningBarcode: voBc,
+          _owningLocked: voLocked,
+        });
+      }
+    }
+    if (allTests.length === 0) return [];
+
+    const grouped = {};
+
+    allTests.forEach((test) => {
+      const code = (test.code || "").toUpperCase();
+      const name = (test.name || "").toUpperCase();
+      const baseDeptId = test.dept_id || test.deptId || "DEP-BIO";
+
+      let groupKey = baseDeptId;
+      let groupName = null;
+      let groupIcon = null;
+
+      if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
+        groupKey = "DEP-HEM-CBC"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
+      } else if (code.includes("URINE") || name.includes("URINE")) {
+        groupKey = "DEP-PAT-URINE"; groupName = "Clinical Pathology & Urine Analysis"; groupIcon = "🧫";
+      } else if (code.includes("STOOL") || name.includes("STOOL")) {
+        groupKey = "DEP-PAT-STOOL"; groupName = "Clinical Pathology & Stool Examination"; groupIcon = "🔬";
+      } else if (code.includes("WIDAL")) {
+        groupKey = "DEP-MIC-WIDAL"; groupName = "Microbiology & Serology"; groupIcon = "🧪";
+      } else if (code.includes("SEMEN")) {
+        groupKey = "DEP-PAT-SEMEN"; groupName = "Clinical Pathology & Andrology"; groupIcon = "🔬";
+      }
+
+      if (!grouped[groupKey]) {
+        const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
+        grouped[groupKey] = {
+          dept: {
+            id: groupKey,
+            name: groupName || baseDept.name,
+            icon: groupIcon || baseDept.icon || "🔬",
+          },
+          tests: [],
+          ownerOrderId: null,
+          ownerBarcode: null,
+          ownerLocked: false,
+          ownerOrder: null,
+        };
+      }
+      grouped[groupKey].tests.push(test);
+
+      if (!grouped[groupKey].ownerOrderId && test._owningOrderId) {
+        const owner = sources.find((o) => (o.orderId || o.id) === test._owningOrderId);
+        grouped[groupKey].ownerOrderId = test._owningOrderId;
+        grouped[groupKey].ownerBarcode = test._owningBarcode;
+        grouped[groupKey].ownerLocked = test._owningLocked;
+        grouped[groupKey].ownerOrder = owner || null;
+      }
+    });
+
+    return Object.values(grouped);
+  }, [activeOrder, visitOrders, departments]);
+
+  // ============================================================
+  // 4. EFFECTS
+  // ============================================================
+
+  // --- Public QR scan ---
   useEffect(() => {
     const checkPublicQrScan = async () => {
-  const params = new URLSearchParams(window.location.search);
-  const trackId = params.get("track") || params.get("verify");
-  const barcode = params.get("bc");
-  if (!trackId && !barcode) return;
+      const params = new URLSearchParams(window.location.search);
+      const trackId = params.get("track") || params.get("verify");
+      const barcode = params.get("bc");
+      if (!trackId && !barcode) return;
 
-  setIsVerifyingPublicUrl(true);
-  try {
-    // Public settings only — full settings are staff-only.
-    // The patient portal reads lab_name / phone / address from labSettings; if
-    // this fails, the component falls back to its built-in defaults.
-    try {
-      const settings = await getLabSettings();
-      if (settings) setLabSettings(settings);
-    } catch (e) {
-      // Anon cannot read lab_settings under RLS — silently ignore
-    }
+      setIsVerifyingPublicUrl(true);
+      try {
+        try {
+          const settings = await getLabSettings();
+          if (settings) setLabSettings(settings);
+        } catch (e) { /* anon cannot read lab_settings — fine */ }
 
-    const { data: rpcData, error: rpcErr } = await supabase.rpc(
-      "lookup_order_by_qr",
-      { p_track_id: trackId || null, p_barcode: barcode || null }
-    );
+        const { data: rpcData, error: rpcErr } = await supabase.rpc(
+          "lookup_order_by_qr",
+          { p_track_id: trackId || null, p_barcode: barcode || null }
+        );
 
-    if (rpcErr) throw rpcErr;
+        if (rpcErr) throw rpcErr;
 
-    if (!rpcData) {
-      setVerificationError("Report record not found or invalid certificate.");
-      return;
-    }
+        if (!rpcData) {
+          setVerificationError("Report record not found or invalid certificate.");
+          return;
+        }
 
-    // staff array is included in the RPC response; fall back to empty
-    setStaffList(Array.isArray(rpcData.staff) ? rpcData.staff : []);
-
-    // RPC returns the shape PatientLivePortal expects, plus snake_case mirrors
-    setPatientTrackingOrder(rpcData);
-  } catch (err) {
-    console.error("QR lookup failed:", err);
-    setVerificationError(
-      "Failed to load patient report: " + (err.message || String(err))
-    );
-  } finally {
-    setIsVerifyingPublicUrl(false);
-  }
-};
+        setStaffList(Array.isArray(rpcData.staff) ? rpcData.staff : []);
+        setPatientTrackingOrder(rpcData);
+      } catch (err) {
+        console.error("QR lookup failed:", err);
+        setVerificationError("Failed to load patient report: " + (err.message || String(err)));
+      } finally {
+        setIsVerifyingPublicUrl(false);
+      }
+    };
 
     checkPublicQrScan();
   }, []);
-// Session restore + auth state listener
-useEffect(() => {
-  let mounted = true;
 
-  (async () => {
-    const session = await getCurrentSession();
-    if (!mounted || !session?.user) return;
-    const profile = await fetchProfileForUser(session.user.id);
-    if (!mounted || !profile) return;
-    const user = mapUser(session.user, profile);
-    setCurrentUser(user);
-    const role = (user.role || "").toLowerCase();
-    setActiveTab(
-      role === "receptionist" ? "reception" :
-      role === "technologist" ? "worklists" :
-      role === "verifier" || role === "biochemist" ? "verifier" : "dashboard"
-    );
-  })();
+  // --- Session restore + auth listener ---
+  useEffect(() => {
+    let mounted = true;
 
-  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-    if (!mounted) return;
-    if (!session) {
-      setCurrentUser(null);
-    }
-  });
+    (async () => {
+      const session = await getCurrentSession();
+      if (!mounted || !session?.user) return;
+      const profile = await fetchProfileForUser(session.user.id);
+      if (!mounted || !profile) return;
+      const user = mapUser(session.user, profile);
+      setCurrentUser(user);
+      const role = (user.role || "").toLowerCase();
+      setActiveTab(
+        role === "receptionist" ? "reception" :
+        role === "technologist" ? "worklists" :
+        role === "verifier" || role === "biochemist" ? "verifier" : "dashboard"
+      );
+    })();
 
-  return () => {
-    mounted = false;
-    sub?.subscription?.unsubscribe?.();
-  };
-}, []);
-  // 2. Fetch Master Data
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (!session) setCurrentUser(null);
+    });
+
+    return () => {
+      mounted = false;
+      sub?.subscription?.unsubscribe?.();
+    };
+  }, []);
+  // --- Persist the date filter to sessionStorage ---
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        "apex_date_filter",
+        JSON.stringify({
+          from: dateRange.from,
+          to: dateRange.to,
+          preset: activePreset,
+        })
+      );
+    } catch (e) { /* private mode etc. */ }
+  }, [dateRange, activePreset]);
+
+    // --- Keep "Today" in sync if the app crosses midnight ---
+  useEffect(() => {
+    if (activePreset !== "TODAY") return;
+
+    const check = () => {
+      const now = toLocalDateStr();
+      if (dateRange.from !== now || dateRange.to !== now) {
+        setDateRange({ from: now, to: now });
+      }
+    };
+
+    // Runs when the tab regains focus, and every 2 minutes while it's open
+    window.addEventListener("focus", check);
+    const t = setInterval(check, 120000);
+
+    return () => {
+      window.removeEventListener("focus", check);
+      clearInterval(t);
+    };
+  }, [activePreset, dateRange]);
+    // --- Refetch when the tab regains focus (handles Chrome tab discards) ---
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const onFocus = () => {
+      fetchPaginatedOrders(true);
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) onFocus();
+    });
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+  // --- Master data fetch ---
   useEffect(() => {
     if (!currentUser) return;
     const fetchMaster = async () => {
@@ -230,36 +394,36 @@ useEffect(() => {
     fetchMaster();
   }, [currentUser]);
 
-  // Main Paginated Orders Fetcher
+  // --- Main paginated orders fetcher ---
   const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
     if (!silent) setIsLoading(true);
+    // Clear stale rows so a failed fetch doesn't leave yesterday's data on screen
+    if (!silent) setOrders([]);
     try {
       const res = await getOrdersPaginated({
         page: currentPage,
         pageSize: 20,
         dateFrom: dateRange.from,
         dateTo: dateRange.to,
-        searchQuery: dashboardSearch
+        searchQuery: dashboardSearch,
       });
 
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
 
-      // SMART MULTI-BARCODE CACHE RESOLUTION:
-      // If server query returns 0 rows during search, check if query matches secondary vial barcode in local orders!
       if (res.orders.length === 0 && dashboardSearch && dashboardSearch.trim()) {
         const q = dashboardSearch.trim().toLowerCase();
-        const matchedLocal = localOrders.filter(lo => {
+        const matchedLocal = localOrders.filter((lo) => {
           const vials = (lo.vials && lo.vials.length > 0) ? lo.vials : getAllOrderVials(lo, testCatalog);
           const allBcs = [
             lo.barcode,
             ...(lo.allBarcodes || []),
             ...(lo.barcodesList || []),
-            ...vials.map(v => v.barcode),
-            ...(lo.tests || []).map(t => t.vialBarcode || t.barcode)
+            ...vials.map((v) => v.barcode),
+            ...(lo.tests || []).map((t) => t.vialBarcode || t.barcode),
           ].filter(Boolean);
           return (
-            allBcs.some(b => String(b).toLowerCase().includes(q)) ||
+            allBcs.some((b) => String(b).toLowerCase().includes(q)) ||
             (lo.patient?.name && lo.patient.name.toLowerCase().includes(q)) ||
             (lo.patient?.id && String(lo.patient.id).toLowerCase().includes(q)) ||
             (lo.patient?.phone && lo.patient.phone.includes(q))
@@ -277,12 +441,11 @@ useEffect(() => {
       }
 
       const formatted = (res.orders || []).map((o, idx) => {
-        const localMatch = localOrders.find(lo => (lo.orderId || lo.id) === (o.id || o.orderId));
+        const localMatch = localOrders.find((lo) => (lo.orderId || lo.id) === (o.id || o.orderId));
 
-        // Restore multi-vial mapping from Supabase results or local storage
         let restoredVials = [];
         if (Array.isArray(o.results)) {
-          const vialRow = o.results.find(r => r.parameter_id === "SPECIMEN_VIALS");
+          const vialRow = o.results.find((r) => r.parameter_id === "SPECIMEN_VIALS");
           if (vialRow && vialRow.result_value) {
             try { restoredVials = JSON.parse(vialRow.result_value); } catch (e) {}
           }
@@ -291,10 +454,12 @@ useEffect(() => {
           restoredVials = localMatch.vials;
         }
 
-        const matchedTests = (o.order_tests || []).map(ot => {
+        const matchedTests = (o.order_tests || []).map((ot) => {
           const rawTest = ot.test || ot.tests || {};
           const testId = ot.test_id || rawTest.id || ot.id;
-          const fromCat = (testCatalog || []).find(t => t.id === testId || (t.code && t.code === rawTest.code)) || {};
+          const fromCat = (testCatalog || []).find(
+            (t) => t.id === testId || (t.code && t.code === rawTest.code)
+          ) || {};
 
           const catParams = fromCat.test_parameters || fromCat.parameters || [];
           const rawParams = rawTest.test_parameters || rawTest.parameters || [];
@@ -302,8 +467,11 @@ useEffect(() => {
 
           let specificVialBc = "";
           if (restoredVials.length > 0) {
-            const vMatch = restoredVials.find(v => 
-              v.testIds?.includes(testId) || v.testIds?.includes(rawTest.code) || v.testNames?.includes(rawTest.name)
+            const vMatch = restoredVials.find(
+              (v) =>
+                v.testIds?.includes(testId) ||
+                v.testIds?.includes(rawTest.code) ||
+                v.testNames?.includes(rawTest.name)
             );
             if (vMatch) specificVialBc = vMatch.barcode;
           }
@@ -321,19 +489,18 @@ useEffect(() => {
             report_type: rawTest.report_type || fromCat.report_type || "tabular",
             vialBarcode: specificVialBc || rawTest.vialBarcode || "",
             test_parameters: resolvedParams,
-            parameters: resolvedParams
+            parameters: resolvedParams,
           };
         }).filter(Boolean);
 
         const orderPrimaryBc = String(o.barcode || "").split(/[\s,]+/)[0];
 
-        // Defensive: filter any fallback source to only this order's own vial
         const filterByVial = (arr) => {
           if (!Array.isArray(arr)) return [];
           if (!orderPrimaryBc) return arr;
           return arr.filter((t) => {
             const tb = t?.vialBarcode || t?.barcode;
-            if (!tb) return true; // no vial info → keep (legacy data)
+            if (!tb) return true;
             return String(tb) === orderPrimaryBc;
           });
         };
@@ -347,9 +514,9 @@ useEffect(() => {
             ? localMatchTests
             : dbFallbackTests;
 
-        const resolvedDoctor = 
-          (o.patient?.address && o.patient.address.startsWith("Ref: ")) 
-            ? o.patient.address.replace("Ref: ", "") 
+        const resolvedDoctor =
+          (o.patient?.address && o.patient.address.startsWith("Ref: "))
+            ? o.patient.address.replace("Ref: ", "")
             : (o.patient?.doctor || o.doctor || "Self");
 
         const resolvedVials = restoredVials.length > 0
@@ -385,8 +552,8 @@ useEffect(() => {
           createdAt: o.created_at || o.createdAt || o.order_date || todayStr,
           verifiedAt: o.verified_at || o.verifiedAt || null,
           barcode: primaryBarcode,
-          allBarcodes: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
-          barcodesList: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map(v => v.barcode),
+          allBarcodes: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map((v) => v.barcode),
+          barcodesList: allBarcodesList.length > 0 ? allBarcodesList : resolvedVials.map((v) => v.barcode),
           doctor: resolvedDoctor,
           patient: {
             ...(o.patient || {}),
@@ -395,7 +562,7 @@ useEffect(() => {
             phone: o.patient?.phone || "N/A",
             age: o.patient?.age || 0,
             gender: o.patient?.gender || "Other",
-            doctor: resolvedDoctor
+            doctor: resolvedDoctor,
           },
           tests: resolvedTests,
           vials: resolvedVials,
@@ -404,7 +571,7 @@ useEffect(() => {
             discount: parseFloat(o.discount_percent) || 0,
             netPayable: parseFloat(o.net_payable) || 0,
             paid: parseFloat(o.paid_amount) || 0,
-            due: parseFloat(o.due_amount) || 0
+            due: parseFloat(o.due_amount) || 0,
           },
           results: Array.isArray(o.results)
             ? o.results.reduce((acc, r) => ({ ...acc, [r.parameter_id]: { value: r.result_value } }), {})
@@ -415,8 +582,11 @@ useEffect(() => {
           isLocked: o.is_locked || o.isLocked || false,
           dept_remarks: resolvedDeptRemarks,
           deptRemarks: resolvedDeptRemarks,
-          verifierRemarks: typeof o.verifier_remarks === "string" && !o.verifier_remarks.startsWith("{") ? o.verifier_remarks : (resolvedDeptRemarks["GLOBAL"] || ""),
-          verifier_remarks: o.verifier_remarks || ""
+          verifierRemarks:
+            typeof o.verifier_remarks === "string" && !o.verifier_remarks.startsWith("{")
+              ? o.verifier_remarks
+              : (resolvedDeptRemarks["GLOBAL"] || ""),
+          verifier_remarks: o.verifier_remarks || "",
         };
       });
 
@@ -442,54 +612,26 @@ useEffect(() => {
 
   useEffect(() => {
     fetchPaginatedOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
 
-  // Cache the last active order so a transient miss in the fresh fetch
-// doesn't silently swap the QC screen to a different patient.
-const lastActiveOrderRef = useRef(null);
-
-const activeOrder = useMemo(() => {
-  const found = orders.find((o) => o.orderId === selectedOrderId || o.id === selectedOrderId);
-  if (found) {
-    lastActiveOrderRef.current = found;
-    return found;
-  }
-  // Not in the current `orders` slice — keep the previous active order.
-  return lastActiveOrderRef.current || orders[0] || null;
-}, [orders, selectedOrderId]);
-
-// All sibling vial orders from the same reception visit share a receiptNo.
-// This groups them so Worklists/QC can present a single patient-level view.
-const visitOrders = useMemo(() => {
-  if (!activeOrder) return [];
-  const key = activeOrder.receiptNo;
-  if (!key) return [activeOrder];
-  const siblings = orders.filter((o) => o.receiptNo === key);
-  return siblings.length > 0 ? siblings : [activeOrder];
-}, [orders, activeOrder]);
-
-  // Realtime WebSocket Listener
+  // --- Realtime listener (patch in place, never refetch) ---
   useEffect(() => {
     if (!currentUser) return;
 
     const channel = supabase
-      .channel('lims-realtime-listener')
+      .channel("lims-realtime-listener")
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'results' },
+        "postgres_changes",
+        { event: "*", schema: "public", table: "results" },
         (payload) => {
           const newResult = payload.new;
           if (!newResult) return;
-
           const paramId = newResult.parameter_id;
 
-          // Skip if we recently wrote this parameter ourselves. Late-arriving
-          // realtime events from earlier keystrokes would otherwise overwrite
-          // the newer local value and make typed input appear to vanish.
           if (recentlyWrittenRef.current[paramId] && Date.now() < recentlyWrittenRef.current[paramId]) {
             return;
           }
-          // Expire stale entries so the map doesn't grow forever
           if (recentlyWrittenRef.current[paramId]) {
             delete recentlyWrittenRef.current[paramId];
           }
@@ -499,21 +641,19 @@ const visitOrders = useMemo(() => {
               const matches = ord.orderId === newResult.order_id || ord.id === newResult.order_id;
               if (matches) {
                 const isDeptRemark = paramId && paramId.startsWith("DEPT_REMARKS_");
-                let updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
-
+                const updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
                 if (isDeptRemark) {
                   const dId = paramId.replace("DEPT_REMARKS_", "");
                   updatedDeptRemarks[dId] = newResult.result_value;
                 }
-
                 return {
                   ...ord,
                   dept_remarks: updatedDeptRemarks,
                   deptRemarks: updatedDeptRemarks,
                   results: {
                     ...ord.results,
-                    [paramId]: { value: newResult.result_value }
-                  }
+                    [paramId]: { value: newResult.result_value },
+                  },
                 };
               }
               return ord;
@@ -522,11 +662,9 @@ const visitOrders = useMemo(() => {
         }
       )
       .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "orders" },
         (payload) => {
-          // Patch the specific order in-place. Do NOT refetch the whole list —
-          // that wipes any input the user is currently typing into.
           const changed = payload.new;
           if (!changed?.id) return;
 
@@ -566,7 +704,7 @@ const visitOrders = useMemo(() => {
     };
   }, [currentUser]);
 
-  // Direct Results Poller
+  // --- Direct results poller (8s safety net) ---
   useEffect(() => {
     if (!currentUser || !activeOrder) return;
     const currentTargetId = activeOrder.orderId || activeOrder.id;
@@ -576,9 +714,9 @@ const visitOrders = useMemo(() => {
       if (document.hidden) return;
       try {
         const { data: latestResults } = await supabase
-          .from('results')
-          .select('parameter_id, result_value')
-          .eq('order_id', currentTargetId);
+          .from("results")
+          .select("parameter_id, result_value")
+          .eq("order_id", currentTargetId);
 
         if (latestResults && latestResults.length > 0) {
           setOrders((prev) =>
@@ -589,19 +727,14 @@ const visitOrders = useMemo(() => {
                 const updatedDeptRemarks = { ...(ord.dept_remarks || ord.deptRemarks || {}) };
 
                 latestResults.forEach((r) => {
-                  // Skip params with a pending debounced write — the local
-                  // value is newer than what the DB has right now.
                   if (resultWriteTimers.current && resultWriteTimers.current[r.parameter_id]) return;
-
-                  // Skip params we wrote within the cooldown window.
-                  if (recentlyWrittenRef.current[r.parameter_id] && Date.now() < recentlyWrittenRef.current[r.parameter_id]) {
-                    return;
-                  }
+                  if (recentlyWrittenRef.current[r.parameter_id] && Date.now() < recentlyWrittenRef.current[r.parameter_id]) return;
 
                   if (updatedResults[r.parameter_id]?.value !== r.result_value) {
                     updatedResults[r.parameter_id] = { value: r.result_value };
                     changed = true;
-                  }      if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
+                  }
+                  if (r.parameter_id && r.parameter_id.startsWith("DEPT_REMARKS_")) {
                     const dId = r.parameter_id.replace("DEPT_REMARKS_", "");
                     if (updatedDeptRemarks[dId] !== r.result_value) {
                       updatedDeptRemarks[dId] = r.result_value;
@@ -610,13 +743,15 @@ const visitOrders = useMemo(() => {
                   }
                 });
 
-                return changed ? { ...ord, results: updatedResults, dept_remarks: updatedDeptRemarks, deptRemarks: updatedDeptRemarks } : ord;
+                return changed
+                  ? { ...ord, results: updatedResults, dept_remarks: updatedDeptRemarks, deptRemarks: updatedDeptRemarks }
+                  : ord;
               }
               return ord;
             })
           );
         }
-      } catch (err) {}
+      } catch (err) { /* silent */ }
     };
 
     const poller = setInterval(syncActiveResults, 8000);
@@ -624,14 +759,16 @@ const visitOrders = useMemo(() => {
       syncActiveResults();
       fetchPaginatedOrders(true);
     };
-    window.addEventListener('focus', onFocus);
+    window.addEventListener("focus", onFocus);
 
     return () => {
       clearInterval(poller);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener("focus", onFocus);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, activeOrder?.orderId, activeOrder?.id]);
-  // Clear pending result-write timers when the active order changes
+
+  // --- Clear pending result-write timers on order change ---
   useEffect(() => {
     return () => {
       if (resultWriteTimers.current) {
@@ -640,6 +777,10 @@ const visitOrders = useMemo(() => {
       }
     };
   }, [selectedOrderId]);
+
+  // ============================================================
+  // 5. CALLBACKS
+  // ============================================================
 
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
@@ -651,16 +792,42 @@ const visitOrders = useMemo(() => {
     } else if (preset === "YESTERDAY") {
       const y = new Date();
       y.setDate(y.getDate() - 1);
-      setDateRange({ from: y.toISOString().slice(0, 10), to: y.toISOString().slice(0, 10) });
+      const yStr = toLocalDateStr(y);
+      setDateRange({ from: yStr, to: yStr });
     } else if (preset === "LAST_7") {
       const d = new Date();
       d.setDate(d.getDate() - 7);
-      setDateRange({ from: d.toISOString().slice(0, 10), to: todayStr });
+      setDateRange({ from: toLocalDateStr(d), to: todayStr });
     } else if (preset === "THIS_MONTH") {
-      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-      setDateRange({ from: startOfMonth, to: todayStr });
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      setDateRange({ from: toLocalDateStr(startOfMonth), to: todayStr });
     } else if (preset === "ALL") {
       setDateRange({ from: "", to: "" });
+    }
+  };
+
+  const handleRejectSample = async (orderId, reason = "Hemolyzed Specimen") => {
+    if (!orderId) return;
+    try {
+      const res = await requestSampleRecollection(orderId, reason);
+      const cleanRemarks = res?.fullRemarks || `[RECOLLECTION REQUIRED: ${reason}]`;
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.orderId === orderId || o.id === orderId)
+            ? {
+                ...o,
+                sample_status: "Repeat Collection Required",
+                sampleStatus: "Repeat Collection Required",
+                verifierRemarks: cleanRemarks,
+                verifier_remarks: cleanRemarks,
+              }
+            : o
+        )
+      );
+      // No hard refetch — in-place update keeps the current patient on screen.
+    } catch (e) {
+      console.warn("Reject background notice:", e);
     }
   };
 
@@ -669,7 +836,8 @@ const visitOrders = useMemo(() => {
     setIsLoading(true);
     try {
       const res = await markSampleRecollected(orderId);
-      const cleanRemarks = res?.cleanRemarks || "New sample recollected. Clinically correlated and verified with quality control standards.";
+      const cleanRemarks = res?.cleanRemarks ||
+        "New sample recollected. Clinically correlated and verified with quality control standards.";
 
       setOrders((prev) =>
         prev.map((o) =>
@@ -679,15 +847,13 @@ const visitOrders = useMemo(() => {
                 sample_status: "Sample Recollected",
                 sampleStatus: "Sample Recollected",
                 verifierRemarks: cleanRemarks,
-                verifier_remarks: cleanRemarks
+                verifier_remarks: cleanRemarks,
               }
             : o
         )
       );
 
-      if (selectedOrderId === orderId) {
-        setSelectedOrderId(orderId);
-      }
+      if (selectedOrderId === orderId) setSelectedOrderId(orderId);
     } catch (e) {
       console.error("Recollection error:", e);
       alert("Error marking sample recollected: " + (e.message || e));
@@ -696,114 +862,6 @@ const visitOrders = useMemo(() => {
     }
   };
 
-const departmentalVials = useMemo(() => {
-  if (!visitOrders || visitOrders.length === 0) return [];
-
-  const collected = [];
-  for (const vo of visitOrders) {
-    const vials = getAllOrderVials(vo, testCatalog);
-    for (const v of vials) {
-      const bc = v.barcode || v.testBarcode;
-      if (!collected.some((c) => c.barcode === bc)) collected.push(v);
-    }
-  }
-
-  return collected.map((v) => ({
-    deptCode: v.deptCode || "GEN",
-    testBarcode: v.barcode || v.testBarcode,
-    patientId: activeOrder?.patient?.id || "P-1001",
-    patientName: activeOrder?.patient?.name || "Patient",
-    tubeColor: v.tubeColor || "Standard",
-    testNames: v.testNames && v.testNames.length > 0 ? v.testNames : []
-  }));
-}, [visitOrders, activeOrder, testCatalog]);
-
-  const departmentGroupedReports = useMemo(() => {
-    // Walk every sibling vial in the visit, not just the active order
-    const sources = (visitOrders && visitOrders.length > 0)
-      ? visitOrders
-      : (activeOrder ? [activeOrder] : []);
-
-    const allTests = [];
-    for (const vo of sources) {
-      const voId = vo.orderId || vo.id;
-      const voBc = String(vo.barcode || "").split(/[\s,]+/)[0];
-      const voLocked = vo.isLocked === true || vo.qcStatus === "Verified";
-      for (const t of (vo.tests || [])) {
-        allTests.push({
-          ...t,
-          _owningOrderId: voId,
-          _owningBarcode: voBc,
-          _owningLocked: voLocked,
-        });
-      }
-    }
-    if (allTests.length === 0) return [];
-
-    const grouped = {};
-
-    allTests.forEach((test) => {
-      const code = (test.code || "").toUpperCase();
-      const name = (test.name || "").toUpperCase();
-      const baseDeptId = test.dept_id || test.deptId || "DEP-BIO";
-
-      let groupKey = baseDeptId;
-      let groupName = null;
-      let groupIcon = null;
-
-      if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
-        groupKey = "DEP-HEM-CBC";
-        groupName = "Hematology & Coagulation";
-        groupIcon = "🩸";
-      } else if (code.includes("URINE") || name.includes("URINE")) {
-        groupKey = "DEP-PAT-URINE";
-        groupName = "Clinical Pathology & Urine Analysis";
-        groupIcon = "🧫";
-      } else if (code.includes("STOOL") || name.includes("STOOL")) {
-        groupKey = "DEP-PAT-STOOL";
-        groupName = "Clinical Pathology & Stool Examination";
-        groupIcon = "🔬";
-      } else if (code.includes("WIDAL")) {
-        groupKey = "DEP-MIC-WIDAL";
-        groupName = "Microbiology & Serology";
-        groupIcon = "🧪";
-      } else if (code.includes("SEMEN")) {
-        groupKey = "DEP-PAT-SEMEN";
-        groupName = "Clinical Pathology & Andrology";
-        groupIcon = "🔬";
-      }
-
-      if (!grouped[groupKey]) {
-        const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
-        grouped[groupKey] = {
-          dept: {
-            id: groupKey,
-            name: groupName || baseDept.name,
-            icon: groupIcon || baseDept.icon || "🔬"
-          },
-          tests: [],
-          ownerOrderId: null,
-          ownerBarcode: null,
-          ownerLocked: false,
-          ownerOrder: null,
-        };
-      }
-      grouped[groupKey].tests.push(test);
-
-      // Lock onto the first test's owning sibling as the department owner
-      if (!grouped[groupKey].ownerOrderId && test._owningOrderId) {
-        const owner = sources.find((o) => (o.orderId || o.id) === test._owningOrderId);
-        grouped[groupKey].ownerOrderId = test._owningOrderId;
-        grouped[groupKey].ownerBarcode = test._owningBarcode;
-        grouped[groupKey].ownerLocked = test._owningLocked;
-        grouped[groupKey].ownerOrder = owner || null;
-      }
-    });
-
-    return Object.values(grouped);
-  }, [activeOrder, visitOrders, departments]);
-
-  // Order Creation Handler with Instant Receipt Print
   const handleSaveOrderToDb = async () => {
     if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
       return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
@@ -816,17 +874,17 @@ const departmentalVials = useMemo(() => {
       const finalPaid = paidVal !== undefined ? parseFloat(paidVal) : net;
       const finalDue = Math.max(0, net - finalPaid);
 
-      const createdOrder = await createNewOrder({ 
-        patientData: patientForm, 
-        testIds: selectedTestIds, 
-        discount: discountVal, 
-        netPayable: net, 
-        paidAmount: finalPaid, 
+      const createdOrder = await createNewOrder({
+        patientData: patientForm,
+        testIds: selectedTestIds,
+        discount: discountVal,
+        netPayable: net,
+        paidAmount: finalPaid,
         dueAmount: finalDue,
-        testCatalog: testCatalog
+        testCatalog,
       });
 
-      setOrders(prev => [createdOrder, ...prev.filter(o => o.orderId !== createdOrder.orderId)]);
+      setOrders((prev) => [createdOrder, ...prev.filter((o) => o.orderId !== createdOrder.orderId)]);
       setSelectedOrderId(createdOrder.orderId);
 
       setPatientForm({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
@@ -834,18 +892,14 @@ const departmentalVials = useMemo(() => {
       setDiscountVal(0);
       setPaidVal(undefined);
 
-      try {
-        printMoneyReceiptA5(createdOrder, labSettings);
-      } catch (err) {
-        console.warn("Receipt print notice:", err);
-      }
+      try { printMoneyReceiptA5(createdOrder, labSettings); } catch (err) { console.warn("Receipt print:", err); }
 
       setActiveTab("dashboard");
       fetchPaginatedOrders(true);
-    } catch (e) { 
-      alert("Error saving order: " + e.message); 
-    } finally { 
-      setIsLoading(false); 
+    } catch (e) {
+      alert("Error saving order: " + e.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -853,146 +907,156 @@ const departmentalVials = useMemo(() => {
     setIsLoading(true);
     try {
       const { newPaid, newDue } = await settleOrderDue(orderId, collectedAmount);
-      setOrders(prev => prev.map(o => o.orderId === orderId ? { ...o, billing: { ...o.billing, paid: newPaid, due: newDue } } : o));
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === orderId
+            ? { ...o, billing: { ...o.billing, paid: newPaid, due: newDue } }
+            : o
+        )
+      );
       alert(`✅ Payment Collected!\nTotal Paid: ৳${newPaid}\nRemaining Due: ৳${newDue}`);
 
-      const matched = orders.find(o => o.orderId === orderId);
+      const matched = orders.find((o) => o.orderId === orderId);
       if (matched) {
         printMoneyReceiptA5({ ...matched, billing: { ...matched.billing, paid: newPaid, due: newDue } }, labSettings);
       }
       fetchPaginatedOrders(true);
-    } catch (e) { 
-      alert("Error collecting due: " + e.message); 
-    } finally { 
-      setIsLoading(false); 
+    } catch (e) {
+      alert("Error collecting due: " + e.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-const handleResultInput = async (paramId, val) => {
-  if (!activeOrder) return;
-  if (!paramId || String(paramId).trim() === "" || paramId === "undefined") return;
+  const handleResultInput = async (paramId, val) => {
+    if (!activeOrder) return;
+    if (!paramId || String(paramId).trim() === "" || paramId === "undefined") return;
 
-  // Route to the sibling order that actually owns this parameter
-  const owner = visitOrders.find((o) => {
-    if (o.isLocked) return false;
-    return (o.tests || []).some((t) => {
-      const params = t.test_parameters || t.parameters || [];
-      return params.some((p) => p.id === paramId);
+    const owner = visitOrders.find((o) => {
+      if (o.isLocked) return false;
+      return (o.tests || []).some((t) => {
+        const params = t.test_parameters || t.parameters || [];
+        return params.some((p) => p.id === paramId);
+      });
     });
-  });
-  const effectiveOrder = owner || activeOrder;
-  const targetOrderId = effectiveOrder.orderId || effectiveOrder.id;
-  if (effectiveOrder.isLocked) return;
+    const effectiveOrder = owner || activeOrder;
+    const targetOrderId = effectiveOrder.orderId || effectiveOrder.id;
+    if (effectiveOrder.isLocked) return;
 
-  const cleanVal = (
-    val === undefined || val === null ||
-    String(val).trim() === "undefined" || String(val).trim() === "null"
-  ) ? "" : String(val).trim();
+    const cleanVal = (
+      val === undefined || val === null ||
+      String(val).trim() === "undefined" || String(val).trim() === "null"
+    ) ? "" : String(val).trim();
 
-  let cleanRemarks = effectiveOrder.verifierRemarks || "";
-  if (cleanRemarks.toUpperCase().includes("RECOLLECTION REQUIRED")) {
-    cleanRemarks = "New sample recollected. Clinically correlated and verified with internal quality control standards.";
-  }
-
-  setOrders((prev) =>
-    prev.map((o) =>
-      (o.orderId === targetOrderId || o.id === targetOrderId)
-        ? {
-            ...o,
-            sample_status: "In Analysis",
-            verifierRemarks: cleanRemarks,
-            results: { ...o.results, [paramId]: { value: cleanVal } }
-          }
-        : o
-    )
-  );
-
-  setSaveStatus({ state: "saving", message: "Syncing..." });
-
-  // Debounce DB writes per parameter. The optimistic setOrders above is
-  // already instant, so the UI stays responsive. Only the network write
-  // is delayed, to prevent fast typing from racing older values onto
-  // the DB after newer ones.
-  if (!resultWriteTimers.current) resultWriteTimers.current = {};
-  if (resultWriteTimers.current[paramId]) {
-    clearTimeout(resultWriteTimers.current[paramId]);
-  }
-
-  resultWriteTimers.current[paramId] = setTimeout(async () => {
-    try {
-      // Mark cooldown BEFORE the write so any event produced by this write
-      // is ignored when it comes back through Realtime.
-      recentlyWrittenRef.current[paramId] = Date.now() + 3000;
-
-      await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
-      if (cleanRemarks !== effectiveOrder.verifierRemarks) {
-        await supabase
-          .from("orders")
-          .update({ verifier_remarks: cleanRemarks })
-          .eq("id", targetOrderId);
-      }
-      setSaveStatus({ state: "saved", message: "Saved" });
-      setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1200);
-    } catch (e) {
-      setSaveStatus({ state: "error", message: "Error: " + e.message });
-    } finally {
-      delete resultWriteTimers.current[paramId];
+    let cleanRemarks = effectiveOrder.verifierRemarks || "";
+    if (cleanRemarks.toUpperCase().includes("RECOLLECTION REQUIRED")) {
+      cleanRemarks = "New sample recollected. Clinically correlated and verified with internal quality control standards.";
     }
-  }, 500);   // 350ms after the last keystroke for this param
-};
-
-const handleRemarksChange = (arg1, arg2) => {
-  if (!activeOrder) return;
-
-  if (arg2 !== undefined) {
-    const deptId = arg1;
-    const text = arg2;
-
-    // Find the sibling order that owns this department
-    const targetOrder = visitOrders.find((o) =>
-      (o.tests || []).some((t) => (t.dept_id || t.deptId) === deptId)
-    ) || activeOrder;
-
-    if (targetOrder.isLocked) return;
-    const targetOrderId = targetOrder.orderId || targetOrder.id;
-    const currentDeptRemarks = {
-      ...(targetOrder.dept_remarks || targetOrder.deptRemarks || {}),
-      [deptId]: text
-    };
 
     setOrders((prev) =>
       prev.map((o) =>
         (o.orderId === targetOrderId || o.id === targetOrderId)
-          ? { ...o, dept_remarks: currentDeptRemarks, deptRemarks: currentDeptRemarks }
+          ? {
+              ...o,
+              sample_status: "In Analysis",
+              verifierRemarks: cleanRemarks,
+              results: { ...o.results, [paramId]: { value: cleanVal } },
+            }
           : o
       )
     );
 
-    (async () => {
+    setSaveStatus({ state: "saving", message: "Syncing..." });
+
+    if (resultWriteTimers.current[paramId]) {
+      clearTimeout(resultWriteTimers.current[paramId]);
+    }
+
+    resultWriteTimers.current[paramId] = setTimeout(async () => {
       try {
-        await saveTestResult(targetOrderId, `DEPT_REMARKS_${deptId}`, text);
-        await supabase.from("orders")
-          .update({ verifier_remarks: JSON.stringify(currentDeptRemarks) })
-          .eq("id", targetOrderId);
-      } catch (e) {}
-    })();
-  } else {
-    // Global remark — apply to all unlocked siblings
-    const val = arg1;
-    setOrders((prev) =>
-      prev.map((o) => {
-        const inVisit = visitOrders.some((vo) => (vo.orderId || vo.id) === (o.orderId || o.id));
-        if (!inVisit || o.isLocked) return o;
-        return { ...o, verifierRemarks: val };
-      })
-    );
-  }
-};
-  const handleVerifyInDb = async () => {
+        recentlyWrittenRef.current[paramId] = Date.now() + 3000;
+
+        await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
+        if (cleanRemarks !== effectiveOrder.verifierRemarks) {
+          await supabase
+            .from("orders")
+            .update({ verifier_remarks: cleanRemarks })
+            .eq("id", targetOrderId);
+        }
+        setSaveStatus({ state: "saved", message: "Saved" });
+        setTimeout(() => setSaveStatus({ state: "idle", message: "" }), 1200);
+      } catch (e) {
+        setSaveStatus({ state: "error", message: "Error: " + e.message });
+      } finally {
+        delete resultWriteTimers.current[paramId];
+      }
+    }, 200);
+  };
+
+  const handleRemarksChange = (arg1, arg2) => {
     if (!activeOrder) return;
 
-    // ----- Pre-flight: block verification if any parameter is empty -----
-    const ordersToVerify = (visitOrders && visitOrders.length > 0) ? visitOrders : [activeOrder];
+    if (arg2 !== undefined) {
+      const deptId = arg1;
+      const text = arg2;
+
+      const targetOrder = visitOrders.find((o) =>
+        (o.tests || []).some((t) => (t.dept_id || t.deptId) === deptId)
+      ) || activeOrder;
+
+      if (targetOrder.isLocked) return;
+      const targetOrderId = targetOrder.orderId || targetOrder.id;
+      const currentDeptRemarks = {
+        ...(targetOrder.dept_remarks || targetOrder.deptRemarks || {}),
+        [deptId]: text,
+      };
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.orderId === targetOrderId || o.id === targetOrderId)
+            ? { ...o, dept_remarks: currentDeptRemarks, deptRemarks: currentDeptRemarks }
+            : o
+        )
+      );
+
+      (async () => {
+        try {
+          recentlyWrittenRef.current[`DEPT_REMARKS_${deptId}`] = Date.now() + 3000;
+          await saveTestResult(targetOrderId, `DEPT_REMARKS_${deptId}`, text);
+          await supabase
+            .from("orders")
+            .update({ verifier_remarks: JSON.stringify(currentDeptRemarks) })
+            .eq("id", targetOrderId);
+        } catch (e) { /* silent */ }
+      })();
+    } else {
+      const val = arg1;
+      setOrders((prev) =>
+        prev.map((o) => {
+          const inVisit = visitOrders.some((vo) => (vo.orderId || vo.id) === (o.orderId || o.id));
+          if (!inVisit || o.isLocked) return o;
+          return { ...o, verifierRemarks: val };
+        })
+      );
+    }
+  };
+
+  const handleVerifyInDb = async (targetDeptId = null) => {
+    if (!activeOrder) return;
+
+    // Scope the verification set: all siblings, or just the ones for one dept
+    let ordersToVerify = (visitOrders && visitOrders.length > 0) ? visitOrders : [activeOrder];
+
+    if (targetDeptId) {
+      ordersToVerify = ordersToVerify.filter((vo) =>
+        (vo.tests || []).some((t) => (t.dept_id || t.deptId) === targetDeptId)
+      );
+      if (ordersToVerify.length === 0) {
+        alert("No orders found for that department.");
+        return;
+      }
+    }
+
     const incompleteReport = [];
 
     for (const vo of ordersToVerify) {
@@ -1001,7 +1065,6 @@ const handleRemarksChange = (arg1, arg2) => {
       const missing = [];
       for (const t of (vo.tests || [])) {
         const params = t.test_parameters || t.parameters || [];
-        // If a test has no explicit params, treat the test row itself as one param
         const effectiveParams = params.length > 0
           ? params
           : [{ id: t.id, name: t.name || "Result" }];
@@ -1028,14 +1091,15 @@ const handleRemarksChange = (arg1, arg2) => {
 
     if (incompleteReport.length > 0) {
       const lines = incompleteReport.map(
-        (r) => `• ${r.barcode}: ${r.missing.length} parameter(s) missing\n   ${r.missing.slice(0, 5).join(", ")}${r.missing.length > 5 ? ", …" : ""}`
+        (r) =>
+          `• ${r.barcode}: ${r.missing.length} parameter(s) missing\n   ${r.missing.slice(0, 5).join(", ")}${r.missing.length > 5 ? ", …" : ""}`
       );
+      const scopeLabel = targetDeptId ? `the ${targetDeptId.replace("DEP-", "")} department` : "the report";
       alert(
-        `⚠ Cannot verify — the following parameters have no result:\n\n${lines.join("\n\n")}\n\nPlease enter every result before verifying.`
+        `⚠ Cannot verify ${scopeLabel} — the following parameters have no result:\n\n${lines.join("\n\n")}\n\nPlease enter every result before verifying.`
       );
       return;
     }
-    // ---------------------------------------------------------------------
 
     setIsLoading(true);
     try {
@@ -1044,54 +1108,66 @@ const handleRemarksChange = (arg1, arg2) => {
 
       for (const vo of ordersToVerify) {
         if (vo.isLocked) continue;
-        const remarksToSave = typeof vo.verifierRemarks === "string" && vo.verifierRemarks.trim()
-          ? vo.verifierRemarks.trim()
-          : defaultRemarks;
-        const serializedRemarks = vo.dept_remarks && Object.keys(vo.dept_remarks).length > 0
-          ? JSON.stringify(vo.dept_remarks)
-          : remarksToSave;
+        const remarksToSave =
+          typeof vo.verifierRemarks === "string" && vo.verifierRemarks.trim()
+            ? vo.verifierRemarks.trim()
+            : defaultRemarks;
+        const serializedRemarks =
+          vo.dept_remarks && Object.keys(vo.dept_remarks).length > 0
+            ? JSON.stringify(vo.dept_remarks)
+            : remarksToSave;
 
         await verifyAndLockOrder(vo.orderId || vo.id, serializedRemarks, verifierName);
       }
 
       const verifiedIds = new Set(ordersToVerify.map((o) => o.orderId || o.id));
-      setOrders((prev) => prev.map((o) => {
-        if (!verifiedIds.has(o.orderId || o.id)) return o;
-        return { ...o, qcStatus: "Verified", isLocked: true };
-      }));
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (!verifiedIds.has(o.orderId || o.id)) return o;
+          return {
+            ...o,
+            qcStatus: "Verified",
+            isLocked: true,
+            verifiedAt: new Date().toISOString(),
+          };
+        })
+      );
 
-      alert("✅ All department reports Verified and Locked!");
-      // No hard refetch — the in-place state update already reflects the
-      // verified status. Realtime + poller keep the rest of the list fresh.
+      const scopeText = targetDeptId
+        ? `${targetDeptId.replace("DEP-", "")} department`
+        : "all department reports";
+      alert(`✅ ${scopeText} Verified and Locked!`);
+      // No hard refetch — in-place update keeps the current patient on screen.
     } catch (e) {
       alert("Verification failed: " + e.message);
     } finally {
       setIsLoading(false);
     }
   };
-
   const handleSaveNewTest = async () => {
-    if (!newTestForm.name || !newTestForm.code || !newTestForm.price) return alert("Fill Name, Code, Price.");
+    if (!newTestForm.name || !newTestForm.code || !newTestForm.price) {
+      return alert("Fill Name, Code, Price.");
+    }
     setIsLoading(true);
     try {
       const createdTest = await createNewTestWithParameters(newTestForm);
       alert("✅ Test Added to Catalog!");
-      
+
       const { tests } = await getMasterData();
       const updatedCatalog = (tests && tests.length > 0) ? tests : [createdTest, ...testCatalog];
       setTestCatalog(updatedCatalog);
 
       setNewTestForm({
-        name: "", code: "", deptId: departments[0]?.id || "DEP-BIO", price: "", sampleType: "Serum", 
+        name: "", code: "", deptId: departments[0]?.id || "DEP-BIO", price: "", sampleType: "Serum",
         tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
-        parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }] 
+        parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }],
       });
 
       setActiveTab("reception");
-    } catch (e) { 
-      alert(e.message); 
-    } finally { 
-      setIsLoading(false); 
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1110,12 +1186,7 @@ const handleRemarksChange = (arg1, arg2) => {
             const hasMin = p.min_range !== null && p.min_range !== undefined && String(p.min_range).trim() !== "";
             const hasMax = p.max_range !== null && p.max_range !== undefined && String(p.max_range).trim() !== "";
             const hasRef = Boolean(p.reference_text && String(p.reference_text).trim() !== "");
-
-            if (!hasMin && !hasMax && hasRef) {
-              resolvedType = "multirange";
-            } else {
-              resolvedType = "numeric";
-            }
+            resolvedType = (!hasMin && !hasMax && hasRef) ? "multirange" : "numeric";
           }
 
           const minVal = (p.min !== undefined && p.min !== null && p.min !== "")
@@ -1137,13 +1208,13 @@ const handleRemarksChange = (arg1, arg2) => {
             max: maxVal,
             min_range: minVal,
             max_range: maxVal,
-            reference_text: refVal
+            reference_text: refVal,
           };
         })
       : [{ id: "1", name: t.name || "", param_type: "numeric", unit: "", min: "", max: "", min_range: "", max_range: "", reference_text: "" }];
 
-    const isDescriptiveTest = t.report_type === "descriptive" || 
-      normalizedParams.some(p => p.param_type === "text");
+    const isDescriptiveTest =
+      t.report_type === "descriptive" || normalizedParams.some((p) => p.param_type === "text");
 
     setEditingTest({
       ...t,
@@ -1159,7 +1230,7 @@ const handleRemarksChange = (arg1, arg2) => {
       reportType: isDescriptiveTest ? "descriptive" : (t.report_type || "tabular"),
       report_type: isDescriptiveTest ? "descriptive" : (t.report_type || "tabular"),
       is_available: t.is_available !== undefined ? t.is_available : true,
-      parameters: normalizedParams
+      parameters: normalizedParams,
     });
   };
 
@@ -1173,7 +1244,11 @@ const handleRemarksChange = (arg1, arg2) => {
       setEditingTest(null);
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDeleteTest = async (testId, testName) => {
@@ -1183,15 +1258,17 @@ const handleRemarksChange = (arg1, arg2) => {
       await deleteTest(testId);
       const { tests } = await getMasterData();
       setTestCatalog(tests || []);
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleToggleReagent = async (testId, newStatus) => {
     try {
       await toggleTestAvailability(testId, newStatus);
-      setTestCatalog((prev) =>
-        prev.map((t) => (t.id === testId ? { ...t, is_available: newStatus } : t))
-      );
+      setTestCatalog((prev) => prev.map((t) => (t.id === testId ? { ...t, is_available: newStatus } : t)));
     } catch (e) {
       alert("Error updating reagent status: " + e.message);
     }
@@ -1212,31 +1289,31 @@ const handleRemarksChange = (arg1, arg2) => {
     }
   };
 
-const handleRegisterStaff = async (staffData) => {
-  setIsLoading(true);
-  try {
-    await createStaffUser(staffData);
-    alert("✅ Staff Member Registered!");
-    setStaffList((await getStaffUsers()) || []);
-  } catch (e) {
-    alert("Error registering staff: " + (e.message || e));
-  } finally {
-    setIsLoading(false);
-  }
-};
+  const handleRegisterStaff = async (staffData) => {
+    setIsLoading(true);
+    try {
+      await createStaffUser(staffData);
+      alert("✅ Staff Member Registered!");
+      setStaffList((await getStaffUsers()) || []);
+    } catch (e) {
+      alert("Error registering staff: " + (e.message || e));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-const handleDeleteStaff = async (userId, userName) => {
-  if (!window.confirm(`Delete staff member "${userName}"?`)) return;
-  setIsLoading(true);
-  try {
-    await deleteStaffUserAuth(userId);
-    setStaffList((await getStaffUsers()) || []);
-  } catch (e) {
-    alert("Error deleting staff: " + (e.message || e));
-  } finally {
-    setIsLoading(false);
-  }
-};
+  const handleDeleteStaff = async (userId, userName) => {
+    if (!window.confirm(`Delete staff member "${userName}"?`)) return;
+    setIsLoading(true);
+    try {
+      await deleteStaffUserAuth(userId);
+      setStaffList((await getStaffUsers()) || []);
+    } catch (e) {
+      alert("Error deleting staff: " + (e.message || e));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSaveDoctor = async (docData) => {
     setIsLoading(true);
@@ -1270,10 +1347,16 @@ const handleDeleteStaff = async (userId, userName) => {
       const saved = await saveLabSettings(settingsData);
       setLabSettings(saved || settingsData);
       alert("✅ Branding Settings Saved!");
-    } catch (e) { alert(e.message); } finally { setIsLoading(false); }
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // Public QR Code Portal
+  // ============================================================
+  // 6. CONDITIONAL RENDERS
+  // ============================================================
   if (isVerifyingPublicUrl) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
@@ -1314,204 +1397,221 @@ const handleDeleteStaff = async (userId, userName) => {
 
   if (!currentUser) {
     return (
-      <Login 
-        onLoginSuccess={(u) => { 
-          setCurrentUser(u); 
+      <Login
+        onLoginSuccess={(u) => {
+          setCurrentUser(u);
           const role = (u.role || "").toLowerCase();
           setActiveTab(
-            role === "receptionist" ? "reception" : 
-            role === "technologist" ? "worklists" : 
+            role === "receptionist" ? "reception" :
+            role === "technologist" ? "worklists" :
             role === "verifier" || role === "biochemist" ? "verifier" : "dashboard"
-          ); 
-        }} 
+          );
+        }}
       />
     );
   }
 
+  // ============================================================
+  // 7. MAIN RENDER
+  // ============================================================
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col w-full">
-      <Navbar 
-        currentUser={currentUser} 
-        onLogout={async () => { await authLogout(); setCurrentUser(null); }}  
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        mobileMenuOpen={mobileMenuOpen} 
-        setMobileMenuOpen={setMobileMenuOpen} 
-        loadDatabaseData={() => fetchPaginatedOrders(false)} 
-        isLoading={isLoading} 
-        labSettings={labSettings} 
-      />
-      
+    <AppLayout
+      currentUser={currentUser}
+      labSettings={labSettings}
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
+      onLogout={async () => { await authLogout(); setCurrentUser(null); }}
+      onNewOrder={() => setActiveTab("reception")}
+      isLoading={isLoading}
+      loadDatabaseData={() => fetchPaginatedOrders(false)}
+      dateRange={dateRange}
+      setDateRange={setDateRange}
+      activePreset={activePreset}
+      setPreset={handlePresetSwitch}
+      setCurrentPage={setCurrentPage}
+    >
       {saveStatus.state !== "idle" && (
-  <div
-    className={`fixed top-16 right-4 z-[60] py-1.5 px-3 text-[11px] font-semibold rounded-lg shadow-lg transition ${
-      saveStatus.state === "saving"
-        ? "bg-amber-500 text-white"
-        : saveStatus.state === "error"
-          ? "bg-rose-600 text-white"
-          : "bg-emerald-600 text-white"
-    }`}
-  >
-    {saveStatus.message}
-  </div>
-)}
+        <div
+          className={`fixed top-16 right-4 z-[60] py-1.5 px-3 text-[11px] font-semibold rounded-lg shadow-lg transition ${
+            saveStatus.state === "saving"
+              ? "bg-amber-500 text-white"
+              : saveStatus.state === "error"
+                ? "bg-rose-600 text-white"
+                : "bg-emerald-600 text-white"
+          }`}
+        >
+          {saveStatus.message}
+        </div>
+      )}
 
-      <main className="w-full max-w-[1720px] mx-auto px-3 sm:px-4 py-3 sm:py-4 flex-1">
-        {activeTab === "dashboard" && (
-          <Dashboard
-            orders={orders}
-            departments={departments}
-            testCatalog={testCatalog}
-            setSelectedOrderId={setSelectedOrderId}
-            setActiveTab={setActiveTab}
-            handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)}
-            handleSettleDue={handleSettleDue}
-            handleMarkRecollected={handleMarkRecollected}
-            dashboardSearch={dashboardSearch}
-            setDashboardSearch={setDashboardSearch}
-            dateRange={dateRange}
-            setDateRange={setDateRange}
-            activePreset={activePreset}
-            setPreset={handlePresetSwitch}
-            currentPage={currentPage}
-            setCurrentPage={setCurrentPage}
-            totalPages={totalPages}
-            totalCount={totalCount}
-            pageSize={20}
-            isLoading={isLoading}
-          />
-        )}
+      {activeTab === "dashboard" && (
+        <Dashboard
+          orders={orders}
+          departments={departments}
+          testCatalog={testCatalog}
+          setSelectedOrderId={setSelectedOrderId}
+          setActiveTab={setActiveTab}
+          handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)}
+          handleSettleDue={handleSettleDue}
+          handleMarkRecollected={handleMarkRecollected}
+          dashboardSearch={dashboardSearch}
+          setDashboardSearch={setDashboardSearch}
+          dateRange={dateRange}
+          setDateRange={setDateRange}
+          activePreset={activePreset}
+          setPreset={handlePresetSwitch}
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          pageSize={20}
+          isLoading={isLoading}
+        />
+      )}
 
-        {activeTab === "reception" && (
-          <ReceptionPOS 
-            testCatalog={testCatalog} 
-            patientForm={patientForm} 
-            setPatientForm={setPatientForm} 
-            selectedTestIds={selectedTestIds} 
-            setSelectedTestIds={setSelectedTestIds} 
-            discountVal={discountVal} 
-            setDiscountVal={setDiscountVal} 
-            paidVal={paidVal}
-            setPaidVal={setPaidVal}
-            handleSaveOrderToDb={handleSaveOrderToDb} 
-            activeOrder={activeOrder} 
-            isLoading={isLoading} 
-            doctorsList={doctorsList}
-          />
-        )}
+      {activeTab === "reception" && (
+        <ReceptionPOS
+          testCatalog={testCatalog}
+          patientForm={patientForm}
+          setPatientForm={setPatientForm}
+          selectedTestIds={selectedTestIds}
+          setSelectedTestIds={setSelectedTestIds}
+          discountVal={discountVal}
+          setDiscountVal={setDiscountVal}
+          paidVal={paidVal}
+          setPaidVal={setPaidVal}
+          handleSaveOrderToDb={handleSaveOrderToDb}
+          activeOrder={activeOrder}
+          isLoading={isLoading}
+          doctorsList={doctorsList}
+        />
+      )}
 
-        {activeTab === "samples" && (
-          <SampleTracking 
-            activeOrder={activeOrder} 
-            visitOrders={visitOrders}
-            departmentalVials={departmentalVials} 
-            handlePrintSpecificVialBarcode={(v) => printSpecificVialBarcode(v, () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], barcodePrinted: true } })))} 
-            trackingStatus={trackingStatus} 
-          />
-        )}
+      {activeTab === "samples" && (
+        <SampleTracking
+          activeOrder={activeOrder}
+          visitOrders={visitOrders}
+          departmentalVials={departmentalVials}
+          handlePrintSpecificVialBarcode={(v) =>
+            printSpecificVialBarcode(v, () =>
+              setTrackingStatus((p) => ({
+                ...p,
+                [activeOrder?.orderId]: { ...p[activeOrder?.orderId], barcodePrinted: true },
+              }))
+            )
+          }
+          trackingStatus={trackingStatus}
+        />
+      )}
 
-        {activeTab === "worklists" && (
-          <Worklists 
-            orders={orders} 
-            departments={departments} 
-            setSelectedOrderId={setSelectedOrderId} 
-            setActiveTab={setActiveTab} 
-          />
-        )}
+      {activeTab === "worklists" && (
+        <Worklists
+          orders={orders}
+          departments={departments}
+          setSelectedOrderId={setSelectedOrderId}
+          setActiveTab={setActiveTab}
+        />
+      )}
 
-        {activeTab === "verifier" && (
-          <VerificationQC
-            activeOrder={activeOrder}
-            visitOrders={visitOrders}
-            handleResultInput={handleResultInput}
-            handleRemarksChange={handleRemarksChange}
-            handleVerifyInDb={handleVerifyInDb}
-            handleMarkRecollected={handleMarkRecollected}
-            handleRejectSample={handleRejectSample}
-            isLoading={isLoading}
-            saveStatus={saveStatus}
-            currentUser={currentUser}
-            labSettings={labSettings}
-          />
-        )}
+      {activeTab === "verifier" && (
+        <VerificationQC
+          activeOrder={activeOrder}
+          visitOrders={visitOrders}
+          testCatalog={testCatalog}
+          handleResultInput={handleResultInput}
+          handleRemarksChange={handleRemarksChange}
+          handleVerifyInDb={handleVerifyInDb}
+          handleMarkRecollected={handleMarkRecollected}
+          handleRejectSample={handleRejectSample}
+          isLoading={isLoading}
+          saveStatus={saveStatus}
+          currentUser={currentUser}
+          labSettings={labSettings}
+        />
+      )}
 
-        {activeTab === "reports" && (
-          <ReportsPrint 
-            activeOrder={activeOrder} 
-            currentUser={currentUser} 
-            departmentGroupedReports={departmentGroupedReports} 
-            handlePrintDepartmentA4Report={(deptId, usePad) => 
+      {activeTab === "reports" && (
+        <ReportsPrint
+          activeOrder={activeOrder}
+          currentUser={currentUser}
+          departmentGroupedReports={departmentGroupedReports}
+           handlePrintDepartmentA4Report={(deptId, usePad) =>
               printDepartmentA4Report(
-                deptId, 
-                activeOrder, 
-                departmentGroupedReports, 
-                staffList, 
-                labSettings, 
-                () => setTrackingStatus((p) => ({ ...p, [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true } })),
+                deptId,
+                activeOrder,
+                departmentGroupedReports,
+                staffList,
+                labSettings,
+                () =>
+                  setTrackingStatus((p) => ({
+                    ...p,
+                    [activeOrder?.orderId]: { ...p[activeOrder?.orderId], reportPrinted: true },
+                  })),
                 usePad
               )
-            } 
-            staffList={staffList} 
-            labSettings={labSettings} 
-            onOpenVerificationModal={() => {
-              const fullVisit = {
-                ...activeOrder,
-                tests: (visitOrders || [activeOrder]).flatMap(v => v.tests || []),
-                allBarcodes: (visitOrders || [activeOrder]).map(v => String(v.barcode || "").split(/[\s,]+/)[0]).filter(Boolean),
-              };
-              setPatientTrackingOrder(fullVisit);
-            }}
-            handleSettleDue={handleSettleDue}
-            handleRemarksChange={handleRemarksChange}
-          />
-        )}
+            }
+          staffList={staffList}
+          labSettings={labSettings}
+          onOpenVerificationModal={() => {
+            const fullVisit = {
+              ...activeOrder,
+              tests: (visitOrders || [activeOrder]).flatMap((v) => v.tests || []),
+              allBarcodes: (visitOrders || [activeOrder])
+                .map((v) => String(v.barcode || "").split(/[\s,]+/)[0])
+                .filter(Boolean),
+            };
+            setPatientTrackingOrder(fullVisit);
+          }}
+          handleSettleDue={handleSettleDue}
+          handleRemarksChange={handleRemarksChange}
+        />
+      )}
 
-        {activeTab === "test-manager" && (
-          <TestManager 
-            departments={departments} 
-            testCatalog={testCatalog} 
-            newTestForm={newTestForm} 
-            setNewTestForm={setNewTestForm} 
-            handleSaveNewTest={handleSaveNewTest} 
-            handleSaveTestEdits={handleSaveTestEdits} 
-            handleDeleteTest={handleDeleteTest} 
-            handleToggleReagent={handleToggleReagent}
-            editingTest={editingTest} 
-            setEditingTest={setEditingTest} 
-            handleOpenEditModal={handleOpenEditModal}
-            handleSeedRadiology={handleSeedRadiology}
-            MASTER_SAMPLE_TYPES={MASTER_SAMPLE_TYPES} 
-            MASTER_TUBE_COLORS={MASTER_TUBE_COLORS} 
-            isLoading={isLoading} 
-          />
-        )}
+      {activeTab === "test-manager" && (
+        <TestManager
+          departments={departments}
+          testCatalog={testCatalog}
+          newTestForm={newTestForm}
+          setNewTestForm={setNewTestForm}
+          handleSaveNewTest={handleSaveNewTest}
+          handleSaveTestEdits={handleSaveTestEdits}
+          handleDeleteTest={handleDeleteTest}
+          handleToggleReagent={handleToggleReagent}
+          editingTest={editingTest}
+          setEditingTest={setEditingTest}
+          handleOpenEditModal={handleOpenEditModal}
+          handleSeedRadiology={handleSeedRadiology}
+          MASTER_SAMPLE_TYPES={MASTER_SAMPLE_TYPES}
+          MASTER_TUBE_COLORS={MASTER_TUBE_COLORS}
+          isLoading={isLoading}
+        />
+      )}
 
-        {activeTab === "doctor-manager" && (
-          <DoctorManagement 
-            doctorsList={doctorsList} 
-            handleSaveDoctor={handleSaveDoctor} 
-            handleDeleteDoctor={handleDeleteDoctor} 
-            isLoading={isLoading} 
-          />
-        )}
+      {activeTab === "doctor-manager" && (
+        <DoctorManagement
+          doctorsList={doctorsList}
+          handleSaveDoctor={handleSaveDoctor}
+          handleDeleteDoctor={handleDeleteDoctor}
+          isLoading={isLoading}
+        />
+      )}
 
-        {activeTab === "staff-manager" && (
-          <UserManagement 
-            staffList={staffList} 
-            handleRegisterStaff={handleRegisterStaff} 
-            handleDeleteStaff={handleDeleteStaff} 
-            isLoading={isLoading} 
-          />
-        )}
+      {activeTab === "staff-manager" && (
+        <UserManagement
+          staffList={staffList}
+          handleRegisterStaff={handleRegisterStaff}
+          handleDeleteStaff={handleDeleteStaff}
+          isLoading={isLoading}
+        />
+      )}
 
-        {activeTab === "lab-settings" && (
-          <LabSettings 
-            labSettings={labSettings} 
-            handleSaveSettings={handleSaveSettings} 
-            isLoading={isLoading} 
-          />
-        )}
-      </main>
-    </div>
+      {activeTab === "lab-settings" && (
+        <LabSettings
+          labSettings={labSettings}
+          handleSaveSettings={handleSaveSettings}
+          isLoading={isLoading}
+        />
+      )}
+    </AppLayout>
   );
 }

@@ -1,5 +1,6 @@
 import { generateQrSvgString } from "./qrcode";
 import { buildReportHeaderHtml, buildReportFooterHtml, getReportLayout } from "./reportLayout";
+import html2pdf from "html2pdf.js";
 
 // GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
@@ -1184,7 +1185,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     if (isProfile) {
       tableRows += `
-        <tr style="border-top: 1.5px solid #000000; border-bottom: 1px solid #000000; page-break-inside: avoid;">
+        <tr style=" border-bottom: 1px solid #000000; page-break-inside: avoid;">
           <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 9pt; color: #000000; text-transform: uppercase;">
             ${test.name} ${test.code ? `(${test.code})` : ""}
             <span style="font-size: 7pt; font-weight: 600; color: #475569; margin-left: 6px; text-transform: none;">[Multi-Parameter Profile]</span>
@@ -1541,7 +1542,6 @@ export function renderDepartmentReportHtml({
   `;
 }
 
-// 9. PRINT DISPATCH DRIVER
 export function printDepartmentA4Report(
   targetDeptId = "ALL",
   activeOrder,
@@ -1554,17 +1554,34 @@ export function printDepartmentA4Report(
   if (!activeOrder) return;
   if (onPrintedCallback) onPrintedCallback();
 
-  // Pad-mode reserves follow the layout designer's header/footer heights.
+  // For "ALL" requests, only include sheets that are actually verified.
+  // This lets receptionists print the verified departments even when other
+  // departments are still pending.
+  const verifiableGroups = (departmentGroupedReports || []).filter((g) => {
+    const owner = g.ownerOrder;
+    if (!owner) return false;
+    return (
+      owner.isLocked === true ||
+      owner.qcStatus === "Verified" ||
+      g.ownerLocked === true
+    );
+  });
+
+  const deptGroupsToPrint = targetDeptId === "ALL"
+    ? verifiableGroups
+    : verifiableGroups.filter((g) => g.dept?.id === targetDeptId);
+
+      if (deptGroupsToPrint.length === 0) {
+    alert("No verified reports to print yet.");
+    return;
+  }
+// Pad-mode reserves follow the layout designer's header/footer heights.
   const PX_TO_MM = 25.4 / 96;
   const _layout = getReportLayout(labSettings);
   const _headerPx = (_layout?.header?.height) || 132;
   const _footerPx = (_layout?.footer?.height) || 72;
   const _headerMm = (_headerPx * PX_TO_MM).toFixed(1);
   const _footerMm = (_footerPx * PX_TO_MM).toFixed(1);
-
-  const deptGroupsToPrint = targetDeptId === "ALL"
-    ? departmentGroupedReports
-    : (departmentGroupedReports || []).filter((g) => g.dept?.id === targetDeptId);
 
   const pagesHtml = (deptGroupsToPrint || []).map((group) => {
     return renderDepartmentReportHtml({
@@ -1630,7 +1647,110 @@ export function printDepartmentA4Report(
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 350);
 }
+// ============================================================
+// DIRECT PDF DOWNLOAD — renders the report HTML to a hidden DOM
+// container, then uses html2pdf (jsPDF + html2canvas) to produce
+// a downloadable A4 PDF. No print dialog.
+// ============================================================
+export async function downloadDepartmentReportPdf({
+  targetDeptId = "ALL",
+  activeOrder,
+  departmentGroupedReports,
+  staffList = [],
+  labSettings = {},
+  onProgress,
+}) {
+  if (!activeOrder) return;
 
+  const deptGroupsToPrint = targetDeptId === "ALL"
+    ? departmentGroupedReports
+    : (departmentGroupedReports || []).filter((g) => g.dept?.id === targetDeptId);
+
+  if (!deptGroupsToPrint || deptGroupsToPrint.length === 0) {
+    alert("No report content to download.");
+    return;
+  }
+
+  if (onProgress) onProgress("Preparing report…");
+
+  // Build one A4-sized page per department sheet
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.top = "0";
+  container.style.left = "-99999px";
+  container.style.width = "210mm";
+  container.style.background = "#ffffff";
+  container.style.zIndex = "-1";
+
+  for (const group of deptGroupsToPrint) {
+    const pageHtml = renderDepartmentReportHtml({
+      group,
+      activeOrder,
+      staffList,
+      labSettings,
+      usePadMode: false,
+      isPreview: false,
+    });
+
+    const page = document.createElement("div");
+    page.style.width = "210mm";
+    page.style.minHeight = "297mm";
+    page.style.background = "#ffffff";
+    page.style.pageBreakAfter = "always";
+    page.style.boxSizing = "border-box";
+    page.innerHTML = pageHtml;
+    container.appendChild(page);
+  }
+
+  document.body.appendChild(container);
+
+  // Give the browser time to lay out fonts / SVG / images
+  await new Promise((r) => setTimeout(r, 400));
+
+  // Wait for the Google font (Lora) to be ready, if it's still loading
+  try {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+  } catch (e) { /* silent */ }
+
+  const barcodeForFile = String(activeOrder.barcode || activeOrder.orderId || "report").split(/[\s,]+/)[0];
+  const filename = `Report-${barcodeForFile}.pdf`;
+
+  if (onProgress) onProgress("Rendering PDF…");
+
+  try {
+    await html2pdf()
+      .set({
+        margin: 0,
+        filename,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          letterRendering: true,
+          backgroundColor: "#ffffff",
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight,
+        },
+        jsPDF: {
+          unit: "mm",
+          format: "a4",
+          orientation: "portrait",
+          compress: true,
+        },
+        pagebreak: { mode: ["css", "legacy"] },
+      })
+      .from(container)
+      .save();
+  } catch (err) {
+    console.error("PDF generation failed:", err);
+    alert("Could not generate PDF. Please try again.");
+  } finally {
+    if (container.parentNode) document.body.removeChild(container);
+    if (onProgress) onProgress(null);
+  }
+}
 // 10. A5 MONEY RECEIPT ENGINE (SCANNABLE ORDER BARCODE)
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {

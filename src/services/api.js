@@ -1,5 +1,11 @@
 import { supabase } from "../supabaseClient";
-
+// Format a Date as YYYY-MM-DD in the USER'S local timezone.
+const toLocalDateStr = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 // ==========================================
 // 1. MASTER DEPARTMENTS (Includes DEP-IMM)
 // ==========================================
@@ -480,11 +486,19 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
 
     const { data, count, error } = await query;
 
-    if (!error && data) {
-      return { orders: data, totalCount: count || 0, page, pageSize, totalPages: Math.ceil((count || 0) / pageSize) };
+    if (error) {
+      console.warn("[getOrdersPaginated] Primary query error:", error.message);
+    } else if (data) {
+      return {
+        orders: data,
+        totalCount: count || 0,
+        page,
+        pageSize,
+        totalPages: Math.ceil((count || 0) / pageSize),
+      };
     }
   } catch (err) {
-    console.warn("Paginated orders fetch notice:", err.message);
+    console.warn("[getOrdersPaginated] Primary query threw:", err.message);
   }
 
   try {
@@ -492,19 +506,24 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
     if (dateTo) fallback = fallback.lte("order_date", dateTo);
 
-    const { data, count } = await fallback
+    const { data, count, error: fallbackError } = await fallback
       .order("order_date", { ascending: false })
       .order("id", { ascending: false })
       .range(fromIndex, toIndex);
+
+    if (fallbackError) {
+      console.warn("[getOrdersPaginated] Fallback query error:", fallbackError.message);
+    }
 
     return {
       orders: data || [],
       totalCount: count || 0,
       page,
       pageSize,
-      totalPages: Math.ceil((count || 0) / pageSize)
+      totalPages: Math.ceil((count || 0) / pageSize),
     };
   } catch (e) {
+    console.warn("[getOrdersPaginated] Fallback threw:", e.message);
     return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 };
   }
 }
@@ -640,8 +659,8 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   const primaryBarcode = barcodeList[0];
   const now = new Date();
-  const nowIso = now.toISOString();
-  const todayDate = nowIso.slice(0, 10);
+  const nowIso = now.toISOString();          // full ISO timestamp (UTC) — fine for created_at
+  const todayDate = toLocalDateStr(now);     // YYYY-MM-DD in LOCAL time — correct for order_date
   const todayCompact = todayDate.replace(/-/g, "");
 
   // Receipt numbers are per-visit, not per-barcode.

@@ -12,6 +12,7 @@ import { getDepartmentVialBarcode, checkAbnormalStatus, isDescriptiveInvestigati
 export default function VerificationQC({
   activeOrder,
   visitOrders = [],
+  testCatalog = [],
   handleResultInput,
   handleRemarksChange,
   handleVerifyInDb,
@@ -59,15 +60,38 @@ const resolvedOrderTests = useMemo(() => {
 
     for (const t of (Array.isArray(rawTests) ? rawTests : [])) {
       const raw = t.test || t.tests || t;
+      const testId = t.test_id || raw.id || t.id;
+
+      // Try to hydrate parameters from the master catalog when the order's
+      // test row is missing them (happens with some sibling orders).
+      const fromCat = (testCatalog || []).find(
+        (c) => c.id === testId || (c.code && c.code === raw.code)
+      ) || {};
+
+      const orderParams = (raw.test_parameters && raw.test_parameters.length > 0)
+        ? raw.test_parameters
+        : (raw.parameters && raw.parameters.length > 0)
+          ? raw.parameters
+          : [];
+
+      const catParams = (fromCat.test_parameters && fromCat.test_parameters.length > 0)
+        ? fromCat.test_parameters
+        : (fromCat.parameters && fromCat.parameters.length > 0)
+          ? fromCat.parameters
+          : [];
+
+      const resolvedParams = orderParams.length > 0 ? orderParams : catParams;
+
       combined.push({
+        ...fromCat,
         ...raw,
-        id: t.test_id || raw.id || t.id,
-        name: raw.name || "Investigation",
-        code: raw.code || "",
-        dept_id: raw.dept_id || raw.deptId || "DEP-BIO",
-        deptId: raw.dept_id || raw.deptId || "DEP-BIO",
-        test_parameters: raw.test_parameters || raw.parameters || [],
-        parameters: raw.test_parameters || raw.parameters || [],
+        id: testId,
+        name: raw.name || fromCat.name || "Investigation",
+        code: raw.code || fromCat.code || "",
+        dept_id: raw.dept_id || raw.deptId || fromCat.dept_id || fromCat.deptId || "DEP-BIO",
+        deptId: raw.dept_id || raw.deptId || fromCat.dept_id || fromCat.deptId || "DEP-BIO",
+        test_parameters: resolvedParams,
+        parameters: resolvedParams,
         _owningOrderId: orderId,
         _owningBarcode: orderPrimaryBc,
         _owningLocked: orderLocked
@@ -75,7 +99,7 @@ const resolvedOrderTests = useMemo(() => {
     }
   }
   return combined;
-}, [sourceOrders]);
+}, [sourceOrders, testCatalog]);
 
   const userRole = (currentUser?.role || "").toLowerCase();
   const canVerifyReport = ["developer", "manager", "admin", "verifier", "biochemist"].includes(userRole);
@@ -205,11 +229,38 @@ const resolvedOrderTests = useMemo(() => {
 
         totalParams += rawParams.length;
 
+        const ownerId = test._owningOrderId;
+        const owner = sourceOrders.find((o) => (o.orderId || o.id) === ownerId) || activeOrder;
+
         rawParams.forEach((p) => {
-          const val = activeOrder.results?.[p.id]?.value ?? activeOrder.results?.[test.id]?.value ?? "";
-          if (val !== undefined && val !== null && String(val).trim() !== "") {
-            filledParams++;
+          // Helper: read a value from any order's results by param ID or test ID
+          const readFrom = (ord) => {
+            const r =
+              ord.results?.[p.id]?.value ??
+              ord.results?.[p.id] ??
+              ord.results?.[test.id]?.value ??
+              ord.results?.[test.id];
+            if (r === undefined || r === null) return "";
+            const s = String(r).trim();
+            if (s === "" || s.toLowerCase() === "undefined" || s.toLowerCase() === "null") return "";
+            return s;
+          };
+
+          // 1. Try the owner (sibling that carries this test)
+          let val = readFrom(owner);
+
+          // 2. Fallback: activeOrder
+          if (!val && activeOrder) val = readFrom(activeOrder);
+
+          // 3. Fallback: any sibling in the visit
+          if (!val) {
+            for (const sib of sourceOrders) {
+              val = readFrom(sib);
+              if (val) break;
+            }
           }
+
+          if (val) filledParams++;
         });
       });
 
@@ -220,7 +271,7 @@ const resolvedOrderTests = useMemo(() => {
         isComplete: totalParams > 0 && filledParams >= totalParams
       };
     });
-  }, [resolvedOrderTests, activeOrder.results]);
+  }, [resolvedOrderTests, sourceOrders, activeOrder]);
   // Global completeness — used to disable the Verify button
   const verificationStatus = useMemo(() => {
     let totalRequired = 0;
@@ -585,7 +636,9 @@ const resolvedOrderTests = useMemo(() => {
     });
   };
 
-  const onVerifyClick = async () => {
+  // targetDeptId is optional. Pass a department ID to verify just that dept,
+  // or call with no args to verify every department in the visit.
+  const onVerifyClick = async (targetDeptId = null) => {
     if (activeOrder.isLocked) return;
 
     // Commit any pending remark shadows before verifying
@@ -596,23 +649,43 @@ const resolvedOrderTests = useMemo(() => {
       }
     });
     setLocalDeptRemarks({});
-    // Give the DB writes a moment to land
     await new Promise((r) => setTimeout(r, 400));
 
+    // Snapshot pre-verify state to compute "did this click finish the visit?"
+    const siblingsBefore = sourceOrders.map((o) => ({
+      id: o.orderId || o.id,
+      tests: o.tests || [],
+      wasVerified: o.isLocked === true || o.qcStatus === "Verified",
+    }));
+
     try {
-      await handleVerifyInDb();
+      await handleVerifyInDb(targetDeptId);
     } catch (e) {
       alert("Verification error: " + (e.message || e));
       return;
     }
 
-    try {
-      if (activeOrder.patient?.phone && activeOrder.patient.phone !== "N/A") {
-        sendReportReadyWhatsApp(activeOrder, labSettings);
-      }
-    } catch (waErr) {}
-  };
+    // Determine if the entire visit is now verified
+    const allNowVerified = siblingsBefore.length > 0 && siblingsBefore.every((s) => {
+      if (s.wasVerified) return true;
+      // Whole-visit verify → every sibling is now locked
+      if (!targetDeptId) return true;
+      // Single-dept verify → siblings in that dept are now locked
+      const belongsToDept = s.tests.some((t) => (t.dept_id || t.deptId) === targetDeptId);
+      return belongsToDept;
+    });
 
+    // Fire the WhatsApp + patient portal notification once the visit is fully verified
+    if (allNowVerified) {
+      try {
+        if (activeOrder.patient?.phone && activeOrder.patient.phone !== "N/A") {
+          sendReportReadyWhatsApp(activeOrder, labSettings);
+        }
+      } catch (waErr) {
+        console.warn("WhatsApp notification failed:", waErr);
+      }
+    }
+  };
   const handleUnlockRecollected = async () => {
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
@@ -754,7 +827,7 @@ const resolvedOrderTests = useMemo(() => {
           {canVerifyReport ? (
             <button
               type="button"
-              onClick={onVerifyClick}
+              onClick={() => onVerifyClick()}
               disabled={
                 isLockedOrAwaiting ||
                 isLoading ||
@@ -771,7 +844,7 @@ const resolvedOrderTests = useMemo(() => {
               {isVerified
                 ? "Report Verified & Signed"
                 : verificationStatus.isComplete
-                  ? "Verify & Complete Report"
+                  ? (departmentGroups.length > 1 ? "Verify ALL Departments" : "Verify & Complete Report")
                   : `Complete All Results (${verificationStatus.totalFilled}/${verificationStatus.totalRequired})`}
             </button>
           ) : (
@@ -901,7 +974,7 @@ const resolvedOrderTests = useMemo(() => {
             <div key={deptGroup.id} className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-xs">
               
               {/* Department Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2 gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-lg">{deptGroup.icon}</span>
                   <div>
@@ -914,9 +987,66 @@ const resolvedOrderTests = useMemo(() => {
                   </div>
                 </div>
 
-                <span className="text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                  {deptGroup.filledParams}/{deptGroup.totalParams} Verified
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                    {deptGroup.filledParams}/{deptGroup.totalParams} filled
+                  </span>
+
+                  {(() => {
+                    // Find sibling order(s) for this department
+                    const deptOwnerOrders = sourceOrders.filter((o) =>
+                      (o.tests || []).some((t) => (t.dept_id || t.deptId) === deptGroup.id)
+                    );
+
+                    const deptAllVerified = deptOwnerOrders.length > 0 && deptOwnerOrders.every(
+                      (o) => o.isLocked === true || o.qcStatus === "Verified"
+                    );
+
+                    const deptAllFilled = deptGroup.totalParams > 0 &&
+                      deptGroup.filledParams >= deptGroup.totalParams;
+
+                    const deptAwaitingRecollection = deptOwnerOrders.some((o) =>
+                      isOrderAwaitingRecollection(o.orderId || o.id)
+                    );
+
+                    if (!canVerifyReport) return null;
+
+                    if (deptAllVerified) {
+                      return (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Verified
+                        </span>
+                      );
+                    }
+
+                    if (deptAwaitingRecollection) {
+                      return (
+                        <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> Awaiting Recollection
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        disabled={!deptAllFilled || isLoading}
+                        onClick={() => onVerifyClick(deptGroup.id)}
+                        title={
+                          !deptAllFilled
+                            ? `${deptGroup.totalParams - deptGroup.filledParams} result(s) still missing in this department`
+                            : `Verify only the ${deptGroup.name} report`
+                        }
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-md transition shadow-xs inline-flex items-center gap-1
+                          disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed
+                          bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        {deptAllFilled ? "Verify This Dept" : `Fill (${deptGroup.filledParams}/${deptGroup.totalParams})`}
+                      </button>
+                    );
+                  })()}
+                </div>
               </div>
 
               {/* Department Tests */}

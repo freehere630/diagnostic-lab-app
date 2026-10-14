@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
 import {
-  Search, Calendar, Receipt, DollarSign, CheckCircle2,
+  Receipt, DollarSign, CheckCircle2,
   X, ChevronLeft, ChevronRight, Clock,
-  MessageCircle, RotateCcw, AlertTriangle, ChevronDown, Filter,
+  MessageCircle, RotateCcw, AlertTriangle, ChevronDown,
   Barcode
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
@@ -199,14 +199,7 @@ export default function Dashboard({
     return dateStr || "Today";
   };
 
-  const getPresetBtnClass = (presetName) => {
-    const isActive = activePreset === presetName;
-    return `px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
-      isActive
-        ? "bg-white text-slate-900 shadow-xs border border-slate-200"
-        : "text-slate-500 hover:text-slate-800"
-    }`;
-  };
+
 
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
@@ -239,59 +232,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* 2. FILTER & TOOLBAR */}
-      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        
-        {/* Universal Search Bar */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Scan / Type ANY Vial Barcode, UHID, Phone, Name..."
-            value={dashboardSearch}
-            onChange={(e) => {
-              setDashboardSearch(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition font-medium"
-          />
-        </div>
 
-        {/* Date Pickers & Range Presets */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <input
-              type="date"
-              value={dateRange.from}
-              onChange={(e) => {
-                setDateRange({ ...dateRange, from: e.target.value });
-                setCurrentPage(1);
-              }}
-              className="bg-transparent text-[11px] font-mono outline-none font-semibold text-slate-700"
-            />
-            <span className="text-slate-300">-</span>
-            <input
-              type="date"
-              value={dateRange.to}
-              onChange={(e) => {
-                setDateRange({ ...dateRange, to: e.target.value });
-                setCurrentPage(1);
-              }}
-              className="bg-transparent text-[11px] font-mono outline-none font-semibold text-slate-700"
-            />
-          </div>
-
-          <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button type="button" onClick={() => setPreset("TODAY")} className={getPresetBtnClass("TODAY")}>Today</button>
-            <button type="button" onClick={() => setPreset("YESTERDAY")} className={getPresetBtnClass("YESTERDAY")}>Yesterday</button>
-            <button type="button" onClick={() => setPreset("LAST_7")} className={getPresetBtnClass("LAST_7")}>7D</button>
-            <button type="button" onClick={() => setPreset("THIS_MONTH")} className={getPresetBtnClass("THIS_MONTH")}>Month</button>
-            <button type="button" onClick={() => setPreset("ALL")} className={getPresetBtnClass("ALL")}>All</button>
-          </div>
-        </div>
-
-      </div>
 
       {/* 3. PATIENT QUEUE TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

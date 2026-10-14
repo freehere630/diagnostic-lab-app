@@ -38,25 +38,75 @@ export default function ReportsPrint({
     );
   }
 
-  const isVerified = activeOrder.qcStatus === "Verified" || activeOrder.isLocked === true;
   const userRole = (currentUser?.role || "").toLowerCase();
   const isReceptionist = userRole === "receptionist";
   const hasOutstandingDue = (activeOrder.billing?.due || 0) > 0;
 
-  // RECEPTIONIST SECURITY LOCK:
-  // Before verification AND clearing due, receptionist CANNOT see preview or print.
-  const isReceptionistBlocked = isReceptionist && (!isVerified || hasOutstandingDue);
-  const canPrint = !isReceptionist || (isVerified && !hasOutstandingDue);
+  // Paid status is per-visit (stored on the master vial), not per-sibling
+  const visitIsPaid = !hasOutstandingDue;
 
+  // Decide per-sheet whether the current user can print it
+  const canPrintSheet = (group) => {
+    const owner = group.ownerOrder;
+    if (!owner) return false;
+    const sheetVerified =
+      owner.isLocked === true ||
+      owner.qcStatus === "Verified" ||
+      group.ownerLocked === true;
+
+    // Non-receptionists can print once the sheet is verified
+    if (!isReceptionist) return sheetVerified;
+
+    // Receptionists need both: verified sheet AND paid visit
+    return sheetVerified && visitIsPaid;
+  };
+
+  // Compute how many sheets the current user can actually print
+  const printableGroups = departmentGroupedReports.filter(canPrintSheet);
+  const totalSheets = departmentGroupedReports.length;
+  const pendingSheets = totalSheets - printableGroups.length;
+
+  // Receptionist preview is blocked only if NO sheet is printable
+  const isReceptionistBlocked = isReceptionist && printableGroups.length === 0;
+
+  // For non-receptionists the "print all" always works if anything is verified
+  const canPrint = isReceptionist
+    ? printableGroups.length > 0
+    : departmentGroupedReports.some((g) => {
+        const owner = g.ownerOrder;
+        return owner && (owner.isLocked === true || owner.qcStatus === "Verified" || g.ownerLocked === true);
+      });
+
+  // "isVerified" for UI purposes = is the CURRENTLY PREVIEWED sheet verified?
+  // Falls back to the master order's status when nothing is selected yet.
+  const activeGroup =
+    departmentGroupedReports.find((g) => g.dept?.id === activeDeptSheet) ||
+    departmentGroupedReports[0] ||
+    null;
+
+  const isVerified = activeGroup
+    ? (
+        activeGroup.ownerOrder?.isLocked === true ||
+        activeGroup.ownerOrder?.qcStatus === "Verified" ||
+        activeGroup.ownerLocked === true
+      )
+    : (
+        activeOrder.qcStatus === "Verified" ||
+        activeOrder.isLocked === true
+      );      
   const doctorName =
     activeOrder.doctor ||
     activeOrder.patient?.doctor ||
     (activeOrder.patient?.address && activeOrder.patient.address.startsWith("Ref: ") ? activeOrder.patient.address.replace("Ref: ", "") : null) ||
     "Self";
 
+  // Receptionist only sees sheets they can print.
+  // Other roles see everything (they can see unverified sheets in preview).
+  const groupsForPreview = isReceptionist ? printableGroups : departmentGroupedReports;
+
   const displayedGroups = activeDeptSheet === "ALL"
-    ? departmentGroupedReports
-    : departmentGroupedReports.filter((g) => g.dept?.id === activeDeptSheet);
+    ? groupsForPreview
+    : groupsForPreview.filter((g) => g.dept?.id === activeDeptSheet);
 
   return (
     <div className="max-w-[1920px] mx-auto text-slate-900 font-sans">
@@ -152,12 +202,19 @@ export default function ReportsPrint({
                   onClick={() => handlePrintDepartmentA4Report("ALL", usePadMode)}
                   className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95"
                 >
-                  <Printer className="w-4 h-4" /> Print Complete Report (A4)
+                  <Printer className="w-4 h-4" />
+                  {isReceptionist && pendingSheets > 0
+                    ? `Print Available (${printableGroups.length}/${totalSheets})`
+                    : "Print Complete Report (A4)"}
                 </button>
               ) : (
                 <div className="flex-1 py-2 bg-slate-100 border border-slate-200 text-slate-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 cursor-not-allowed">
                   <Lock className="w-3.5 h-3.5 text-amber-500" />
-                  {!isVerified ? "Verification Required" : "Due Clearance Required"}
+                  {pendingSheets === totalSheets
+                    ? "No verified reports available"
+                    : hasOutstandingDue
+                      ? "Due Clearance Required"
+                      : "Verification Required"}
                 </div>
               )}
 
@@ -218,23 +275,40 @@ export default function ReportsPrint({
 
               {departmentGroupedReports.map((group) => {
                 const isSelected = activeDeptSheet === group.dept.id;
+                const sheetPrintable = canPrintSheet(group);
+                const owner = group.ownerOrder;
+                const sheetVerified = owner && (
+                  owner.isLocked === true ||
+                  owner.qcStatus === "Verified" ||
+                  group.ownerLocked === true
+                );
+
                 return (
                   <div
                     key={group.dept.id}
                     className={`rounded-lg border transition flex items-center justify-between p-2 ${
                       isSelected
                         ? "border-blue-600 bg-blue-50/70 shadow-xs"
-                        : "border-slate-200 hover:bg-slate-50 bg-white"
+                        : sheetPrintable
+                          ? "border-slate-200 hover:bg-slate-50 bg-white"
+                          : "border-slate-200 bg-slate-50/60"
                     }`}
                   >
                     <button
                       type="button"
-                      onClick={() => setActiveDeptSheet(group.dept.id)}
-                      className="flex-1 text-left flex items-center gap-2 min-w-0 pr-2"
+                      onClick={() => {
+                        // Receptionists can only select printable sheets
+                        if (isReceptionist && !sheetPrintable) return;
+                        setActiveDeptSheet(group.dept.id);
+                      }}
+                      disabled={isReceptionist && !sheetPrintable}
+                      className={`flex-1 text-left flex items-center gap-2 min-w-0 pr-2 ${
+                        isReceptionist && !sheetPrintable ? "cursor-not-allowed" : ""
+                      }`}
                     >
                       <span className="text-base shrink-0">{group.dept.icon || "🔬"}</span>
                       <div className="truncate">
-                        <span className={`text-xs block truncate ${isSelected ? "font-bold text-blue-950" : "font-semibold text-slate-800"}`}>
+                        <span className={`text-xs block truncate ${isSelected ? "font-bold text-blue-950" : sheetPrintable ? "font-semibold text-slate-800" : "font-semibold text-slate-500"}`}>
                           {group.dept.name}
                         </span>
                         <span className="text-[10px] text-slate-400 block truncate">
@@ -245,10 +319,22 @@ export default function ReportsPrint({
                             Vial: {group.ownerBarcode}
                           </span>
                         )}
+
+                        {/* Lock badge shown when sheet isn't printable for this user */}
+                        {!sheetPrintable && (
+                          <span className="text-[9px] font-bold text-amber-700 inline-flex items-center gap-0.5 mt-0.5">
+                            <Lock className="w-2.5 h-2.5" />
+                            {!sheetVerified && hasOutstandingDue
+                              ? "Not verified • Payment due"
+                              : !sheetVerified
+                                ? "Pending verification"
+                                : "Payment due"}
+                          </span>
+                        )}
                       </div>
                     </button>
 
-                    {canPrint && (
+                    {sheetPrintable ? (
                       <button
                         type="button"
                         onClick={() => handlePrintDepartmentA4Report(group.dept.id, usePadMode)}
@@ -257,6 +343,10 @@ export default function ReportsPrint({
                       >
                         <Printer className="w-3 h-3" /> Print
                       </button>
+                    ) : (
+                      <span className="px-2 py-1 text-[10px] font-bold text-slate-400 bg-slate-100 rounded border border-slate-200 shrink-0 inline-flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Locked
+                      </span>
                     )}
                   </div>
                 );
