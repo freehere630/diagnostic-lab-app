@@ -19,7 +19,31 @@ export const sanitizeSearchInput = (s) =>
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 64);
+// Insert a department row if it doesn't exist yet, but NEVER
+// overwrite an existing name. Previously we did an upsert that
+// wrote `{ id, name: deptId.replace("DEP-", "") }`, which
+// silently shortened "Immunology & Endocrinology" to "IMM" every
+// time a test was saved.
+async function ensureDepartmentExists(deptId) {
+  if (!deptId) return;
+  try {
+    const { data } = await supabase
+      .from("departments")
+      .select("id")
+      .eq("id", deptId)
+      .maybeSingle();
+    if (data) return; // exists — leave its name and icon alone
 
+    const defaultDept = DEFAULT_DEPARTMENTS.find((d) => d.id === deptId);
+    await supabase.from("departments").insert({
+      id: deptId,
+      name: defaultDept?.name || deptId.replace("DEP-", ""),
+      icon: defaultDept?.icon || "🔬"
+    });
+  } catch (e) {
+    // Non-fatal — the row may already exist.
+  }
+}
 // ==========================================
 // 1. MASTER DEPARTMENTS (Includes DEP-IMM)
 // ==========================================
@@ -421,12 +445,23 @@ export async function searchPatients(query) {
   }
 }
 
+// Shallow history query — only the fields the history modal actually
+// renders. The previous version pulled `*, test_parameters(*), results(*)`
+// which returned ~800 rows for a patient with 20 past orders. This
+// version returns ~1 row per order.
 export async function getPatientHistory(patientId) {
   if (!patientId) return [];
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select(`*, order_tests(*, test:tests(*, test_parameters(*))), results(*)`)
+      .select(`
+        id,
+        order_date,
+        paid_amount,
+        due_amount,
+        qc_status,
+        order_tests(test:tests(id, name, code))
+      `)
       .eq("patient_id", patientId)
       .order("order_date", { ascending: false });
     if (!error && data) return data;
@@ -585,10 +620,6 @@ export async function getAllOrders() {
 // ==========================================
 // 7. ORDER CREATION: ATOMIC VIAL REGISTRATION
 // ==========================================
-// Every vial that belongs to one receipt is inserted in a single
-// Postgres transaction via create_vial_orders(). If any row fails,
-// the whole batch rolls back — no orphaned orders, no partial
-// receipts, no barcode numbers consumed but unused.
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
   const patientId = patientData.id && patientData.id.trim()
     ? patientData.id.trim()
@@ -613,7 +644,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     };
   });
 
-  // Group tests into dedicated departmental vials
   const departmentVials = [];
   selectedTests.forEach((t) => {
     let deptId = (t.dept_id || t.deptId || "").toUpperCase();
@@ -670,7 +700,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     v.testBarcode = barcodeList[i];
   });
 
-  // Tag every test with its exact vial barcode
   selectedTests.forEach((t) => {
     const matchedVial = departmentVials.find(v =>
       v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)
@@ -681,12 +710,10 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   const primaryBarcode = barcodeList[0];
   const now = new Date();
-  const nowIso = now.toISOString();          // full ISO timestamp (UTC) — fine for created_at
-  const todayDate = toLocalDateStr(now);     // YYYY-MM-DD in LOCAL time — correct for order_date
+  const nowIso = now.toISOString();
+  const todayDate = toLocalDateStr(now);
   const todayCompact = todayDate.replace(/-/g, "");
 
-  // Receipt numbers are per-visit, not per-barcode.
-  // Look up the highest existing receipt for today and increment by 1.
   let receiptSeq = 1;
   try {
     const { data: recent } = await supabase
@@ -714,7 +741,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const receiptNo = `RCP-${todayCompact}-${String(receiptSeq).padStart(4, "0")}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // 1. Persist Patient (idempotent — outside the vial transaction)
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -745,7 +771,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     localStorage.setItem("apex_local_patients", JSON.stringify(mergedPatients));
   } catch (e) {}
 
-  // Upsert test catalog definitions (idempotent — outside the transaction)
   for (const t of selectedTests) {
     try {
       await supabase.from("tests").upsert({
@@ -769,9 +794,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const finalPaid = paidAmount !== undefined ? parseFloat(paidAmount) : finalNet;
   const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
 
-  // =========================================================================
-  // 2. BUILD ALL VIAL PAYLOADS IN MEMORY — ZERO DB CALLS IN THIS BLOCK
-  // =========================================================================
   const ordersPayload = [];
   const orderTestsPayload = [];
   const resultsMetadataPayload = [];
@@ -783,7 +805,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     const isMaster = (i === 0);
     const thisOrderId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}`;
 
-    // Strictly filter tests that belong to THIS vial!
     const testsForThisVial = selectedTests.filter(t =>
       v.testIds.includes(t.id) ||
       v.testIds.includes(t.code) ||
@@ -816,9 +837,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
     }
 
-    // Vial metadata goes through the results table under reserved
-    // parameter_id keys — SPECIMEN_VIALS, VIAL_DEPT_<bc>,
-    // VIAL_TESTS_<bc>, TEST_VIAL_<test_id>.
     resultsMetadataPayload.push({
       order_id: thisOrderId,
       parameter_id: "SPECIMEN_VIALS",
@@ -882,9 +900,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     });
   }
 
-  // =========================================================================
-  // 3. ONE ROUND-TRIP. ONE TRANSACTION. ALL-OR-NOTHING.
-  // =========================================================================
   const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_vial_orders", {
     p_payload: {
       orders: ordersPayload,
@@ -898,7 +913,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     throw new Error("Could not save the order atomically: " + rpcErr.message);
   }
 
-  // Sanity check: the function must return every row we sent.
   const returnedIds = new Set((rpcResult || []).map((r) => r.id));
   for (const p of ordersPayload) {
     if (!returnedIds.has(p.id)) {
@@ -906,8 +920,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     }
   }
 
-  // Cache locally (capped). The RPC already persisted everything to the
-  // database, so this is purely for offline resilience.
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const newIds = new Set(createdVialOrders.map(o => o.orderId));
@@ -915,9 +927,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     localStorage.setItem("apex_local_orders", JSON.stringify(merged));
   } catch (e) {}
 
-  // Return a print-ready master order. The caller uses this to render the
-  // A5 receipt, which needs the full test list. Persisted versions (DB +
-  // localStorage) stay scoped per-vial to avoid the sibling-leak bug.
   const masterForPrint = {
     ...createdVialOrders[0],
     tests: selectedTests,
@@ -1100,6 +1109,11 @@ export async function toggleTestAvailability(testId, isAvailable) {
   return data;
 }
 
+// ==========================================
+// createNewTestWithParameters
+// Single atomic RPC. If the SQL function hasn't been deployed, the
+// error surfaces clearly instead of half-creating the test.
+// ==========================================
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.replace(/[^A-Za-z0-9]/g, "").toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -1108,9 +1122,7 @@ export async function createNewTestWithParameters(testData) {
 
   const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
 
-  try {
-    await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") });
-  } catch (e) {}
+  await ensureDepartmentExists(deptId);
 
   const testPayload = {
     id: testId,
@@ -1124,14 +1136,6 @@ export async function createNewTestWithParameters(testData) {
     report_type: isDescriptive ? "descriptive" : "tabular",
     is_available: testData.is_available !== undefined ? testData.is_available : true
   };
-
-  let test = null;
-  try {
-    const { data } = await supabase.from("tests").insert(testPayload).select().single();
-    test = data || testPayload;
-  } catch (e) {
-    test = testPayload;
-  }
 
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
   const paramRows = (validParams.length > 0 ? validParams : [{ name: testData.name, param_type: "numeric" }]).map((p, idx) => {
@@ -1155,10 +1159,18 @@ export async function createNewTestWithParameters(testData) {
     };
   });
 
-  try {
-    await supabase.from("test_parameters").upsert(paramRows, { onConflict: "id" });
-  } catch (e) {
-    console.warn("Insert params notice:", e);
+  const { error: rpcErr } = await supabase.rpc("create_test_with_parameters", {
+    p_test: testPayload,
+    p_params: paramRows
+  });
+
+  if (rpcErr) {
+    console.error("[createNewTestWithParameters] RPC failed:", rpcErr.message);
+    throw new Error(
+      "Could not save the test atomically. " +
+      (rpcErr.message || "") +
+      " — make sure the SQL functions from Batch 4 have been deployed."
+    );
   }
 
   const fullTestWithParams = {
@@ -1177,14 +1189,17 @@ export async function createNewTestWithParameters(testData) {
   return fullTestWithParams;
 }
 
+// ==========================================
+// updateExistingTest
+// Single atomic RPC. Removed parameters, their orphan results, and
+// the updated rows commit together or not at all.
+// ==========================================
 export async function updateExistingTest(testId, testData) {
   const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
     (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
 
   const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
-  try {
-    await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") });
-  } catch (e) {}
+  await ensureDepartmentExists(deptId);
 
   const testPayload = {
     code: testData.code.trim(),
@@ -1198,86 +1213,85 @@ export async function updateExistingTest(testId, testData) {
     is_available: testData.is_available !== undefined ? testData.is_available : true
   };
 
-  try {
-    await supabase.from("tests").update(testPayload).eq("id", testId);
-  } catch (e) {
-    console.warn("Update test row notice:", e);
-  }
-
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
+  const paramRows = validParams.map((p, idx) => {
+    const rawMin = (p.min !== undefined && p.min !== null && p.min !== "") ? p.min : (p.min_range ?? "");
+    const rawMax = (p.max !== undefined && p.max !== null && p.max !== "") ? p.max : (p.max_range ?? "");
+    const minVal = rawMin !== "" && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
+    const maxVal = rawMax !== "" && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
+    const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
 
-  if (validParams.length > 0) {
-    const keptIds = [];
-    const paramRows = validParams.map((p, idx) => {
-      const rawMin = (p.min !== undefined && p.min !== null && p.min !== "") ? p.min : (p.min_range ?? "");
-      const rawMax = (p.max !== undefined && p.max !== null && p.max !== "") ? p.max : (p.max_range ?? "");
-      const minVal = rawMin !== "" && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
-      const maxVal = rawMax !== "" && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
-      const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
+    const pId = p.id && String(p.id).trim() !== "" && !String(p.id).startsWith("p-")
+      ? String(p.id).trim()
+      : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
 
-      const pId = p.id && String(p.id).trim() !== "" && !String(p.id).startsWith("p-")
-        ? String(p.id).trim()
-        : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
+    let safeType = p.param_type || "numeric";
+    if (safeType === "multirange") safeType = "numeric";
+    if (safeType === "descriptive") safeType = "text";
 
-      keptIds.push(pId);
+    return {
+      id: pId,
+      test_id: testId,
+      name: p.name.trim(),
+      param_type: safeType,
+      unit: (p.unit || "").trim(),
+      min_range: minVal,
+      max_range: maxVal,
+      reference_text: refText || null
+    };
+  });
 
-      let safeType = p.param_type || "numeric";
-      if (safeType === "multirange") safeType = "numeric";
-      if (safeType === "descriptive") safeType = "text";
-
-      return {
-        id: pId,
-        test_id: testId,
-        name: p.name.trim(),
-        param_type: safeType,
-        unit: (p.unit || "").trim(),
-        min_range: minVal,
-        max_range: maxVal,
-        reference_text: refText || null
-      };
+  if (paramRows.length > 0) {
+    const { error: rpcErr } = await supabase.rpc("update_test_with_parameters", {
+      p_test_id: testId,
+      p_test: testPayload,
+      p_params: paramRows
     });
 
-    try {
-      const { data: existingDbParams } = await supabase.from("test_parameters").select("id").eq("test_id", testId);
-      if (existingDbParams && existingDbParams.length > 0) {
-        const toDeleteIds = existingDbParams.map(ep => ep.id).filter(id => !keptIds.includes(id));
-        if (toDeleteIds.length > 0) {
-          await supabase.from("results").delete().in("parameter_id", toDeleteIds);
-          await supabase.from("test_parameters").delete().in("id", toDeleteIds);
-        }
-      }
-
-      await supabase.from("test_parameters").upsert(paramRows, { onConflict: "id" });
-    } catch (dbErr) {
-      console.warn("DB param update notice:", dbErr);
+    if (rpcErr) {
+      console.error("[updateExistingTest] RPC failed:", rpcErr.message);
+      throw new Error(
+        "Could not update the test atomically. " +
+        (rpcErr.message || "") +
+        " — make sure the SQL functions from Batch 4 have been deployed."
+      );
     }
-
-    try {
-      const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-      const updatedTestObj = {
-        ...testPayload,
-        id: testId,
-        test_parameters: paramRows,
-        parameters: paramRows
-      };
-      const merged = [updatedTestObj, ...local.filter(t => t.id !== testId)].slice(0, 3000);
-      localStorage.setItem("apex_local_tests", JSON.stringify(merged));
-    } catch (e) {}
+  } else {
+    // No parameters provided — just update the header row.
+    const { error: updErr } = await supabase.from("tests").update(testPayload).eq("id", testId);
+    if (updErr) throw new Error(updErr.message);
   }
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+    const updatedTestObj = {
+      ...testPayload,
+      id: testId,
+      test_parameters: paramRows,
+      parameters: paramRows
+    };
+    const merged = [updatedTestObj, ...local.filter(t => t.id !== testId)].slice(0, 3000);
+    localStorage.setItem("apex_local_tests", JSON.stringify(merged));
+  } catch (e) {}
 }
 
+// ==========================================
+// deleteTest
+// Single atomic RPC. Cascades through results, order_tests, and
+// test_parameters as one unit.
+// ==========================================
 export async function deleteTest(testId) {
-  try {
-    const { data: params } = await supabase.from("test_parameters").select("id").eq("test_id", testId);
-    if (params && params.length > 0) {
-      const pIds = params.map(p => p.id);
-      await supabase.from("results").delete().in("parameter_id", pIds);
-    }
-    await supabase.from("order_tests").delete().eq("test_id", testId);
-    await supabase.from("test_parameters").delete().eq("test_id", testId);
-    await supabase.from("tests").delete().eq("id", testId);
-  } catch (e) {
-    console.warn("Delete test DB notice:", e);
+  const { error: rpcErr } = await supabase.rpc("delete_test_cascade", {
+    p_test_id: testId
+  });
+
+  if (rpcErr) {
+    console.error("[deleteTest] RPC failed:", rpcErr.message);
+    throw new Error(
+      "Could not delete the test atomically. " +
+      (rpcErr.message || "") +
+      " — make sure the SQL functions from Batch 4 have been deployed."
+    );
   }
 
   try {
@@ -1287,8 +1301,6 @@ export async function deleteTest(testId) {
 }
 
 // Reads from staff_profiles (joined conceptually with auth.users).
-// Shape is preserved (id / full_name / role / designation / signature_data)
-// so that Navbar, VerificationQC, UserManagement, and printHelpers keep working.
 function mapStaffProfile(row) {
   return {
     id: row.user_id,
@@ -1454,20 +1466,6 @@ export async function saveLabSettings(settingsData) {
 // ==========================================
 // 12. SEQUENTIAL BARCODE GENERATOR — YYMM######
 // ==========================================
-// Barcode format: 10 digits
-//   YY      = last two digits of year   (e.g. "26" for 2026)
-//   MM      = month number, 01..12      (e.g. "10" for October)
-//   ######  = 6-digit sequence that RESETS to 000001 on the 1st
-//             of every month
-//
-//   January 2026  → 2601000001, 2601000002, …
-//   February 2026 → 2602000001, 2602000002, …   ← reset
-//   January 2027  → 2701000001, 2701000002, …   ← new YY
-//
-// The database function allocate_barcodes() is the authoritative
-// source and hands out sequences atomically. If it hasn't been
-// deployed yet (or the network is down), we fall back to a
-// client-side counter keyed by YYMM so the app keeps working.
 export async function getNextSequentialBarcode(count = 1) {
   const wanted = Math.max(1, Math.min(100, Number(count) || 1));
 
@@ -1496,8 +1494,6 @@ export async function getNextSequentialBarcode(count = 1) {
   return localBarcodeFallback(wanted);
 }
 
-// Client-side fallback used only when the RPC is unavailable.
-// Same YYMM###### format; counter keyed by YYMM in localStorage.
 function localBarcodeFallback(count) {
   const d = new Date();
   const yy = String(d.getFullYear()).slice(-2);

@@ -100,7 +100,6 @@ useEffect(() => {
         if (bc && !allBarcodes.includes(bc)) allBarcodes.push(bc);
         for (const t of (v.tests || [])) allTests.push(t);
 
-        // Sum billing across siblings, but count the master's full net only once
         totalPaid += parseFloat(v.billing?.paid || 0);
         totalDue  += parseFloat(v.billing?.due  || 0);
         netPayable = Math.max(netPayable, parseFloat(v.billing?.netPayable || 0));
@@ -238,7 +237,7 @@ useEffect(() => {
 
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
-      
+
       {/* 1. ANALYTICS STRIP */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
@@ -330,8 +329,13 @@ useEffect(() => {
 
       {/* 3. PATIENT QUEUE TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        
-        {isLoading ? (
+
+        {/* Full-screen spinner only when there are no rows to show yet.
+            When rows exist and a background sync is running, keep the
+            table visible with a translucent overlay — the previous
+            behaviour (swapping the whole table for a spinner) caused a
+            visible flash on every page change and every keystroke. */}
+        {sortedOrders.length === 0 && isLoading ? (
           <div className="py-16 text-center text-slate-400 text-xs">
             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
             Syncing database records...
@@ -341,177 +345,190 @@ useEffect(() => {
             No patient orders found matching your search.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
-                  <th className="py-2.5 px-3">Time</th>
-                  <th className="py-2.5 px-3">Receipt / All Specimen Vials</th>
-                  <th className="py-2.5 px-3">Patient (UHID)</th>
-                  <th className="py-2.5 px-3">Contact</th>
-                  <th className="py-2.5 px-3">Paid / Due</th>
-                  <th className="py-2.5 px-3">QC Status</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
-                </tr>
-              </thead>
-                            <tbody className="divide-y divide-slate-100">
-                {sortedOrders.map((g) => {
-                  const masterId = g.master.orderId || g.master.id;
-                  const hasDue = g.totalDue > 0;
-                  const isRecollection = g.anyRepeat;
-                  const searchTrimmed = (dashboardSearch || "").trim().toLowerCase();
+          <div className="relative">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
+                    <th className="py-2.5 px-3">Time</th>
+                    <th className="py-2.5 px-3">Receipt / All Specimen Vials</th>
+                    <th className="py-2.5 px-3">Patient (UHID)</th>
+                    <th className="py-2.5 px-3">Contact</th>
+                    <th className="py-2.5 px-3">Paid / Due</th>
+                    <th className="py-2.5 px-3">QC Status</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                              <tbody className="divide-y divide-slate-100">
+                  {sortedOrders.map((g) => {
+                    const masterId = g.master.orderId || g.master.id;
+                    const hasDue = g.totalDue > 0;
+                    const isRecollection = g.anyRepeat;
+                    const searchTrimmed = (dashboardSearch || "").trim().toLowerCase();
 
-                  return (
-                    <tr
-                      key={masterId}
-                      className={`hover:bg-slate-50/80 transition group ${isRecollection ? "bg-rose-50/30" : ""}`}
-                    >
-                      {/* Time */}
-                      <td className="py-2 px-3 whitespace-nowrap">
-                        <span className="font-mono text-slate-700 font-medium block">
-                          {formatEntryTime(g.date, g.createdAt)}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{g.date}</span>
-                      </td>
+                    return (
+                      <tr
+                        key={masterId}
+                        className={`hover:bg-slate-50/80 transition group ${isRecollection ? "bg-rose-50/30" : ""}`}
+                      >
+                        {/* Time */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className="font-mono text-slate-700 font-medium block">
+                            {formatEntryTime(g.date, g.createdAt)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">{g.date}</span>
+                        </td>
 
-                      {/* Receipt & All Specimen Vials */}
-                      <td className="py-2 px-3">
-                        <span className="font-mono font-bold text-slate-800 block text-[11px]">{g.receiptNo}</span>
+                        {/* Receipt & All Specimen Vials */}
+                        <td className="py-2 px-3">
+                          <span className="font-mono font-bold text-slate-800 block text-[11px]">{g.receiptNo}</span>
 
-                        <div className="flex flex-wrap gap-1 mt-0.5 max-w-xs">
-                          {g.allBarcodes.map((bc, vIdx) => {
-                            const isMatchedSearch = searchTrimmed && String(bc).toLowerCase().includes(searchTrimmed);
-                            const matchingVial = g.vials.find(v => String(v.barcode || "").split(/[\s,]+/)[0] === bc);
-                            const tubeShort = matchingVial?.vials?.[0]?.tubeColor?.split(" ")[0]
-                              || matchingVial?.tests?.[0]?.tube_color?.split(" ")[0]
-                              || "Vial";
-                            return (
-                              <span
-                                key={vIdx}
-                                className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-semibold border flex items-center gap-0.5 ${
-                                  isMatchedSearch
-                                    ? "bg-blue-600 text-white border-blue-600 font-bold ring-2 ring-blue-300"
-                                    : "bg-slate-100 text-slate-700 border-slate-200"
-                                }`}
-                                title={`Vial ${bc}`}
-                              >
-                                <span>{bc}</span>
-                                <span className={isMatchedSearch ? "text-blue-100" : "text-slate-400"}>
-                                  ({tubeShort})
+                          <div className="flex flex-wrap gap-1 mt-0.5 max-w-xs">
+                            {g.allBarcodes.map((bc, vIdx) => {
+                              const isMatchedSearch = searchTrimmed && String(bc).toLowerCase().includes(searchTrimmed);
+                              const matchingVial = g.vials.find(v => String(v.barcode || "").split(/[\s,]+/)[0] === bc);
+                              const tubeShort = matchingVial?.vials?.[0]?.tubeColor?.split(" ")[0]
+                                || matchingVial?.tests?.[0]?.tube_color?.split(" ")[0]
+                                || "Vial";
+                              return (
+                                <span
+                                  key={vIdx}
+                                  className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-semibold border flex items-center gap-0.5 ${
+                                    isMatchedSearch
+                                      ? "bg-blue-600 text-white border-blue-600 font-bold ring-2 ring-blue-300"
+                                      : "bg-slate-100 text-slate-700 border-slate-200"
+                                  }`}
+                                  title={`Vial ${bc}`}
+                                >
+                                  <span>{bc}</span>
+                                  <span className={isMatchedSearch ? "text-blue-100" : "text-slate-400"}>
+                                    ({tubeShort})
+                                  </span>
                                 </span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </td>
+                              );
+                            })}
+                          </div>
+                        </td>
 
-                      {/* Patient */}
-                      <td className="py-2 px-3">
-                        <div className="font-bold text-slate-900 truncate max-w-[160px] sm:max-w-[200px]">
-                          {g.patient?.name}
-                        </div>
-                        <div className="text-[10px] text-blue-600 font-mono font-semibold">
-                          {g.patient?.id} • {g.patient?.age || "?"}Y / {g.patient?.gender || "?"}
-                        </div>
-                      </td>
+                        {/* Patient */}
+                        <td className="py-2 px-3">
+                          <div className="font-bold text-slate-900 truncate max-w-[160px] sm:max-w-[200px]">
+                            {g.patient?.name}
+                          </div>
+                          <div className="text-[10px] text-blue-600 font-mono font-semibold">
+                            {g.patient?.id} • {g.patient?.age || "?"}Y / {g.patient?.gender || "?"}
+                          </div>
+                        </td>
 
-                      {/* Contact */}
-                      <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
-                        {g.patient?.phone || "—"}
-                      </td>
+                        {/* Contact */}
+                        <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
+                          {g.patient?.phone || "—"}
+                        </td>
 
-                      {/* Paid / Due */}
-                      <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px]">
-                        <span className="font-semibold text-slate-700">৳{g.totalPaid}</span>
-                        {hasDue ? (
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                            Due ৳{g.totalDue}
-                          </span>
-                        ) : (
-                          <span className="ml-1.5 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
-                            PAID
-                          </span>
-                        )}
-                      </td>
+                        {/* Paid / Due */}
+                        <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px]">
+                          <span className="font-semibold text-slate-700">৳{g.totalPaid}</span>
+                          {hasDue ? (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                              Due ৳{g.totalDue}
+                            </span>
+                          ) : (
+                            <span className="ml-1.5 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
+                              PAID
+                            </span>
+                          )}
+                        </td>
 
-                      {/* Status */}
-                      <td className="py-2 px-3 whitespace-nowrap">
-                        {isRecollection ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Specimen
-                          </span>
-                        ) : (
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            g.isLocked
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-amber-50 text-amber-700 border-amber-200"
-                          }`}>
-                            {g.isLocked ? "Verified" : "Pending"}
-                          </span>
-                        )}
-                      </td>
+                        {/* Status */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          {isRecollection ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-rose-600" /> Repeat Specimen
+                            </span>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                              g.isLocked
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}>
+                              {g.isLocked ? "Verified" : "Pending"}
+                            </span>
+                          )}
+                        </td>
 
-                      {/* Actions */}
-                      <td className="py-2 px-3 text-right whitespace-nowrap space-x-1">
-                        {hasDue && (
+                        {/* Actions */}
+                        <td className="py-2 px-3 text-right whitespace-nowrap space-x-1">
+                          {hasDue && (
+                            <button
+                              onClick={() => openSettleModal(g)}
+                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[11px] font-bold transition inline-flex items-center gap-1 shadow-xs"
+                              title="Collect balance"
+                            >
+                              <DollarSign className="w-3 h-3" /> Due
+                            </button>
+                          )}
+
                           <button
-                            onClick={() => openSettleModal(g)}
-                            className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[11px] font-bold transition inline-flex items-center gap-1 shadow-xs"
-                            title="Collect balance"
+                            onClick={() => {
+                              setSelectedOrderId(masterId);
+                              setActiveTab("samples");
+                            }}
+                            className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[11px] font-semibold transition inline-flex items-center gap-1"
+                            title="Open vials & barcode labels"
                           >
-                            <DollarSign className="w-3 h-3" /> Due
+                            <Barcode className="w-3 h-3" /> Vials
                           </button>
-                        )}
 
-                        <button
-                          onClick={() => {
-                            setSelectedOrderId(masterId);
-                            setActiveTab("samples");
-                          }}
-                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[11px] font-semibold transition inline-flex items-center gap-1"
-                          title="Open vials & barcode labels"
-                        >
-                          <Barcode className="w-3 h-3" /> Vials
-                        </button>
+                          <button
+                            onClick={() => {
+                              const fullVisitOrder = {
+                                ...g.master,
+                                tests: g.allTests,
+                                allBarcodes: g.allBarcodes,
+                                barcodesList: g.allBarcodes,
+                                vials: g.vials,
+                                billing: {
+                                  ...g.master.billing,
+                                  subTotal: g.allTests.reduce(
+                                    (s, t) => s + parseFloat(t.price || 0),
+                                    0
+                                  ),
+                                },
+                              };
+                              handlePrintMoneyReceipt(fullVisitOrder);
+                            }}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
+                          >
+                            <Receipt className="w-3 h-3" /> Receipt
+                          </button>
 
-                        <button
-                          onClick={() => {
-                            const fullVisitOrder = {
-                              ...g.master,
-                              tests: g.allTests,
-                              allBarcodes: g.allBarcodes,
-                              barcodesList: g.allBarcodes,
-                              vials: g.vials,
-                              billing: {
-                                ...g.master.billing,
-                                subTotal: g.allTests.reduce(
-                                  (s, t) => s + parseFloat(t.price || 0),
-                                  0
-                                ),
-                              },
-                            };
-                            handlePrintMoneyReceipt(fullVisitOrder);
-                          }}
-                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
-                        >
-                          <Receipt className="w-3 h-3" /> Receipt
-                        </button>
+                          <button
+                            onClick={() => {
+                              setSelectedOrderId(masterId);
+                              setActiveTab("reports");
+                            }}
+                            className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded-md text-[11px] font-semibold transition shadow-xs"
+                          >
+                            Report ➔
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-                        <button
-                          onClick={() => {
-                            setSelectedOrderId(masterId);
-                            setActiveTab("reports");
-                          }}
-                          className="px-2.5 py-1 bg-slate-900 hover:bg-blue-600 text-white rounded-md text-[11px] font-semibold transition shadow-xs"
-                        >
-                          Report ➔
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {/* Translucent overlay shown while a background sync is
+                running and rows are already visible. */}
+            {isLoading && (
+              <div className="absolute inset-0 bg-white/55 backdrop-blur-[1px] flex items-start justify-center pt-8 pointer-events-none transition-opacity">
+                <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-md flex items-center gap-2">
+                  <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[11px] font-semibold text-slate-700">Syncing…</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

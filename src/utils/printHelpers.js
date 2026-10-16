@@ -1,7 +1,8 @@
 import { generateQrSvgString } from "./qrcode";
 import { buildReportHeaderHtml, buildReportFooterHtml, getReportLayout } from "./reportLayout";
 import { encodeCode128C, encodeCode128B } from "./barcodeCode128";
-import html2pdf from "html2pdf.js";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 // ─────────────────────────────────────────────────────────────
 // XSS GUARD
@@ -1364,17 +1365,17 @@ export function renderDepartmentReportHtml({
     : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${esc(deptBarcode)}</b>`;
 
   const signaturesBlockHtml = isVerified ? `
-    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
-      <div style="text-align: center; width: 230px;">
+    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px;padding-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+      <div style="text-align: center; width: 200px;">
         ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
-        <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
+        <div style="border-top: 1.5px dashed #000000; padding-top: 2px;">
           <div style="font-weight: 700; font-size: 9pt; color: #000000;">${esc(techUser.full_name)}</div>
           <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${esc(techUser.designation)}</div>
         </div>
       </div>
-      <div style="text-align: center; width: 230px;">
+      <div style="text-align: center; width: 200px;">
         ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
-        <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
+        <div style="border-top: 1.5px dashed #000000; padding-top: 2px;">
           <div style="font-weight: 700; font-size: 9pt; color: #000000;">${esc(verifierUser.full_name)}</div>
           <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${esc(verifierUser.designation)}</div>
         </div>
@@ -1383,13 +1384,13 @@ export function renderDepartmentReportHtml({
   ` : `
     <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; height: 38px;">
       <div style="text-align: center; width: 230px;">
-        <div style="border-top: 1px dashed #94a3b8; padding-top: 2px;">
-          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;">[ Medical Technologist Sign ]</div>
+        <div style=" padding-top: 2px;">
+          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div>
         </div>
       </div>
       <div style="text-align: center; width: 230px;">
-        <div style="border-top: 1px dashed #94a3b8; padding-top: 2px;">
-          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;">[ Consultant Pathologist Sign ]</div>
+        <div style=" padding-top: 2px;">
+          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div>
         </div>
       </div>
     </div>
@@ -1615,11 +1616,6 @@ export function printDepartmentA4Report(
   }, 350);
 }
 
-// ============================================================
-// DIRECT PDF DOWNLOAD — renders the report HTML to a hidden DOM
-// container, then uses html2pdf (jsPDF + html2canvas) to produce
-// a downloadable A4 PDF. No print dialog.
-// ============================================================
 export async function downloadDepartmentReportPdf({
   targetDeptId = "ALL",
   activeOrder,
@@ -1639,81 +1635,167 @@ export async function downloadDepartmentReportPdf({
     return;
   }
 
-  if (onProgress) onProgress("Preparing report…");
+  // Exact A4 dimensions at 96 DPI. Each page is 794×1123 px, which
+  // maps 1:1 onto a 210×297 mm PDF page.
+  const A4_W_PX = 794;
+  const A4_H_PX = 1123;
+  const A4_W_MM = 210;
+  const A4_H_MM = 297;
+  const TOTAL_PAGES = deptGroupsToPrint.length;
 
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.top = "0";
-  container.style.left = "-99999px";
-  container.style.width = "210mm";
-  container.style.background = "#ffffff";
-  container.style.zIndex = "-1";
+  // ─── Backdrop (progress indicator) ────────────────────────────
+  const backdrop = document.createElement("div");
+  backdrop.setAttribute("data-apex-pdf-backdrop", "1");
+  backdrop.style.cssText = [
+    "position: fixed",
+    "inset: 0",
+    "background: #0f172a",
+    "z-index: 2147483647",
+    "display: flex",
+    "align-items: center",
+    "justify-content: center",
+    "color: #ffffff",
+    "font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+  ].join(";");
+  backdrop.innerHTML = `
+    <div style="text-align:center">
+      <div style="width:42px;height:42px;border:3px solid rgba(255,255,255,0.2);border-top-color:#ffffff;border-radius:50%;animation:apex-pdf-spin 0.9s linear infinite;margin:0 auto 14px"></div>
+      <div style="font-size:14px;font-weight:700;letter-spacing:0.2px">Generating PDF Report</div>
+      <div id="apex-pdf-progress" style="font-size:11px;opacity:0.7;margin-top:5px">Preparing…</div>
+      <style>@keyframes apex-pdf-spin { to { transform: rotate(360deg); } }</style>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  const progressEl = backdrop.querySelector("#apex-pdf-progress");
 
-  for (const group of deptGroupsToPrint) {
-    const pageHtml = renderDepartmentReportHtml({
-      group,
-      activeOrder,
-      staffList,
-      labSettings,
-      usePadMode: false,
-      isPreview: false,
+  const setProgress = (msg) => {
+    if (progressEl) progressEl.textContent = msg;
+    if (onProgress) onProgress(msg);
+  };
+
+  try {
+    // Wait for Lora to be ready — otherwise text renders invisibly
+    // in the canvas.
+    setProgress("Loading fonts…");
+    try {
+      if (document.fonts?.ready) await document.fonts.ready;
+    } catch { /* silent */ }
+
+    // ─── Render each department sheet to its own canvas ─────────
+    const canvases = [];
+
+    for (let i = 0; i < TOTAL_PAGES; i++) {
+      const group = deptGroupsToPrint[i];
+      setProgress(`Rendering page ${i + 1} of ${TOTAL_PAGES}…`);
+
+      // On-screen host at (0,0). html2canvas skips elements that
+      // live far off-screen — this must be visible, and is hidden
+      // from the user by the opaque backdrop above it.
+      const host = document.createElement("div");
+      host.setAttribute("data-apex-pdf-host", "1");
+      host.style.cssText = [
+        "position: fixed",
+        "top: 0",
+        "left: 0",
+        `width: ${A4_W_PX}px`,
+        `height: ${A4_H_PX}px`,
+        "background: #ffffff",
+        "color: #000000",
+        "z-index: 2147483646",
+        "pointer-events: none",
+        "overflow: hidden",
+        "font-family: 'Lora', Georgia, serif",
+      ].join(";");
+
+      // Force the report template's outer wrapper to exactly
+      // A4_H_PX. Its mm-based min-height resolves inconsistently
+      // inside html2canvas's clone and can leave a few px of slack,
+      // which is what pushed content past the last page before.
+      const overrideStyle = document.createElement("style");
+      overrideStyle.textContent = `
+        [data-apex-pdf-host] > div > div {
+          min-height: ${A4_H_PX}px !important;
+          height: ${A4_H_PX}px !important;
+          max-height: ${A4_H_PX}px !important;
+          overflow: hidden !important;
+        }
+      `;
+      host.appendChild(overrideStyle);
+
+      const inner = document.createElement("div");
+      inner.style.cssText = [
+        `width: ${A4_W_PX}px`,
+        `height: ${A4_H_PX}px`,
+        "overflow: hidden",
+        "background: #ffffff",
+      ].join(";");
+      inner.innerHTML = renderDepartmentReportHtml({
+        group,
+        activeOrder,
+        staffList,
+        labSettings,
+        usePadMode: false,
+        isPreview: false,
+      });
+      host.appendChild(inner);
+
+      document.body.appendChild(host);
+
+      // Let layout + images settle for this page.
+      await new Promise((r) => setTimeout(r, 180));
+
+      const canvas = await html2canvas(host, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        width: A4_W_PX,
+        height: A4_H_PX,
+        windowWidth: A4_W_PX,
+        windowHeight: A4_H_PX,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
+      });
+
+      canvases.push(canvas);
+
+      if (host.parentNode) host.parentNode.removeChild(host);
+    }
+
+    // ─── Assemble with jsPDF — one image per page, no slicing ───
+    setProgress("Assembling PDF…");
+
+    const pdf = new jsPDF({
+      unit: "mm",
+      format: "a4",
+      orientation: "portrait",
+      compress: true,
     });
 
-    const page = document.createElement("div");
-    page.style.width = "210mm";
-    page.style.minHeight = "297mm";
-    page.style.background = "#ffffff";
-    page.style.pageBreakAfter = "always";
-    page.style.boxSizing = "border-box";
-    page.innerHTML = pageHtml;
-    container.appendChild(page);
-  }
-
-  document.body.appendChild(container);
-
-  await new Promise((r) => setTimeout(r, 400));
-
-  try {
-    if (document.fonts && document.fonts.ready) {
-      await document.fonts.ready;
+    for (let i = 0; i < canvases.length; i++) {
+      if (i > 0) pdf.addPage();
+      const imgData = canvases[i].toDataURL("image/jpeg", 0.95);
+      // (imageData, format, x, y, width, height, alias, compression)
+      pdf.addImage(imgData, "JPEG", 0, 0, A4_W_MM, A4_H_MM, undefined, "FAST");
     }
-  } catch (e) { /* silent */ }
 
-  const barcodeForFile = String(activeOrder.barcode || activeOrder.orderId || "report").split(/[\s,]+/)[0];
-  const filename = `Report-${barcodeForFile}.pdf`;
+    const barcodeForFile = String(activeOrder.barcode || activeOrder.orderId || "report")
+      .split(/[\s,]+/)[0];
+    pdf.save(`Report-${barcodeForFile}.pdf`);
 
-  if (onProgress) onProgress("Rendering PDF…");
-
-  try {
-    await html2pdf()
-      .set({
-        margin: 0,
-        filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          letterRendering: true,
-          backgroundColor: "#ffffff",
-          windowWidth: container.scrollWidth,
-          windowHeight: container.scrollHeight,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait",
-          compress: true,
-        },
-        pagebreak: { mode: ["css", "legacy"] },
-      })
-      .from(container)
-      .save();
+    setProgress("Done");
   } catch (err) {
-    console.error("PDF generation failed:", err);
-    alert("Could not generate PDF. Please try again.");
+    console.error("[downloadDepartmentReportPdf] failed:", err);
+    alert("Could not generate PDF: " + (err?.message || err));
   } finally {
-    if (container.parentNode) document.body.removeChild(container);
-    if (onProgress) onProgress(null);
+    // Small delay so pdf.save()'s anchor click has flushed.
+    setTimeout(() => {
+      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      if (onProgress) onProgress(null);
+    }, 400);
   }
 }
 

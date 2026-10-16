@@ -3,13 +3,10 @@ import {
   FlaskConical, Menu, X, ChevronLeft, ChevronRight, LogOut, RefreshCw,
   Plus, Bell, Activity, Receipt, QrCode, Layers, ShieldCheck,
   FileText, Settings, UserCheck, Building2, Stethoscope, ChevronDown,
-  Calendar,
+  Calendar, Package, PackagePlus, Truck, ListChecks, Home, ClipboardList,
 } from "lucide-react";
 import GlobalSearch from "./GlobalSearch";
 
-// ============================================================
-// NAV CONFIG — grouped, role-aware. Add new pages here.
-// ============================================================
 const NAV_GROUPS = [
   {
     id: "workflow",
@@ -22,6 +19,17 @@ const NAV_GROUPS = [
       { id: "reports",    label: "Reports & Print",   icon: FileText,    roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
     ],
   },
+  {
+  id: "inventory",
+  label: "Inventory",
+  items: [
+    { id: "inventory-dashboard", label: "Inventory Home",  icon: Home,         roles: ["developer","manager","admin","store_keeper"] },
+    { id: "inventory-items",     label: "Item Master",     icon: Package,      roles: ["developer","manager","admin","store_keeper"] },
+    { id: "inventory-po",        label: "Purchase Orders", icon: ClipboardList,roles: ["developer","manager","admin","store_keeper"] },
+    { id: "inventory-suppliers", label: "Suppliers",       icon: Truck,        roles: ["developer","manager","admin","store_keeper"] },
+    { id: "inventory-ledger",    label: "Stock Ledger",    icon: ListChecks,   roles: ["developer","manager","admin","store_keeper","verifier","biochemist","technologist"] },
+  ],
+},
   {
     id: "business",
     label: "Business",
@@ -41,9 +49,6 @@ const NAV_GROUPS = [
   },
 ];
 
-// ============================================================
-// LAYOUT
-// ============================================================
 export default function AppLayout({
   currentUser,
   labSettings,
@@ -54,13 +59,11 @@ export default function AppLayout({
   isLoading,
   loadDatabaseData,
   children,
-  // Optional — date range filter (rendered in the top bar)
   dateRange,
   setDateRange,
   activePreset,
   setPreset,
   setCurrentPage,
-  // Optional — callbacks from GlobalSearch
   onGlobalOrderPick,
   onGlobalPatientPick,
 }) {
@@ -153,10 +156,8 @@ export default function AppLayout({
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
         <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
           <div className="flex items-center justify-between h-14 px-3 sm:px-4 gap-3">
-            {/* Mobile: hamburger + name */}
             <div className="flex items-center gap-2 lg:hidden shrink-0 min-w-0">
               <button
                 onClick={() => setMobileOpen(true)}
@@ -167,7 +168,6 @@ export default function AppLayout({
               <span className="font-bold text-sm truncate">{labName}</span>
             </div>
 
-            {/* Desktop: date range picker + quick presets */}
             {dateRange && setDateRange && setPreset && (
               <div className="hidden lg:flex items-center gap-2 shrink-0">
                 <div className="flex items-center gap-1 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
@@ -221,7 +221,6 @@ export default function AppLayout({
               </div>
             )}
 
-            {/* Right: actions */}
             <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <GlobalSearch
                 onPickOrder={onGlobalOrderPick}
@@ -256,7 +255,6 @@ export default function AppLayout({
                 <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-rose-500" />
               </button>
 
-              {/* User menu */}
               <div className="relative">
                 <button
                   type="button"
@@ -310,7 +308,6 @@ export default function AppLayout({
           </div>
         </header>
 
-        {/* Main content */}
         <main className="flex-1 w-full max-w-[1720px] mx-auto px-3 sm:px-4 py-3 sm:py-4">
           {children}
         </main>
@@ -319,9 +316,6 @@ export default function AppLayout({
   );
 }
 
-// ============================================================
-// SIDEBAR CONTENT (shared by desktop + mobile)
-// ============================================================
 function SidebarContent({ labName, logoData, collapsed, visibleGroups, activeTab, setActiveTab }) {
   return (
     <>

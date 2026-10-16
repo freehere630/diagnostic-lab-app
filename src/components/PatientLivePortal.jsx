@@ -1,17 +1,43 @@
 import React from "react";
 import {
-  CheckCircle2, Clock, Download, Building2, Lock, Phone, ArrowLeft
+  CheckCircle2, Clock, Download, Building2, Lock, Phone
 } from "lucide-react";
 import {
-  printDepartmentA4Report,
   downloadDepartmentReportPdf,
-  buildUnifiedResultsTable,
   isImagingOrRadiologyInvestigation
 } from "../utils/printHelpers";
 
+// Canonical department names — used in the parameter list header
+// when the DB row has been silently shortened (e.g. "IMM" instead
+// of "Immunology & Endocrinology").
+const DEPT_NAME_MAP = {
+  "DEP-HEM":   "Hematology & Coagulation",
+  "DEP-BIO":   "Clinical Biochemistry",
+  "DEP-IMM":   "Immunology & Endocrinology",
+  "DEP-RAD":   "Radiology & X-Ray",
+  "DEP-USG":   "Ultrasonography (USG)",
+  "DEP-CTMRI": "CT Scan & MRI Imaging",
+  "DEP-CARD":  "Cardiology (ECG & Echo)",
+  "DEP-MIC":   "Microbiology & Serology",
+  "DEP-PAT":   "Clinical Pathology & Urine",
+  "DEP-HISTO": "Histopathology & Cytology",
+};
+
+const DEPT_ICON_MAP = {
+  "DEP-HEM":   "🩸",
+  "DEP-BIO":   "🧪",
+  "DEP-IMM":   "🧬",
+  "DEP-RAD":   "🩻",
+  "DEP-USG":   "📡",
+  "DEP-CTMRI": "🧠",
+  "DEP-CARD":  "💓",
+  "DEP-MIC":   "🔬",
+  "DEP-PAT":   "🧫",
+  "DEP-HISTO": "🔬",
+};
+
 export default function PatientLivePortal({ order, labSettings, staffList = [] }) {
   const [downloadState, setDownloadState] = React.useState("idle");
-  // 'idle' | 'preparing' | 'rendering' | 'done'
 
   if (!order) return null;
 
@@ -19,9 +45,7 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
   const dueAmount = parseFloat(order.billing?.due || 0);
   const hasDue = dueAmount > 0;
   const isFullyPaid = !hasDue;
-
-  // The patient can ONLY view quantitative results if verified and fully paid
-  const canViewResults = isReady && isFullyPaid;
+  const canDownload = isReady && isFullyPaid;
 
   const labName = labSettings?.lab_name || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER";
   const tagline = labSettings?.tagline || "With Al-Fattah on the Journey to Wellness";
@@ -38,24 +62,33 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
     (order.patient?.address && order.patient.address.startsWith("Ref: ") ? order.patient.address.replace("Ref: ", "") : null) ||
     "Self";
 
+  // Group tests by department, keeping a reference to the owning order
+  // so the PDF renderer can pull the right results from the right row.
   const departmentGroupedReports = React.useMemo(() => {
-    if (!order.tests) return [];
+    const tests = order.tests || [];
+    if (tests.length === 0) return [];
     const grouped = {};
-    order.tests.forEach((test) => {
-      const deptId = test.dept_id || "DEP-GEN";
+    tests.forEach((test) => {
+      const deptId = test.dept_id || test.deptId || "DEP-GEN";
       if (!grouped[deptId]) {
         grouped[deptId] = {
-          dept: { id: deptId, name: "General Diagnostics" },
-          tests: []
+          dept: {
+            id: deptId,
+            name: DEPT_NAME_MAP[deptId] || "General Diagnostics",
+            icon: DEPT_ICON_MAP[deptId] || "🔬",
+          },
+          tests: [],
+          ownerOrder: order,
+          ownerLocked: isReady,
         };
       }
       grouped[deptId].tests.push(test);
     });
     return Object.values(grouped);
-  }, [order]);
+  }, [order, isReady]);
 
   const handleDownloadPdf = async () => {
-    if (!canViewResults) {
+    if (!canDownload) {
       alert("Report download is locked pending settlement of the due balance.");
       return;
     }
@@ -79,14 +112,15 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
       setTimeout(() => setDownloadState("idle"), 1500);
     } catch (err) {
       console.error(err);
+      alert("Could not generate the PDF. Please try again, or contact reception.");
       setDownloadState("idle");
     }
   };
 
   return (
     <div className="w-full max-w-xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden text-slate-900 my-4">
-      
-      {/* 1. BRANDING BANNER (COMPACT) */}
+
+      {/* 1. BRANDING BANNER */}
       <div className="bg-slate-900 text-white p-5 text-center">
         <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center mx-auto mb-2 border border-white/15">
           <Building2 className="w-5 h-5 text-blue-400" />
@@ -97,9 +131,9 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
       </div>
 
       <div className="p-4 sm:p-5 space-y-4 text-xs">
-        
+
         {/* 2. DYNAMIC STATUS CARD */}
-        {canViewResults ? (
+        {canDownload ? (
           <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
@@ -108,7 +142,7 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
                   Report Ready & Verified
                 </p>
                 <p className="text-[11px] text-emerald-700">
-                  Full payment cleared. Digitally signed by Pathologist.
+                  Digitally signed. Click Download PDF dialog to keep a copy.
                 </p>
               </div>
             </div>
@@ -147,10 +181,10 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
               </div>
               <div>
                 <p className="font-bold text-xs text-rose-950 uppercase tracking-tight">
-                  Report Verified — Numerical Results Locked
+                  Report Verified — Download Locked
                 </p>
                 <p className="text-[11px] text-rose-800 mt-0.5">
-                  Your report has been signed by the consultant, but quantitative results are locked until full payment is settled.
+                  Your report has been signed by the consultant. Please settle the pending balance at reception to unlock the PDF download.
                 </p>
               </div>
             </div>
@@ -209,42 +243,88 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
           </table>
         </div>
 
-        {/* 4. TESTS & FINDINGS */}
-        {canViewResults ? (
-          <div className="space-y-2.5 pt-2 border-t border-slate-100">
-            <div
-              className="bg-white"
-              dangerouslySetInnerHTML={{
-                __html: buildUnifiedResultsTable(order.tests || [], order.results || {})
-              }}
-            />
-            <div className="pt-2 text-[11px] text-slate-700">
-              <span className="font-bold uppercase text-slate-900">Pathologist Remarks:</span>
-              <span className="italic ml-1">{order.verifierRemarks || "Clinically correlated and verified with quality control standards."}</span>
-            </div>
-          </div>
-        ) : (
-          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wide block">
-              Ordered Investigations:
+        {/* 4. PARAMETER LIST — names only, values are only in the PDF. */}
+        <div className="pt-2 border-t border-slate-100 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
+              Ordered Investigations & Parameters
             </span>
-            <div className="flex flex-wrap gap-1">
-              {(order.tests || []).map((t) => (
-                <span key={t.id} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-800 font-semibold text-[11px] flex items-center gap-1 shadow-xs">
-                  {canViewResults ? "✓" : "🔒"} {t.name}
-                </span>
-              ))}
-            </div>
+            {canDownload ? (
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                ✓ Results in PDF
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                Result values hidden
+              </span>
+            )}
           </div>
-        )}
 
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+            {departmentGroupedReports.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic">No investigations on this order.</p>
+            ) : (
+              departmentGroupedReports.map((group) => (
+                <div key={group.dept.id} className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 pb-1 border-b border-slate-200/70">
+                    <span className="text-sm">{group.dept.icon}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700">
+                      {group.dept.name}
+                    </span>
+                  </div>
+                  <ul className="space-y-1 ml-1">
+                    {group.tests.map((t, tIdx) => {
+                      const params = t.test_parameters || t.parameters || [];
+                      const showParams = params.length > 1;
+                      return (
+                        <li key={t.id || tIdx} className="text-xs">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-slate-400">•</span>
+                            <span className="font-bold text-slate-800">{t.name}</span>
+                            {t.code && (
+                              <span className="text-[10px] font-mono text-slate-400">
+                                ({t.code})
+                              </span>
+                            )}
+                          </div>
+                          {showParams && (
+                            <ul className="ml-4 mt-0.5 space-y-0.5">
+                              {params.map((p, pIdx) => (
+                                <li key={p.id || pIdx} className="text-[11px] text-slate-600 leading-snug">
+                                  – {p.name}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))
+            )}
+          </div>
+
+          <p className="text-[10px] text-slate-500 bg-blue-50/60 border border-blue-100 rounded-lg p-2 flex items-start gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+            <span>
+              Result values are not shown on this page. Download the official PDF report
+              {canDownload ? " using the button above" : " once the report is verified and the balance is settled"}.
+            </span>
+          </p>
+        </div>
       </div>
 
       {/* 5. FOOTER ACTION */}
-      <div className="p-3 bg-slate-50/75 border-t border-slate-100 flex items-center justify-between">
-        
+      <div className="p-3 bg-slate-50/75 border-t border-slate-100 flex items-center justify-between gap-2">
+        <button
+          onClick={() => window.location.reload()}
+          className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-lg text-xs transition"
+        >
+          Refresh Status
+        </button>
 
-        {canViewResults ? (
+        {canDownload ? (
           <button
             onClick={handleDownloadPdf}
             disabled={downloadState !== "idle"}
@@ -272,14 +352,13 @@ export default function PatientLivePortal({ order, labSettings, staffList = [] }
           </button>
         ) : (
           <button
-            onClick={() => window.location.reload()}
-            className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-lg text-xs transition"
+            disabled
+            className="px-4 py-1.5 bg-slate-200 text-slate-400 font-semibold rounded-lg text-xs cursor-not-allowed flex items-center gap-1"
           >
-            Refresh Status
+            <Lock className="w-3.5 h-3.5" /> PDF Locked
           </button>
         )}
       </div>
-
     </div>
   );
 }

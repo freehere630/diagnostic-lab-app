@@ -1,3 +1,11 @@
+import InventoryItems from "./components/InventoryItems";
+import SupplierManagement from "./components/SupplierManagement";
+import ReceiveStockModal from "./components/ReceiveStockModal";
+import StockLedger from "./components/StockLedger";
+import InventoryDashboard from "./components/InventoryDashboard";
+import PurchaseOrders from "./components/PurchaseOrders";
+import PurchaseOrderDetail from "./components/PurchaseOrderDetail";
+import ReceiveAgainstPOModal from "./components/ReceiveAgainstPOModal";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
@@ -40,9 +48,6 @@ import LabSettings from "./components/LabSettings";
 import PatientLivePortal from "./components/PatientLivePortal";
 import DoctorManagement from "./components/DoctorManagement";
 
-// Format a Date as YYYY-MM-DD in the USER'S local timezone.
-// Never use `toISOString().slice(0,10)` — that's UTC and shifts the date
-// by one day for eastern timezones (Bangladesh = UTC+6) between 00:00–06:00.
 const toLocalDateStr = (d = new Date()) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -65,22 +70,17 @@ const MASTER_TUBE_COLORS = [
 export default function App() {
   const todayStr = toLocalDateStr();
 
-  // ============================================================
-  // 1. STATE — every useState lives here, before any effect
-  // ============================================================
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState({ state: "idle", message: "" });
 
-  // Core master data
   const [departments, setDepartments] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [doctorsList, setDoctorsList] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
 
-  // Orders & pagination
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [trackingStatus, setTrackingStatus] = useState({});
@@ -88,8 +88,6 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Date filter — restore from sessionStorage so the state survives Chrome
-  // discarding a background tab (which wipes all React state on restore).
   const readSavedDateFilter = () => {
     try {
       const raw = sessionStorage.getItem("apex_date_filter");
@@ -109,12 +107,10 @@ export default function App() {
   });
   const [dashboardSearch, setDashboardSearch] = useState("");
 
-  // Patient tracking portal
   const [patientTrackingOrder, setPatientTrackingOrder] = useState(null);
   const [isVerifyingPublicUrl, setIsVerifyingPublicUrl] = useState(false);
   const [verificationError, setVerificationError] = useState("");
 
-  // POS form
   const [selectedTestIds, setSelectedTestIds] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
   const [paidVal, setPaidVal] = useState(undefined);
@@ -122,25 +118,21 @@ export default function App() {
     id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self",
   });
 
-  // Test manager
   const [editingTest, setEditingTest] = useState(null);
   const [newTestForm, setNewTestForm] = useState({
     name: "", code: "", deptId: "DEP-BIO", price: "", sampleType: "Serum",
     tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
     parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }],
   });
-
-  // ============================================================
-  // 2. REFS — before any effect
-  // ============================================================
+  const [selectedPOId, setSelectedPOId] = useState(null);
+const [receivePOId, setReceivePOId] = useState(null);
+const [receiveStockOpen, setReceiveStockOpen] = useState(false);
+const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null);
   const lastActiveOrderRef = useRef(null);
   const resultWriteTimers = useRef({});
   const recentlyWrittenRef = useRef({});
   const fetchSeqRef = useRef(0);
 
-  // ============================================================
-  // 3. MEMOS — derived state
-  // ============================================================
   const activeOrder = useMemo(() => {
     const found = orders.find(
       (o) => o.orderId === selectedOrderId || o.id === selectedOrderId
@@ -225,14 +217,38 @@ export default function App() {
       }
 
       if (!grouped[groupKey]) {
-        const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
-        grouped[groupKey] = {
-          dept: {
-            id: groupKey,
-            name: groupName || baseDept.name,
-            icon: groupIcon || baseDept.icon || "🔬",
-          },
-          tests: [],
+  const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
+
+  // Prefer a curated full name when the DB row has been shortened
+  // (e.g. "IMM" instead of "Immunology & Endocrinology"). This is
+  // a safety net on top of the SQL backfill in case the DB is out
+  // of sync on a fresh deployment.
+  const CANONICAL_DEPT_NAMES = {
+    "DEP-HEM":   "Hematology & Coagulation",
+    "DEP-BIO":   "Clinical Biochemistry",
+    "DEP-IMM":   "Immunology & Endocrinology",
+    "DEP-RAD":   "Radiology & X-Ray",
+    "DEP-USG":   "Ultrasonography (USG)",
+    "DEP-CTMRI": "CT Scan & MRI Imaging",
+    "DEP-CARD":  "Cardiology (ECG & Echo)",
+    "DEP-MIC":   "Microbiology & Serology",
+    "DEP-PAT":   "Clinical Pathology & Urine",
+    "DEP-HISTO": "Histopathology & Cytology",
+  };
+  const dbName = (baseDept.name || "").trim();
+  const isShort = dbName.length < 8 || dbName === baseDeptId.replace("DEP-", "");
+  const resolvedName =
+    groupName ||
+    (isShort ? CANONICAL_DEPT_NAMES[baseDeptId] || dbName : dbName) ||
+    "General Pathology";
+
+  grouped[groupKey] = {
+    dept: {
+      id: groupKey,
+      name: resolvedName,
+      icon: groupIcon || baseDept.icon || "🔬",
+    },
+    tests: [],
           ownerOrderId: null,
           ownerBarcode: null,
           ownerLocked: false,
@@ -253,11 +269,6 @@ export default function App() {
     return Object.values(grouped);
   }, [activeOrder, visitOrders, departments]);
 
-  // ============================================================
-  // 4. EFFECTS
-  // ============================================================
-
-  // --- Public QR scan ---
   useEffect(() => {
     const checkPublicQrScan = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -285,7 +296,33 @@ export default function App() {
         }
 
         setStaffList(Array.isArray(rpcData.staff) ? rpcData.staff : []);
-        setPatientTrackingOrder(rpcData);
+
+        // Normalize `results` to the shape the report renderer expects.
+        // The RPC returns raw DB rows (an array of { parameter_id,
+        // result_value }), but buildUnifiedResultsTable reads
+        // { [paramId]: { value } }. Without this, every value shows "—"
+        // on the portal AND the downloaded PDF.
+        const normalizedResults = (() => {
+          const raw = rpcData.results;
+          if (!raw) return {};
+          if (Array.isArray(raw)) {
+            return raw.reduce((acc, r) => {
+              if (r && r.parameter_id !== undefined && r.parameter_id !== null) {
+                acc[r.parameter_id] = { value: r.result_value };
+              }
+              return acc;
+            }, {});
+          }
+          const out = {};
+          for (const [k, v] of Object.entries(raw)) {
+            out[k] = (v && typeof v === "object" && !Array.isArray(v))
+              ? v
+              : { value: v };
+          }
+          return out;
+        })();
+
+        setPatientTrackingOrder({ ...rpcData, results: normalizedResults });
       } catch (err) {
         console.error("QR lookup failed:", err);
         setVerificationError("Failed to load patient report: " + (err.message || String(err)));
@@ -297,7 +334,6 @@ export default function App() {
     checkPublicQrScan();
   }, []);
 
-  // --- Session restore + auth listener ---
   useEffect(() => {
     let mounted = true;
 
@@ -327,7 +363,6 @@ export default function App() {
     };
   }, []);
 
-  // --- Persist the date filter to sessionStorage ---
   useEffect(() => {
     try {
       sessionStorage.setItem(
@@ -341,7 +376,6 @@ export default function App() {
     } catch (e) { /* private mode etc. */ }
   }, [dateRange, activePreset]);
 
-  // --- Keep "Today" in sync if the app crosses midnight ---
   useEffect(() => {
     if (activePreset !== "TODAY") return;
 
@@ -361,7 +395,6 @@ export default function App() {
     };
   }, [activePreset, dateRange]);
 
-  // --- Refetch when the tab regains focus (handles Chrome tab discards) ---
   useEffect(() => {
     if (!currentUser) return;
 
@@ -382,7 +415,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
-  // --- Master data fetch ---
   useEffect(() => {
     if (!currentUser) return;
     const fetchMaster = async () => {
@@ -400,14 +432,16 @@ export default function App() {
     fetchMaster();
   }, [currentUser]);
 
-  // --- Main paginated orders fetcher ---
   const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
 
     const mySeq = ++fetchSeqRef.current;
 
     if (!silent) setIsLoading(true);
-    if (!silent) setOrders([]);
+    // NOTE: we no longer clear `orders` here. Doing so caused a
+    // visible flash of "No patient orders found" on every page
+    // change and every keystroke-triggered search. The Dashboard
+    // now renders stale rows under a thin loading overlay.
     try {
       const res = await getOrdersPaginated({
         page: currentPage,
@@ -421,24 +455,42 @@ export default function App() {
 
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
 
+      // Pre-index cached orders once. Previously we called
+      // getAllOrderVials() inside the filter, which walked the full
+      // parameter tree of every cached order on every search.
+      const localById = new Map();
+      const localSearchIndex = localOrders.map((lo) => {
+        const key = lo.orderId || lo.id;
+        if (key) localById.set(key, lo);
+
+        const vials = (lo.vials && lo.vials.length > 0) ? lo.vials : getAllOrderVials(lo, testCatalog);
+        const barcodes = [
+          lo.barcode,
+          ...(lo.allBarcodes || []),
+          ...(lo.barcodesList || []),
+          ...vials.map((v) => v.barcode),
+          ...(lo.tests || []).map((t) => t.vialBarcode || t.barcode),
+        ].filter(Boolean).map((b) => String(b).toLowerCase());
+
+        return {
+          order: lo,
+          barcodes,
+          name: (lo.patient?.name || "").toLowerCase(),
+          id: String(lo.patient?.id || "").toLowerCase(),
+          phone: String(lo.patient?.phone || ""),
+        };
+      });
+
       if (res.orders.length === 0 && dashboardSearch && dashboardSearch.trim()) {
         const q = dashboardSearch.trim().toLowerCase();
-        const matchedLocal = localOrders.filter((lo) => {
-          const vials = (lo.vials && lo.vials.length > 0) ? lo.vials : getAllOrderVials(lo, testCatalog);
-          const allBcs = [
-            lo.barcode,
-            ...(lo.allBarcodes || []),
-            ...(lo.barcodesList || []),
-            ...vials.map((v) => v.barcode),
-            ...(lo.tests || []).map((t) => t.vialBarcode || t.barcode),
-          ].filter(Boolean);
-          return (
-            allBcs.some((b) => String(b).toLowerCase().includes(q)) ||
-            (lo.patient?.name && lo.patient.name.toLowerCase().includes(q)) ||
-            (lo.patient?.id && String(lo.patient.id).toLowerCase().includes(q)) ||
-            (lo.patient?.phone && lo.patient.phone.includes(q))
-          );
-        });
+        const matchedLocal = localSearchIndex
+          .filter((e) =>
+            e.barcodes.some((b) => b.includes(q)) ||
+            e.name.includes(q) ||
+            e.id.includes(q) ||
+            e.phone.includes(q)
+          )
+          .map((e) => e.order);
 
         if (matchedLocal.length > 0) {
           setOrders(matchedLocal);
@@ -451,7 +503,7 @@ export default function App() {
       }
 
       const formatted = (res.orders || []).map((o, idx) => {
-        const localMatch = localOrders.find((lo) => (lo.orderId || lo.id) === (o.id || o.orderId));
+        const localMatch = localById.get(o.id || o.orderId);
 
         let restoredVials = [];
         if (Array.isArray(o.results)) {
@@ -627,7 +679,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, currentPage, dateRange, dashboardSearch]);
 
-  // --- Realtime listener (patch in place, never refetch) ---
   useEffect(() => {
     if (!currentUser) return;
 
@@ -716,7 +767,6 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // --- Direct results poller (8s safety net) ---
   useEffect(() => {
     if (!currentUser || !activeOrder) return;
     const currentTargetId = activeOrder.orderId || activeOrder.id;
@@ -779,8 +829,10 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, activeOrder?.orderId, activeOrder?.id]);
+  useEffect(() => {
+  if (activeTab !== "inventory-po") setSelectedPOId(null);
+}, [activeTab]);
 
-  // --- Clear pending result-write timers on order change ---
   useEffect(() => {
     return () => {
       if (resultWriteTimers.current) {
@@ -789,10 +841,6 @@ export default function App() {
       }
     };
   }, [selectedOrderId]);
-
-  // ============================================================
-  // 5. CALLBACKS
-  // ============================================================
 
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
@@ -979,15 +1027,24 @@ export default function App() {
 
     setSaveStatus({ state: "saving", message: "Syncing..." });
 
+    // Extend the "ignore realtime" window the INSTANT the user types.
+    // Previously this was set inside the 200ms debounce timer, which
+    // left a 200ms gap where an incoming realtime UPDATE could
+    // overwrite the keystroke.
+    recentlyWrittenRef.current[paramId] = Date.now() + 3000;
+
     if (resultWriteTimers.current[paramId]) {
       clearTimeout(resultWriteTimers.current[paramId]);
     }
 
     resultWriteTimers.current[paramId] = setTimeout(async () => {
       try {
+        await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
+
+        // Refresh the window after the save lands so the echo of our
+        // own write doesn't bounce back through the realtime channel.
         recentlyWrittenRef.current[paramId] = Date.now() + 3000;
 
-        await saveTestResult(targetOrderId, paramId, cleanVal, "ENTERED");
         if (cleanRemarks !== effectiveOrder.verifierRemarks) {
           await supabase
             .from("orders")
@@ -1325,8 +1382,6 @@ export default function App() {
     }
   };
 
-  // Returns true on success, false on failure — DoctorManagement relies
-  // on this to keep the modal open when a save fails.
   const handleSaveDoctor = async (docData) => {
     setIsLoading(true);
     try {
@@ -1367,10 +1422,10 @@ export default function App() {
       setIsLoading(false);
     }
   };
-
-  // ============================================================
-  // 6. CONDITIONAL RENDERS
-  // ============================================================
+const openReceiveStock = (itemId = null) => {
+  setReceiveStockInitialItemId(itemId);
+  setReceiveStockOpen(true);
+};
   if (isVerifyingPublicUrl) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
@@ -1425,11 +1480,9 @@ export default function App() {
     );
   }
 
-  // ============================================================
-  // 7. MAIN RENDER
-  // ============================================================
   return (
     <AppLayout
+      onNavigate={(tab) => setActiveTab(tab)}
       currentUser={currentUser}
       labSettings={labSettings}
       activeTab={activeTab}
@@ -1448,7 +1501,6 @@ export default function App() {
         setActiveTab("dashboard");
       }}
       onGlobalPatientPick={() => {
-        // Patient is pre-selected in the Reception lookup; just route there.
         setActiveTab("reception");
       }}
     >
@@ -1587,7 +1639,32 @@ export default function App() {
           handleRemarksChange={handleRemarksChange}
         />
       )}
+        {activeTab === "inventory-dashboard" && (
+          <InventoryDashboard onNavigate={(tab) => setActiveTab(tab)} />
+        )}
 
+        {activeTab === "inventory-items" && (
+          <InventoryItems onReceiveStock={openReceiveStock} />
+        )}
+
+        {activeTab === "inventory-suppliers" && (
+          <SupplierManagement />
+        )}
+
+        {activeTab === "inventory-ledger" && (
+          <StockLedger />
+        )}
+        {activeTab === "inventory-po" && !selectedPOId && (
+  <PurchaseOrders onOpenPO={(id) => setSelectedPOId(id)} />
+)}
+
+{activeTab === "inventory-po" && selectedPOId && (
+  <PurchaseOrderDetail
+    poId={selectedPOId}
+    onBack={() => setSelectedPOId(null)}
+    onReceive={(id) => setReceivePOId(id)}
+  />
+)}
       {activeTab === "test-manager" && (
         <TestManager
           departments={departments}
@@ -1633,6 +1710,21 @@ export default function App() {
           isLoading={isLoading}
         />
       )}
+      <ReceiveStockModal
+  open={receiveStockOpen}
+  onClose={() => {
+    setReceiveStockOpen(false);
+    setReceiveStockInitialItemId(null);
+  }}
+  initialItemId={receiveStockInitialItemId}
+  onReceived={() => { /* no-op — each screen refreshes itself on remount */ }}
+/>
+<ReceiveAgainstPOModal
+  open={!!receivePOId}
+  poId={receivePOId}
+  onClose={() => setReceivePOId(null)}
+  onReceived={() => { /* detail view refreshes on remount */ }}
+/>
     </AppLayout>
   );
 }
