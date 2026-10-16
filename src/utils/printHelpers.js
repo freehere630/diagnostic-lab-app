@@ -2,6 +2,24 @@ import { generateQrSvgString } from "./qrcode";
 import { buildReportHeaderHtml, buildReportFooterHtml, getReportLayout } from "./reportLayout";
 import html2pdf from "html2pdf.js";
 
+// ─────────────────────────────────────────────────────────────
+// XSS GUARD
+// Escape EVERY untrusted string before embedding it into report
+// HTML. Never escape the output of generateQrSvgString or
+// generateSvgBarcodeHtml — those are trusted, locally-generated SVG.
+// ─────────────────────────────────────────────────────────────
+export const esc = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+// Helper: escape, then convert newlines to <br>. Order matters —
+// escape FIRST so a stray "<br>" in user data becomes "&lt;br&gt;".
+const escWithBreaks = (v) => esc(v).replace(/\n/g, "<br>");
+
 // GS1 Code 128 Patterns
 const CODE128_PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
@@ -129,8 +147,8 @@ function formatResultCell(val, min, max, unit = "", paramType = "numeric") {
   }
 
   return `
-    <span style="font-weight: 700; font-size: 9pt; color: #000000; font-family: 'Lora', Georgia, serif;">${val}</span>
-    ${unit ? `<span style="font-weight: 600; font-size: 7.5pt; color: #333333; margin-left: 2px; font-family: 'Lora', Georgia, serif;">${unit}</span>` : ""}
+    <span style="font-weight: 700; font-size: 9pt; color: #000000; font-family: 'Lora', Georgia, serif;">${esc(val)}</span>
+    ${unit ? `<span style="font-weight: 600; font-size: 7.5pt; color: #333333; margin-left: 2px; font-family: 'Lora', Georgia, serif;">${esc(unit)}</span>` : ""}
   `;
 }
 
@@ -221,8 +239,6 @@ export function getAllOrderVials(order, catalog = []) {
         const bc = String(v.barcode || v.testBarcode || "");
         return !bc || bc === primaryBc;
       });
-      // Only apply the filter if it left something behind; otherwise trust
-      // what came in (legacy rows without barcode metadata).
       if (matching.length > 0) vialsToUse = matching;
     }
 
@@ -238,7 +254,6 @@ export function getAllOrderVials(order, catalog = []) {
   }
 
   const vials = {};
-  // Extract strictly the first primary barcode to avoid concatenating comma-separated strings
   const primaryBc = String(order.barcode || "2026000001").split(/[\s,]+/)[0];
   const baseNum = parseInt(primaryBc.replace(/\D/g, ""), 10) || 2026000001;
   let counter = 0;
@@ -324,9 +339,9 @@ export function getDepartmentVialBarcode(order, deptId, groupTests = []) {
 
   if (groupTests && groupTests.length > 0) {
     for (const gt of groupTests) {
-      const matched = allVials.find(v => 
-        (v.testIds || []).includes(gt.id) || 
-        (v.testIds || []).includes(gt.code) || 
+      const matched = allVials.find(v =>
+        (v.testIds || []).includes(gt.id) ||
+        (v.testIds || []).includes(gt.code) ||
         (v.testNames || []).includes(gt.name) ||
         (v.testNames || []).includes(gt.code)
       );
@@ -354,6 +369,13 @@ function isTestProfile(test) {
   return params.length > 1;
 }
 
+// ─────────────────────────────────────────────────────────────
+// IMPORTANT: extractResultValue and getParamDetails return RAW
+// (unescaped) values. Every template that embeds them into HTML
+// must call esc() or escWithBreaks() at the interpolation site —
+// except when the value is passed through formatResultCell, which
+// escapes internally.
+// ─────────────────────────────────────────────────────────────
 function extractResultValue(tests = [], results = {}, keywords = [], fallback = "—") {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
   for (const test of tests) {
@@ -388,7 +410,7 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
       const pName = (p.name || "").toLowerCase().trim();
       if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
         let refText = (p.reference_text || p.ref_text || "").trim();
-        
+
         if (!refText) {
           const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "";
           const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "";
@@ -397,7 +419,13 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
           else if (hasMax) refText = `≤ ${p.max_range}`;
         }
 
-        const formattedRef = refText ? refText.replace(/\n/g, "<br>") : defaultRef.replace(/\n/g, "<br>");
+        // ESCAPE FIRST, then restore line breaks. This is the single
+        // most important safety point in the file — ref text is
+        // user-controlled via the Test Catalog editor.
+        const formattedRef = refText
+          ? escWithBreaks(refText)
+          : escWithBreaks(defaultRef);
+
         const minVal = p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : defaultMin);
         const maxVal = p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : defaultMax);
         const unitVal = p.unit !== undefined && p.unit !== null && p.unit !== "" ? p.unit : defaultUnit;
@@ -418,7 +446,7 @@ function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef
     param: null,
     name: keys[0],
     unit: defaultUnit,
-    ref: defaultRef ? defaultRef.replace(/\n/g, "<br>") : "",
+    ref: defaultRef ? escWithBreaks(defaultRef) : "",
     min: defaultMin,
     max: defaultMax
   };
@@ -429,10 +457,10 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   const getVal = (keywords) => extractResultValue(tests, results, keywords, "—");
   const getInfo = (keywords, defUnit, defRef, defMin, defMax) => getParamDetails(tests, keywords, defUnit, defRef, defMin, defMax);
 
-  const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5<br>Adult Women: 11.5 - 15.5", 11.5, 16.5);
-  const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8<br>Women: 3.8 - 5.2", 3.8, 5.8);
-  const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50<br>Women: 36 - 46", 36.0, 50.0);
-  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10<br>Women: 0 - 20", 0, 20);
+  const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5\nAdult Women: 11.5 - 15.5", 11.5, 16.5);
+  const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8\nWomen: 3.8 - 5.2", 3.8, 5.8);
+  const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50\nWomen: 36 - 46", 36.0, 50.0);
+  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10\nWomen: 0 - 20", 0, 20);
   const mcvInfo = getInfo(["Mean Corpuscular Volume (MCV)", "MCV"], "fL", "78.0 - 98.0", 78.0, 98.0);
   const mchInfo = getInfo(["Mean Corpuscular Hemoglobin (MCH)", "MCH"], "pg", "27.0 - 32.0", 27.0, 32.0);
   const mchcInfo = getInfo(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"], "g/dL", "31.0 - 36.0", 31.0, 36.0);
@@ -499,7 +527,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
 
   const row = (name, val, info) => `
     <tr>
-      <td style="padding: 2.8px 6px; font-size: 9pt; color: #000; font-weight: 500;">${name}</td>
+      <td style="padding: 2.8px 6px; font-size: 9pt; color: #000; font-weight: 500;">${esc(name)}</td>
       <td style="padding: 2.8px 6px; font-size: 9pt; vertical-align: top;">
         ${formatResultCell(val, info.min, info.max, info.unit)}
       </td>
@@ -509,7 +537,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
 
   const secHeader = (title) => `
     <tr style="">
-      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${title}</td>
+      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${esc(title)}</td>
     </tr>
   `;
 
@@ -618,7 +646,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
 
   const tableRow = (label, val, info, pType = "text") => `
     <tr>
-      <td style="${rowStyle}; font-weight: 500;">${label}</td>
+      <td style="${rowStyle}; font-weight: 500;">${esc(label)}</td>
       <td style="${rowStyle};">${formatResultCell(val, info.min, info.max, "", pType)}</td>
       <td style="${refStyle}">${info.ref}</td>
     </tr>
@@ -668,31 +696,31 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
             <tr>
               <td style="${rowStyle}; font-weight: 700; width: 35%;">Pus Cells (WBC)</td>
               <td style="${rowStyle}; width: 25%;">${formatResultCell(pusCells, pusCellsInfo.min, pusCellsInfo.max, "", "qualitative")}</td>
-              <td style="${rowStyle}; width: 12%;">${pusCellsInfo.unit || "/HPF"}</td>
+              <td style="${rowStyle}; width: 12%;">${esc(pusCellsInfo.unit || "/HPF")}</td>
               <td style="${refStyle}; width: 28%;">${pusCellsInfo.ref}</td>
             </tr>
             <tr>
               <td style="${rowStyle}; font-weight: 700;">Epithelial Cells</td>
               <td style="${rowStyle};">${formatResultCell(epithelial, epithelialInfo.min, epithelialInfo.max, "", "qualitative")}</td>
-              <td style="${rowStyle};">${epithelialInfo.unit || "/HPF"}</td>
+              <td style="${rowStyle};">${esc(epithelialInfo.unit || "/HPF")}</td>
               <td style="${refStyle}">${epithelialInfo.ref}</td>
             </tr>
             <tr>
               <td style="${rowStyle}; font-weight: 700;">Red Blood Cells (RBC)</td>
               <td style="${rowStyle};">${formatResultCell(rbc, rbcInfo.min, rbcInfo.max, "", "qualitative")}</td>
-              <td style="${rowStyle};">${rbcInfo.unit || "/HPF"}</td>
+              <td style="${rowStyle};">${esc(rbcInfo.unit || "/HPF")}</td>
               <td style="${refStyle}">${rbcInfo.ref}</td>
             </tr>
             <tr>
               <td style="${rowStyle}; font-weight: 700;">Casts</td>
               <td style="${rowStyle};">${formatResultCell(casts, null, null, "", "qualitative")}</td>
-              <td style="${rowStyle};">${castsInfo.unit || "/LPF"}</td>
+              <td style="${rowStyle};">${esc(castsInfo.unit || "/LPF")}</td>
               <td style="${refStyle}">${castsInfo.ref}</td>
             </tr>
             <tr>
               <td style="${rowStyle}; font-weight: 700;">Crystals</td>
               <td style="${rowStyle};">${formatResultCell(crystals, null, null, "", "qualitative")}</td>
-              <td style="${rowStyle};">${crystalsInfo.unit || "/HPF"}</td>
+              <td style="${rowStyle};">${esc(crystalsInfo.unit || "/HPF")}</td>
               <td style="${refStyle}">${crystalsInfo.ref}</td>
             </tr>
             <tr>
@@ -754,7 +782,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
 
   const tableRow = (label, val, info, pType = "text") => `
     <tr>
-      <td style="${rowStyle}; font-weight: 500;">${label}</td>
+      <td style="${rowStyle}; font-weight: 500;">${esc(label)}</td>
       <td style="${rowStyle};">${formatResultCell(val, info.min, info.max, "", pType)}</td>
       <td style="${refStyle}">${info.ref}</td>
     </tr>
@@ -845,7 +873,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
     if (!observedTiter || observedTiter === "—") {
       return dilutions.map(() => `<td style="padding: 4px; text-align: center; border: 1px solid #cbd5e1; font-size: 8pt; color: #94a3b8;">—</td>`).join("");
     }
-    const cleanObs = observedTiter.replace(/[^0-9]/g, "");
+    const cleanObs = String(observedTiter).replace(/[^0-9]/g, "");
     const obsNum = parseInt(cleanObs, 10) || 0;
 
     return dilutions.map((d) => {
@@ -861,10 +889,10 @@ export function renderCustomWidalReport(tests = [], results = {}) {
 
   const row = (antigenName, observedVal, info) => `
     <tr>
-      <td style="padding: 4px 6px; font-weight: 700; border: 1px solid #000; font-size: 9pt;">${antigenName}</td>
+      <td style="padding: 4px 6px; font-weight: 700; border: 1px solid #000; font-size: 9pt;">${esc(antigenName)}</td>
       ${buildTiterCells(observedVal)}
       <td style="padding: 4px 6px; text-align: center; font-weight: 900; border: 1px solid #000; font-size: 9pt; font-family: 'Inter', sans-serif;">
-        ${observedVal}
+        ${esc(observedVal)}
       </td>
       <td style="padding: 4px 6px; border: 1px solid #000; font-size: 7.5pt; color: #333; white-space: pre-line;">
         ${info.ref}
@@ -898,7 +926,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
       <div style="margin-top: 8px; padding: 6px 8px; border: 1px solid #000; border-radius: 4px; font-size: 9pt;">
         <span style="font-weight: 800; text-transform: uppercase;">Serological Interpretation:</span>
         <span style="margin-left: 6px; font-weight: 600;">
-          ${imp !== "—" ? imp : "A single Widal test is suggestive only. Diagnostic titer is ≥ 1:160 for TO and TH."}
+          ${imp !== "—" ? esc(imp) : "A single Widal test is suggestive only. Diagnostic titer is ≥ 1:160 for TO and TH."}
         </span>
       </div>
     </div>
@@ -954,11 +982,11 @@ export function renderCustomSemenReport(tests = [], results = {}) {
         </div>
         <table style="width: 100%; border-collapse: collapse;">
           <tbody>
-            <tr><td style="${rowStyle}">Period of Abstinence</td><td style="${rowStyle}">${abstinence}</td><td style="${refStyle}">${abstinenceInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Period of Abstinence</td><td style="${rowStyle}">${esc(abstinence)}</td><td style="${refStyle}">${abstinenceInfo.ref}</td></tr>
             <tr><td style="${rowStyle}">Volume</td><td style="${rowStyle}">${formatResultCell(volume, volumeInfo.min, volumeInfo.max, volumeInfo.unit)}</td><td style="${refStyle}">${volumeInfo.ref}</td></tr>
-            <tr><td style="${rowStyle}">Color & Appearance</td><td style="${rowStyle}">${color}</td><td style="${refStyle}">${colorInfo.ref}</td></tr>
-            <tr><td style="${rowStyle}">Liquefaction Time</td><td style="${rowStyle}">${liq}</td><td style="${refStyle}">${liqInfo.ref}</td></tr>
-            <tr><td style="${rowStyle}">Viscosity</td><td style="${rowStyle}">${visc}</td><td style="${refStyle}">${viscInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Color & Appearance</td><td style="${rowStyle}">${esc(color)}</td><td style="${refStyle}">${colorInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Liquefaction Time</td><td style="${rowStyle}">${esc(liq)}</td><td style="${refStyle}">${liqInfo.ref}</td></tr>
+            <tr><td style="${rowStyle}">Viscosity</td><td style="${rowStyle}">${esc(visc)}</td><td style="${refStyle}">${viscInfo.ref}</td></tr>
             <tr><td style="${rowStyle}">Reaction / pH</td><td style="${rowStyle}">${formatResultCell(ph, phInfo.min, phInfo.max)}</td><td style="${refStyle}">${phInfo.ref}</td></tr>
           </tbody>
         </table>
@@ -1006,10 +1034,10 @@ export function renderCustomSemenReport(tests = [], results = {}) {
 export function renderDescriptiveStudySheet(test, results, deptName) {
   const rawParams = test.test_parameters || test.parameters || [];
   const param = rawParams[0] || { id: test.id, name: test.name };
-  const rawText = results?.[param.id]?.value ?? 
-                  results?.[test.id]?.value ?? 
-                  param.reference_text ?? 
-                  param.default_template ?? 
+  const rawText = results?.[param.id]?.value ??
+                  results?.[test.id]?.value ??
+                  param.reference_text ??
+                  param.default_template ??
                   "Normal study. No significant abnormality detected.";
 
   let clinicalIndication = "";
@@ -1049,12 +1077,12 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
       <div style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 5px 0; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline;">
         <div>
           <span style="font-size: 10.5pt; font-weight: 900; text-transform: uppercase; color: #000;">
-            ${test.name.toUpperCase()}
+            ${esc(test.name).toUpperCase()}
           </span>
-          ${test.code ? `<span style="font-size: 9pt; font-family: 'Consolas', monospace; font-weight: 700; color: #334155; margin-left: 6px;">(${test.code})</span>` : ""}
+          ${test.code ? `<span style="font-size: 9pt; font-family: 'Consolas', monospace; font-weight: 700; color: #334155; margin-left: 6px;">(${esc(test.code)})</span>` : ""}
         </div>
         <span style="font-size: 8pt; font-weight: 800; text-transform: uppercase; color: #334155;">
-          ${deptName || "Clinical Study"}
+          ${esc(deptName) || "Clinical Study"}
         </span>
       </div>
 
@@ -1063,13 +1091,13 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
           ${clinicalIndication ? `
             <div style="margin-bottom: 3px;">
               <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Clinical Indication:</b>
-              <span style="margin-left: 4px; color: #000;">${clinicalIndication}</span>
+              <span style="margin-left: 4px; color: #000;">${esc(clinicalIndication)}</span>
             </div>
           ` : ""}
           ${(protocolTechnique || test.sample_type) ? `
             <div>
               <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Specimen / Technique:</b>
-              <span style="margin-left: 4px; color: #000;">${protocolTechnique || test.sample_type}</span>
+              <span style="margin-left: 4px; color: #000;">${esc(protocolTechnique || test.sample_type)}</span>
             </div>
           ` : ""}
         </div>
@@ -1080,7 +1108,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
           Findings & Observations:
         </b>
         <div style="white-space: pre-wrap; font-size: 9.5pt; line-height: 1.6; color: #000; font-weight: 400; text-align: justify;">
-          ${findingsBody || rawText}
+          ${esc(findingsBody || rawText)}
         </div>
       </div>
 
@@ -1090,7 +1118,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
             Diagnostic Impression / Conclusion:
           </b>
           <div style="font-size: 9.5pt; line-height: 1.5; color: #000; font-weight: 800;">
-            ${diagnosticImpression}
+            ${esc(diagnosticImpression)}
           </div>
         </div>
       ` : ""}
@@ -1102,8 +1130,8 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
 export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", deptName = "", patient = {}) {
   let descriptiveSheets = "";
 
-  const isHematology = (deptId || "").includes("HEM") || 
-                       (deptName || "").toLowerCase().includes("hematology") || 
+  const isHematology = (deptId || "").includes("HEM") ||
+                       (deptName || "").toLowerCase().includes("hematology") ||
                        (tests || []).some(t => (t.name || "").toLowerCase().includes("blood count") || (t.code || "").toUpperCase().includes("CBC"));
 
   const isUrine = (deptId || "").includes("PAT") &&
@@ -1187,7 +1215,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
       tableRows += `
         <tr style=" border-bottom: 1px solid #000000; page-break-inside: avoid;">
           <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 9pt; color: #000000; text-transform: uppercase;">
-            ${test.name} ${test.code ? `(${test.code})` : ""}
+            ${esc(test.name)} ${test.code ? `(${esc(test.code)})` : ""}
             <span style="font-size: 7pt; font-weight: 600; color: #475569; margin-left: 6px; text-transform: none;">[Multi-Parameter Profile]</span>
           </td>
         </tr>
@@ -1196,13 +1224,13 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     params.forEach((p, idx) => {
       const paramKey = p.id || `P-${test.id}-${idx + 1}`;
-      const rawVal = results?.[p.id]?.value ?? 
-                     results?.[paramKey]?.value ?? 
-                     results?.[p.name]?.value ?? 
-                     results?.[p.id] ?? 
-                     results?.[paramKey] ?? 
-                     results?.[p.name] ?? 
-                     results?.[test.id]?.value ?? 
+      const rawVal = results?.[p.id]?.value ??
+                     results?.[paramKey]?.value ??
+                     results?.[p.name]?.value ??
+                     results?.[p.id] ??
+                     results?.[paramKey] ??
+                     results?.[p.name] ??
+                     results?.[test.id]?.value ??
                      results?.[test.id];
 
       let val = "—";
@@ -1218,19 +1246,20 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         : (p.name || test.name || "Parameter");
 
       let refRange = "Normal";
-      const hasRefText = (p.reference_text || p.ref_text) && 
-                         String(p.reference_text || p.ref_text).trim() !== "" && 
+      const hasRefText = (p.reference_text || p.ref_text) &&
+                         String(p.reference_text || p.ref_text).trim() !== "" &&
                          String(p.reference_text || p.ref_text).toLowerCase() !== "undefined";
 
       if (hasRefText) {
-        refRange = String(p.reference_text || p.ref_text).trim().replace(/\n/g, "<br>");
+        // ESCAPE FIRST, then restore newlines as <br>.
+        refRange = escWithBreaks(String(p.reference_text || p.ref_text).trim());
       } else if (p.param_type === "numeric") {
         const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "" && String(p.min_range) !== "undefined";
         const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "" && String(p.max_range) !== "undefined";
 
-        if (hasMin && hasMax) refRange = `${p.min_range} – ${p.max_range}`;
-        else if (hasMin) refRange = `≥ ${p.min_range}`;
-        else if (hasMax) refRange = `≤ ${p.max_range}`;
+        if (hasMin && hasMax) refRange = esc(`${p.min_range} – ${p.max_range}`);
+        else if (hasMin) refRange = esc(`≥ ${p.min_range}`);
+        else if (hasMax) refRange = esc(`≤ ${p.max_range}`);
         else refRange = "Normal";
       } else if (p.param_type === "qualitative") {
         refRange = "Negative";
@@ -1239,12 +1268,12 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
       tableRows += `
         <tr style="border-bottom: 1px dotted #e2e8f0; page-break-inside: avoid;">
           <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
-            ${displayName}
+            ${esc(displayName)}
           </td>
           <td style="padding: 3.8px 4px; vertical-align: top;">
             ${formatResultCell(val, p.min_range, p.max_range, "", p.param_type)}
           </td>
-          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; vertical-align: top;">${p.unit || test.unit || "—"}</td>
+          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; vertical-align: top;">${esc(p.unit || test.unit) || "—"}</td>
           <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top; white-space: pre-line;">${refRange}</td>
         </tr>
       `;
@@ -1283,8 +1312,6 @@ export function renderDepartmentReportHtml({
 }) {
   if (!activeOrder || !group) return "";
 
-  // ---- Layout-derived pad reserves (designer px → mm) ----
-  // The designer canvas is A4 at 96 DPI: 96px = 25.4mm
   const PX_TO_MM = 25.4 / 96;
   const layout = getReportLayout(labSettings);
   const headerHeightPx = (layout?.header?.height) || 132;
@@ -1293,7 +1320,6 @@ export function renderDepartmentReportHtml({
   const footerHeightMm = (footerHeightPx * PX_TO_MM).toFixed(1);
   const contentHeightMm = (297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm)).toFixed(1);
 
-  // Prefer the sibling vial that actually owns this department
   const owner = group.ownerOrder || activeOrder;
   const orderId = owner.orderId || owner.id || activeOrder.orderId || activeOrder.id || "";
   const isVerified =
@@ -1313,7 +1339,6 @@ export function renderDepartmentReportHtml({
 
   const isDescriptive = isDescriptiveInvestigation(group.tests?.[0], group.dept?.id, group.dept?.name);
 
-  // Barcode: prefer the owner's, fall back to the department lookup
   const deptBarcode =
     group.ownerBarcode ||
     getDepartmentVialBarcode(owner, group.dept?.id, group.tests) ||
@@ -1341,17 +1366,16 @@ export function renderDepartmentReportHtml({
 
   const renderSignatureHtml = (sigData, fallbackName) => {
     if (!isVerified) return `<div style="height: 32px;"></div>`;
-    if (sigData && sigData.startsWith("data:image")) {
-      return `<img src="${sigData}" style="height: 32px; max-width: 135px; object-fit: contain; margin: 0 auto 2px auto; display: block;" />`;
+    if (sigData && String(sigData).startsWith("data:image")) {
+      return `<img src="${esc(sigData)}" style="height: 32px; max-width: 135px; object-fit: contain; margin: 0 auto 2px auto; display: block;" />`;
     }
-    return `<div style="font-family: 'Lora', Georgia, serif; font-size: 10pt; font-weight: 700; color: #000000; height: 30px; line-height: 30px; text-align: center;">${sigData || fallbackName}</div>`;
+    return `<div style="font-family: 'Lora', Georgia, serif; font-size: 10pt; font-weight: 700; color: #000000; height: 30px; line-height: 30px; text-align: center;">${esc(sigData || fallbackName)}</div>`;
   };
 
   const rawDeptName = group.dept?.name || "Clinical Pathology";
   const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
   const deptId = group.dept?.id || "";
 
-  // RESOLVE SPECIFIC REMARK FOR THIS DEPARTMENT REPORT
   let resolvedDeptRemark = "";
   const remarkSources = [owner, activeOrder].filter(Boolean);
 
@@ -1389,23 +1413,23 @@ export function renderDepartmentReportHtml({
   }
 
   const sixthSlotDemographics = isDescriptive
-    ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${cleanDeptName}</b>`
-    : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${deptBarcode}</b>`;
+    ? `<span style="font-weight: 700;">Modality:</span> <b style="font-weight: 800;">${esc(cleanDeptName)}</b>`
+    : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${esc(deptBarcode)}</b>`;
 
   const signaturesBlockHtml = isVerified ? `
     <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
       <div style="text-align: center; width: 230px;">
         ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
         <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
-          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${techUser.full_name}</div>
-          <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${techUser.designation}</div>
+          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${esc(techUser.full_name)}</div>
+          <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${esc(techUser.designation)}</div>
         </div>
       </div>
       <div style="text-align: center; width: 230px;">
         ${renderSignatureHtml(verifierUser.signature_data, verifierUser.full_name)}
         <div style="border-top: 1.5px solid #000000; padding-top: 2px;">
-          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${verifierUser.full_name}</div>
-          <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${verifierUser.designation}</div>
+          <div style="font-weight: 700; font-size: 9pt; color: #000000;">${esc(verifierUser.full_name)}</div>
+          <div style="font-size: 7.5pt; font-weight: 700; color: #000000; margin-top: 1px;">${esc(verifierUser.designation)}</div>
         </div>
       </div>
     </div>
@@ -1430,7 +1454,7 @@ export function renderDepartmentReportHtml({
       headerHtml = `
         <div style="height: ${headerHeightMm}mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
           <div>
-            <span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${(labSettings?.lab_name || "AL FATTAH DIAGNOSTIC").toUpperCase()}</span>
+            <span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${esc((labSettings?.lab_name || "AL FATTAH DIAGNOSTIC")).toUpperCase()}</span>
             <p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: ${headerHeightMm}mm Reserved Margin ]</p>
           </div>
           <span style="background: #e2e8f0; color: #334155; font-weight: 800; font-size: 7pt; padding: 2px 6px; border-radius: 4px;">PAD MODE</span>
@@ -1454,7 +1478,6 @@ export function renderDepartmentReportHtml({
     footerHtml = buildReportFooterHtml(labSettings);
   }
 
-  // Formatters for Bill / Delivery time (12-hour clock)
   const fmtTime = (dateStr) => {
     if (!dateStr) return "—";
     try {
@@ -1474,19 +1497,19 @@ export function renderDepartmentReportHtml({
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9pt; font-family: 'Lora', Georgia, serif;">
           <tr>
-            <td style="padding: 2px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 9pt; font-weight: 700;">${activeOrder.patient?.name || "Patient"}</b></td>
-            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${activeOrder.patient?.age || "—"} Y / ${activeOrder.patient?.gender || "—"}</b></td>
-            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-weight: 700;">${activeOrder.patient?.id || "N/A"}</b></td>
+            <td style="padding: 2px 0; width: 40%;"><span style="font-weight: 700;">Patient Name:</span> <b style="font-size: 9pt; font-weight: 700;">${esc(activeOrder.patient?.name) || "Patient"}</b></td>
+            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Age / Sex:</span> <b style="font-weight: 700;">${esc(activeOrder.patient?.age) || "—"} Y / ${esc(activeOrder.patient?.gender) || "—"}</b></td>
+            <td style="padding: 2px 0; width: 30%;"><span style="font-weight: 700;">Patient ID:</span> <b style="font-weight: 700;">${esc(activeOrder.patient?.id) || "N/A"}</b></td>
           </tr>
           <tr>
-            <td style="padding: 2px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600; font-size: 8pt;">${doctorName}</b></td>
-            <td style="padding: 2px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${activeOrder.date || new Date().toISOString().slice(0, 10)}</b></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Ref. Doctor:</span> <b style="font-weight: 600; font-size: 8pt;">${esc(doctorName)}</b></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Date:</span> <b style="font-weight: 800;">${esc(activeOrder.date) || new Date().toISOString().slice(0, 10)}</b></td>
             <td style="padding: 2px 0;">${sixthSlotDemographics}</td>
           </tr>
           <tr>
             <td style="padding: 2px 0;"></td>
-            <td style="padding: 2px 0;"><span style="font-weight: 700;">Bill Time:</span> <b style="font-weight: 700;">${billTime}</b></td>
-            <td style="padding: 2px 0;"><span style="font-weight: 700;">Delivery Time:</span> <b style="font-weight: 700;">${deliveryTime}</b></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Bill Time:</span> <b style="font-weight: 700;">${esc(billTime)}</b></td>
+            <td style="padding: 2px 0;"><span style="font-weight: 700;">Delivery Time:</span> <b style="font-weight: 700;">${esc(deliveryTime)}</b></td>
           </tr>
         </table>
         <div style="width: 58px; text-align: center; margin-left: 8px; flex-shrink: 0;">
@@ -1510,7 +1533,7 @@ export function renderDepartmentReportHtml({
   const remarksHtml = isDescriptive ? "" : `
     <div style="margin-top: 25px; margin-left: 8mm; margin-right: 8mm; font-size: 9pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
-      <span style="font-weight: 700; margin-left: 6px; color: #000000; font-style: italic;">${resolvedDeptRemark}</span>
+      <span style="font-weight: 700; margin-left: 6px; color: #000000; font-style: italic;">${esc(resolvedDeptRemark)}</span>
     </div>
   `;
 
@@ -1527,7 +1550,7 @@ export function renderDepartmentReportHtml({
         ${patientDetailsHtml(1, 1)}
         <div style="text-align: center; margin: 5px 0 2px 0; page-break-inside: avoid;">
           <span style="font-size: 10pt; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; color: #000000;">
-            DEPARTMENT OF ${cleanDeptName}
+            DEPARTMENT OF ${esc(cleanDeptName)}
           </span>
         </div>
         ${fullResultsHtml}
@@ -1554,9 +1577,6 @@ export function printDepartmentA4Report(
   if (!activeOrder) return;
   if (onPrintedCallback) onPrintedCallback();
 
-  // For "ALL" requests, only include sheets that are actually verified.
-  // This lets receptionists print the verified departments even when other
-  // departments are still pending.
   const verifiableGroups = (departmentGroupedReports || []).filter((g) => {
     const owner = g.ownerOrder;
     if (!owner) return false;
@@ -1571,11 +1591,11 @@ export function printDepartmentA4Report(
     ? verifiableGroups
     : verifiableGroups.filter((g) => g.dept?.id === targetDeptId);
 
-      if (deptGroupsToPrint.length === 0) {
+  if (deptGroupsToPrint.length === 0) {
     alert("No verified reports to print yet.");
     return;
   }
-// Pad-mode reserves follow the layout designer's header/footer heights.
+
   const PX_TO_MM = 25.4 / 96;
   const _layout = getReportLayout(labSettings);
   const _headerPx = (_layout?.header?.height) || 132;
@@ -1610,7 +1630,7 @@ export function printDepartmentA4Report(
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
-        <title>Report - ${activeOrder.barcode || activeOrder.orderId}</title>
+        <title>Report - ${esc(activeOrder.barcode || activeOrder.orderId)}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600;700;800;900&display=swap');
           @page {
@@ -1647,6 +1667,7 @@ export function printDepartmentA4Report(
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 350);
 }
+
 // ============================================================
 // DIRECT PDF DOWNLOAD — renders the report HTML to a hidden DOM
 // container, then uses html2pdf (jsPDF + html2canvas) to produce
@@ -1673,7 +1694,6 @@ export async function downloadDepartmentReportPdf({
 
   if (onProgress) onProgress("Preparing report…");
 
-  // Build one A4-sized page per department sheet
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "0";
@@ -1704,10 +1724,8 @@ export async function downloadDepartmentReportPdf({
 
   document.body.appendChild(container);
 
-  // Give the browser time to lay out fonts / SVG / images
   await new Promise((r) => setTimeout(r, 400));
 
-  // Wait for the Google font (Lora) to be ready, if it's still loading
   try {
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
@@ -1751,6 +1769,7 @@ export async function downloadDepartmentReportPdf({
     if (onProgress) onProgress(null);
   }
 }
+
 // 10. A5 MONEY RECEIPT ENGINE (SCANNABLE ORDER BARCODE)
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
@@ -1762,7 +1781,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     billing: { subTotal: 0, discount: 0, netPayable: 0, paid: 0, due: 0 }
   };
 
-  const curLabName = (labSettings?.lab_name || labSettings?.labName || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER").toUpperCase();
+  const curLabName = String(labSettings?.lab_name || labSettings?.labName || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER").toUpperCase();
   const curTagline = labSettings?.tagline || "With Al-Fattah on the Journey to Wellness";
   const curAddress = labSettings?.address || "Solmaid Purbo Para, Vatara, Dhaka 1212";
   const curPhone = labSettings?.phone || "01723854472, 01624787444";
@@ -1772,10 +1791,10 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const orderId = activeOrd.orderId || activeOrd.id || "ORD-001";
   const primaryBarcode = String(activeOrd.barcode || "2026000001").split(/[\s,]+/)[0];
 
-  const doctorName = 
-    activeOrd.doctor || 
-    activeOrd.patient?.doctor || 
-    (activeOrd.patient?.address && activeOrd.patient.address.startsWith("Ref: ") ? activeOrd.patient.address.replace("Ref: ", "") : null) || 
+  const doctorName =
+    activeOrd.doctor ||
+    activeOrd.patient?.doctor ||
+    (activeOrd.patient?.address && activeOrd.patient.address.startsWith("Ref: ") ? activeOrd.patient.address.replace("Ref: ", "") : null) ||
     "Self";
 
   const trackingUrl = `${window.location.origin}/?track=${encodeURIComponent(orderId)}&bc=${encodeURIComponent(primaryBarcode)}`;
@@ -1825,9 +1844,9 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
 
     const itemsHtml = chunk.map((t, idx) => `
       <tr style="border-bottom: 1px dashed #cbd5e1;">
-        <td style="padding: 2.2px 4px; font-size: 7.5pt;">${startIndex + idx + 1}. ${t.name}</td>
-        <td style="padding: 2.2px 4px; color: #475569; font-size: 7pt;">${t.sample_type || "Serum"}</td>
-        <td style="padding: 2.2px 4px; text-align: right; font-weight: bold; font-size: 7.5pt;">৳ ${t.price}</td>
+        <td style="padding: 2.2px 4px; font-size: 7.5pt;">${startIndex + idx + 1}. ${esc(t.name)}</td>
+        <td style="padding: 2.2px 4px; color: #475569; font-size: 7pt;">${esc(t.sample_type) || "Serum"}</td>
+        <td style="padding: 2.2px 4px; text-align: right; font-weight: bold; font-size: 7.5pt;">৳ ${esc(t.price)}</td>
       </tr>
     `).join("");
 
@@ -1836,9 +1855,9 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         <div>
           <div style="border-bottom: 2px dashed #000; padding-bottom: 4px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;">
             <div>
-              <h1 style="margin: 0; font-size: 11pt; font-weight: 900; letter-spacing: .5px;">${curLabName}</h1>
-              <p style="margin: 1px 0; font-size: 7pt; color: #334155;">${curTagline}</p>
-              <p style="margin: 0; font-size: 6.5pt; color: #475569;">${curAddress} • Tel: ${curPhone}</p>
+              <h1 style="margin: 0; font-size: 11pt; font-weight: 900; letter-spacing: .5px;">${esc(curLabName)}</h1>
+              <p style="margin: 1px 0; font-size: 7pt; color: #334155;">${esc(curTagline)}</p>
+              <p style="margin: 0; font-size: 6.5pt; color: #475569;">${esc(curAddress)} • Tel: ${esc(curPhone)}</p>
             </div>
             <div style="text-align: right;">
               <div style="border: 1.5px solid #000; padding: 2px 5px; font-weight: 900; font-size: 5pt; text-transform: uppercase;">MONEY RECEIPT</div>
@@ -1849,18 +1868,18 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
           <div style="border: 1px dashed #000; padding: 4px 6px; margin-bottom: 5px; font-size: 7.5pt; background: #fafafa;">
             <table style="width: 100%; border-collapse: collapse; font-family: inherit;">
               <tr>
-                <td style="padding: 1px 0;"><b>RECEIPT NO:</b> ${activeOrd.receiptNo || "RCP-0914-001"}</td>
-                <td style="padding: 1px 0; text-align: right;"><b>DATE:</b> ${activeOrd.date || new Date().toISOString().slice(0, 10)}</td>
+                <td style="padding: 1px 0;"><b>RECEIPT NO:</b> ${esc(activeOrd.receiptNo) || "RCP-0914-001"}</td>
+                <td style="padding: 1px 0; text-align: right;"><b>DATE:</b> ${esc(activeOrd.date) || new Date().toISOString().slice(0, 10)}</td>
               </tr>
               <tr>
-                <td style="padding: 1px 0;"><b>PATIENT ID:</b> <span style="font-weight: bold;">${patientId}</span></td>
-                <td style="padding: 1px 0; text-align: right;"><b>PHONE:</b> ${activeOrd.patient?.phone || "N/A"}</td>
+                <td style="padding: 1px 0;"><b>PATIENT ID:</b> <span style="font-weight: bold;">${esc(patientId)}</span></td>
+                <td style="padding: 1px 0; text-align: right;"><b>PHONE:</b> ${esc(activeOrd.patient?.phone) || "N/A"}</td>
               </tr>
               <tr>
-                <td colspan="2" style="padding: 1px 0;"><b>PATIENT:</b> ${activeOrd.patient?.name || "Patient"} (${activeOrd.patient?.age || ""}Y / ${activeOrd.patient?.gender || ""})</td>
+                <td colspan="2" style="padding: 1px 0;"><b>PATIENT:</b> ${esc(activeOrd.patient?.name) || "Patient"} (${esc(activeOrd.patient?.age) || ""}Y / ${esc(activeOrd.patient?.gender) || ""})</td>
               </tr>
               <tr>
-                <td colspan="2" style="padding: 1px 0; border-top: 1px dashed #ccc; margin-top: 1px;"><b>REF. BY:</b> ${doctorName}</td>
+                <td colspan="2" style="padding: 1px 0; border-top: 1px dashed #ccc; margin-top: 1px;"><b>REF. BY:</b> ${esc(doctorName)}</td>
               </tr>
             </table>
           </div>
@@ -1879,14 +1898,14 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
           ${isLast ? `
             <div style="display: flex; justify-content: flex-end; margin-top: 4px; padding-top: 2px;">
               <table style="width: 210px; font-size: 7.5pt; border-collapse: collapse; font-family: inherit;">
-                <tr><td>SUBTOTAL:</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.subTotal || 0}</td></tr>
-                <tr><td>DISCOUNT (${activeOrd.billing?.discount || 0}%):</td><td style="text-align: right;">- ৳ ${(((activeOrd.billing?.subTotal || 0) * (activeOrd.billing?.discount || 0)) / 100).toFixed(0)}</td></tr>
+                <tr><td>SUBTOTAL:</td><td style="text-align: right; font-weight: bold;">৳ ${esc(activeOrd.billing?.subTotal) || 0}</td></tr>
+                <tr><td>DISCOUNT (${esc(activeOrd.billing?.discount) || 0}%):</td><td style="text-align: right;">- ৳ ${(((activeOrd.billing?.subTotal || 0) * (activeOrd.billing?.discount || 0)) / 100).toFixed(0)}</td></tr>
                 <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 9pt;">
-                  <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${activeOrd.billing?.netPayable || 0}</td>
+                  <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.netPayable) || 0}</td>
                 </tr>
-                <tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing?.paid || 0}</td></tr>
+                <tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${esc(activeOrd.billing?.paid) || 0}</td></tr>
                 <tr style="font-weight: bold; color: ${activeOrd.billing?.due > 0 ? '#b91c1c' : '#000'};">
-                  <td>DUE BALANCE:</td><td style="text-align: right;">৳ ${activeOrd.billing?.due || 0}</td>
+                  <td>DUE BALANCE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.due) || 0}</td>
                 </tr>
               </table>
             </div>
@@ -1900,28 +1919,25 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
         <div style="margin-top: 6px;">
           <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: flex-end; gap: 4px;">
 
-            <!-- Patient UHID barcode -->
             <div style="text-align: center; width: 150px; flex-shrink: 0;">
               ${generateSvgBarcodeHtml(patientId, 26)}
               <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900; letter-spacing: 0.5px; font-family: 'Consolas', monospace;">
-                ${patientId}
+                ${esc(patientId)}
               </p>
             </div>
 
-            <!-- Live report QR -->
             <div style="text-align: center; width: 70px; flex-shrink: 0;">
               ${scannableTrackingQrSvg}
               <span style="font-size: 4.5pt; font-weight: bold; display: block; margin-top: 1px;">Scan for Live Report</span>
             </div>
 
-            <!-- Cashier signature line -->
             <div style="text-align: center; width: 120px; flex-shrink: 0; align-self: center;">
               <div style="border-bottom: 1px solid #000; height: 14px; margin-bottom: 2px;"></div>
               <span style="font-size: 6pt; font-weight: bold; letter-spacing: 0.3px;">AUTHORIZED CASHIER</span>
             </div>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px; font-size: 5.5pt; color: #475569;">
-            <span>${curReceiptFooter}</span>
+            <span>${esc(curReceiptFooter)}</span>
             ${totalPages > 1 ? `<span>Page ${pageNum} of ${totalPages}</span>` : ''}
           </div>
         </div>
@@ -1945,7 +1961,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
-        <title>Receipt - ${activeOrd.receiptNo}</title>
+        <title>Receipt - ${esc(activeOrd.receiptNo)}</title>
         <style>
           @page { size: 148mm 210mm; margin: 6mm 8mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -1988,7 +2004,7 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
-        <title>Vial - ${exactVialBarcode}</title>
+        <title>Vial - ${esc(exactVialBarcode)}</title>
         <style>
           @page { size: 38mm 25mm; margin: 0mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; shape-rendering: crispEdges !important; }
@@ -2006,16 +2022,16 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
       <body>
         <div class="sticker-container">
           <div class="header">
-            <span style="max-width: 22mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${vial.patientName || "Patient"}</span>
-            <span style="font-family: 'Consolas', monospace;">${vial.patientId || ""}</span>
+            <span style="max-width: 22mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(vial.patientName) || "Patient"}</span>
+            <span style="font-family: 'Consolas', monospace;">${esc(vial.patientId) || ""}</span>
           </div>
           <div class="barcode-area">
             ${svgBarcode}
-            <p class="barcode-number">${exactVialBarcode}</p>
+            <p class="barcode-number">${esc(exactVialBarcode)}</p>
           </div>
           <div class="footer">
-            <span class="tube-badge">${(vial.tubeColor || "").split(" ")[0]}</span>
-            <span class="test-names">${(vial.testNames || []).join(", ")}</span>
+            <span class="tube-badge">${esc((vial.tubeColor || "").split(" ")[0])}</span>
+            <span class="test-names">${esc((vial.testNames || []).join(", "))}</span>
           </div>
         </div>
       </body>

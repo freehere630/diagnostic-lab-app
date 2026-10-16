@@ -135,6 +135,11 @@ export default function App() {
   const lastActiveOrderRef = useRef(null);
   const resultWriteTimers = useRef({});
   const recentlyWrittenRef = useRef({});
+  // Monotonic counter. Every call to fetchPaginatedOrders() takes the next
+  // number. When an older fetch resolves after a newer one has started, its
+  // `mySeq` no longer equals the ref, and it drops its result instead of
+  // clobbering fresh data.
+  const fetchSeqRef = useRef(0);
 
   // ============================================================
   // 3. MEMOS — derived state
@@ -365,14 +370,19 @@ export default function App() {
     const onFocus = () => {
       fetchPaginatedOrders(true);
     };
+    // Same handler reused for visibilitychange so the cleanup below can
+    // actually remove it. Previously this was an anonymous function and
+    // leaked a listener on every re-run of the effect.
+    const onVisibility = () => {
+      if (!document.hidden) onFocus();
+    };
 
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) onFocus();
-    });
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
@@ -397,6 +407,11 @@ export default function App() {
   // --- Main paginated orders fetcher ---
   const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
+
+    // Take a ticket. Any fetch that started earlier and resolves later
+    // will see that its ticket is stale and bail out before touching state.
+    const mySeq = ++fetchSeqRef.current;
+
     if (!silent) setIsLoading(true);
     // Clear stale rows so a failed fetch doesn't leave yesterday's data on screen
     if (!silent) setOrders([]);
@@ -408,6 +423,10 @@ export default function App() {
         dateTo: dateRange.to,
         searchQuery: dashboardSearch,
       });
+
+      // A newer fetch superseded us while we were awaiting. Drop this
+      // result entirely — do not touch orders, pages, or loading state.
+      if (mySeq !== fetchSeqRef.current) return;
 
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
 
@@ -604,9 +623,15 @@ export default function App() {
         setSelectedOrderId(formatted[0].orderId);
       }
     } catch (err) {
-      console.error("Pagination load error:", err);
+      // Only log if we're still the current fetch — a superseded fetch's
+      // error is noise.
+      if (mySeq === fetchSeqRef.current) {
+        console.error("Pagination load error:", err);
+      }
     } finally {
-      if (!silent) setIsLoading(false);
+      // Only clear the loading flag if we still own the slot. If a newer
+      // fetch is in flight, it will clear it when it finishes.
+      if (!silent && mySeq === fetchSeqRef.current) setIsLoading(false);
     }
   };
 

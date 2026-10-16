@@ -37,8 +37,15 @@ export async function fetchProfileForUser(userId) {
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
-  if (error || !data) return null;
-  return data;
+  if (error) {
+    // Surface RLS / policy problems. Previously this error was
+    // swallowed and the login screen showed a misleading
+    // "No staff profile linked to this account" message even when
+    // the profile existed but wasn't readable.
+    console.error("[fetchProfileForUser] query failed:", error.message, error);
+    return null;
+  }
+  return data || null;
 }
 
 export function mapUser(authUser, profile) {

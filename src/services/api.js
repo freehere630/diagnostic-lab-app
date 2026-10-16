@@ -6,6 +6,20 @@ const toLocalDateStr = (d = new Date()) => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+
+// ─────────────────────────────────────────────────────────────
+// PostgREST treats , . : ( ) [ ] " ' % * and backslash as control
+// characters inside .or() / .ilike() filters. Strip them and clamp
+// the length so a stray comma from a patient name can't break the
+// query, and a 10 KB paste can't flood the request line.
+// ─────────────────────────────────────────────────────────────
+export const sanitizeSearchInput = (s) =>
+  String(s ?? "")
+    .replace(/[,.:()\[\]"'\\%*]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64);
+
 // ==========================================
 // 1. MASTER DEPARTMENTS (Includes DEP-IMM)
 // ==========================================
@@ -148,7 +162,7 @@ export const MASTER_SEMEN_PARAMETERS = [
 ];
 
 export const DESCRIPTIVE_STANDARD_TEMPLATES = {
-  radiologyChest: 
+  radiologyChest:
 `CLINICAL INDICATION: Routine health screening / Respiratory evaluation.
 TECHNIQUE: Standard digital chest radiograph (P/A projection).
 
@@ -163,7 +177,7 @@ FINDINGS:
 IMPRESSION:
 Normal chest radiograph (No acute cardiopulmonary abnormality detected).`,
 
-  usgAbdomen: 
+  usgAbdomen:
 `CLINICAL INDICATION: Abdominal pain / General health assessment.
 TECHNIQUE: Real-time high-resolution abdominal sonography with 3.5 MHz curvilinear probe.
 
@@ -181,7 +195,7 @@ FINDINGS:
 IMPRESSION:
 Normal ultrasonographic study of whole abdomen.`,
 
-  histopathology: 
+  histopathology:
 `SPECIMEN: Punch Biopsy / Excisional Tissue Specimen.
 CLINICAL HISTORY & SITE: Suspected lesion / Routine biopsy evaluation.
 
@@ -194,7 +208,7 @@ Sections show tissue fragments lined by stratified squamous epithelium showing u
 DIAGNOSIS / IMPRESSION:
 Benign fibro-epithelial tissue fragments. Negative for malignancy.`,
 
-  fnacCytology: 
+  fnacCytology:
 `SPECIMEN / SITE: Fine Needle Aspiration Cytology (FNAC) of palpable swelling.
 CLINICAL HISTORY: Palpable painless nodule, duration 3 months.
 
@@ -207,7 +221,7 @@ Smears are cellular and show cohesive clusters and sheets of benign epithelial /
 CYTOLOGICAL OPINION:
 Features consistent with benign nodule / hyperplasia. No evidence of malignant cytology.`,
 
-  ecg12Lead: 
+  ecg12Lead:
 `CLINICAL INDICATION: Chest discomfort / Pre-operative evaluation.
 TECHNIQUE: Standard 12-lead resting electrocardiogram (25 mm/sec, 10 mm/mV).
 
@@ -252,9 +266,9 @@ export async function getMasterData() {
       }
     } catch (e) {}
 
-    return { 
-      departments: finalDepts, 
-      tests: currentTests || [] 
+    return {
+      departments: finalDepts,
+      tests: currentTests || []
     };
   } catch (err) {
     console.error("Master data fetch error:", err);
@@ -363,7 +377,7 @@ export async function createOrUpdateDoctor(docData) {
   try { await supabase.from("doctors").upsert(row); } catch (e) {}
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_doctors") || "[]");
-    const updated = [row, ...local.filter((d) => d.id !== docId)];
+    const updated = [row, ...local.filter((d) => d.id !== docId)].slice(0, 500);
     localStorage.setItem("apex_local_doctors", JSON.stringify(updated));
   } catch (e) {}
 
@@ -383,8 +397,9 @@ export async function deleteDoctor(docId) {
 // ==========================================
 export async function searchPatients(query) {
   if (!query || query.trim().length < 2) return [];
-  const cleanQ = query.trim().toLowerCase();
-  
+  const cleanQ = sanitizeSearchInput(query).toLowerCase();
+  if (cleanQ.length < 2) return [];
+
   try {
     const { data, error } = await supabase
       .from("patients")
@@ -396,7 +411,7 @@ export async function searchPatients(query) {
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    return local.filter((p) => 
+    return local.filter((p) =>
       (p.id && p.id.toLowerCase().includes(cleanQ)) ||
       (p.phone && p.phone.includes(cleanQ)) ||
       (p.name && p.name.toLowerCase().includes(cleanQ))
@@ -438,7 +453,7 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
       patient:patients(*),
       order_tests(*, test:tests(*, test_parameters(*))),
       results(*)
-    `, { count: "exact" });
+    `, { count: "estimated" });
 
     if (dateFrom && dateTo) {
       if (dateFrom === dateTo) query = query.eq("order_date", dateFrom);
@@ -446,8 +461,9 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     } else if (dateFrom) query = query.gte("order_date", dateFrom);
     else if (dateTo) query = query.lte("order_date", dateTo);
 
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.trim();
+    const safeQ = sanitizeSearchInput(searchQuery);
+    if (safeQ) {
+      const q = safeQ;
       const cleanDigits = q.replace(/\D/g, "");
 
       let matchedOrderIds = [];
@@ -489,12 +505,13 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     if (error) {
       console.warn("[getOrdersPaginated] Primary query error:", error.message);
     } else if (data) {
+      const primaryCount = (count ?? data.length) || 0;
       return {
         orders: data,
-        totalCount: count || 0,
+        totalCount: primaryCount,
         page,
         pageSize,
-        totalPages: Math.ceil((count || 0) / pageSize),
+        totalPages: Math.ceil(primaryCount / pageSize),
       };
     }
   } catch (err) {
@@ -502,7 +519,7 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
   }
 
   try {
-    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "exact" });
+    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "estimated" });
     if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
     if (dateTo) fallback = fallback.lte("order_date", dateTo);
 
@@ -515,12 +532,13 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
       console.warn("[getOrdersPaginated] Fallback query error:", fallbackError.message);
     }
 
+    const fallbackCount = (count ?? (data?.length || 0)) || 0;
     return {
       orders: data || [],
-      totalCount: count || 0,
+      totalCount: fallbackCount,
       page,
       pageSize,
-      totalPages: Math.ceil((count || 0) / pageSize),
+      totalPages: Math.ceil(fallbackCount / pageSize),
     };
   } catch (e) {
     console.warn("[getOrdersPaginated] Fallback threw:", e.message);
@@ -565,11 +583,15 @@ export async function getAllOrders() {
 }
 
 // ==========================================
-// 7. ORDER CREATION: INDIVIDUAL VIAL REGISTRATION
+// 7. ORDER CREATION: ATOMIC VIAL REGISTRATION
 // ==========================================
+// Every vial that belongs to one receipt is inserted in a single
+// Postgres transaction via create_vial_orders(). If any row fails,
+// the whole batch rolls back — no orphaned orders, no partial
+// receipts, no barcode numbers consumed but unused.
 export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
-  const patientId = patientData.id && patientData.id.trim() 
-    ? patientData.id.trim() 
+  const patientId = patientData.id && patientData.id.trim()
+    ? patientData.id.trim()
     : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
   const selectedTests = (testCatalog || []).filter((t) => testIds.includes(t.id)).map(t => {
@@ -624,11 +646,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     const key = `${deptCode}-${tubeShort}`;
 
     if (!departmentVials.some((v) => v.key === key)) {
-      departmentVials.push({ 
-        key, 
-        deptId: deptId, 
-        deptCode: deptCode, 
-        tubeColor: tubeColor, 
+      departmentVials.push({
+        key,
+        deptId: deptId,
+        deptCode: deptCode,
+        tubeColor: tubeColor,
         testIds: [t.id, t.code, t.name],
         testNames: [t.code || t.name]
       });
@@ -650,7 +672,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   // Tag every test with its exact vial barcode
   selectedTests.forEach((t) => {
-    const matchedVial = departmentVials.find(v => 
+    const matchedVial = departmentVials.find(v =>
       v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)
     ) || departmentVials[0];
     t.vialBarcode = matchedVial.barcode;
@@ -692,7 +714,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const receiptNo = `RCP-${todayCompact}-${String(receiptSeq).padStart(4, "0")}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
-  // 1. Persist Patient
+  // 1. Persist Patient (idempotent — outside the vial transaction)
   const patientRow = {
     id: patientId,
     name: patientData.name,
@@ -701,7 +723,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     phone: patientData.phone || "N/A",
     address: `Ref: ${referringDoctor}`
   };
-  
+
   try {
     const { error: patErr } = await supabase.from("patients").upsert(patientRow);
     if (patErr) {
@@ -719,10 +741,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   try {
     const localPatients = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    localStorage.setItem("apex_local_patients", JSON.stringify([patientRow, ...localPatients.filter(p => p.id !== patientId)]));
+    const mergedPatients = [patientRow, ...localPatients.filter(p => p.id !== patientId)].slice(0, 1000);
+    localStorage.setItem("apex_local_patients", JSON.stringify(mergedPatients));
   } catch (e) {}
 
-  // Upsert test catalog definitions
+  // Upsert test catalog definitions (idempotent — outside the transaction)
   for (const t of selectedTests) {
     try {
       await supabase.from("tests").upsert({
@@ -747,30 +770,31 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
 
   // =========================================================================
-  // 2. REGISTER EACH VIAL AS ITS OWN INDEPENDENT ORDER IN THE DATABASE!
-  // This guarantees each vial barcode holds and returns ONLY its own tests!
+  // 2. BUILD ALL VIAL PAYLOADS IN MEMORY — ZERO DB CALLS IN THIS BLOCK
   // =========================================================================
+  const ordersPayload = [];
+  const orderTestsPayload = [];
+  const resultsMetadataPayload = [];
   const createdVialOrders = [];
 
   for (let i = 0; i < departmentVials.length; i++) {
     const v = departmentVials[i];
     const vialBarcode = v.barcode;
     const isMaster = (i === 0);
-
     const thisOrderId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}`;
 
     // Strictly filter tests that belong to THIS vial!
-    const testsForThisVial = selectedTests.filter(t => 
-      v.testIds.includes(t.id) || 
-      v.testIds.includes(t.code) || 
-      v.testNames.includes(t.name) || 
+    const testsForThisVial = selectedTests.filter(t =>
+      v.testIds.includes(t.id) ||
+      v.testIds.includes(t.code) ||
+      v.testNames.includes(t.name) ||
       v.testNames.includes(t.code)
     );
 
     const vialSubtotal = testsForThisVial.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
     const vialNet = vialSubtotal - (vialSubtotal * finalDiscountPercent) / 100;
 
-    let vialOrderRow = {
+    const vialOrderRow = {
       id: thisOrderId,
       patient_id: patientId,
       barcode: vialBarcode,
@@ -786,44 +810,41 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       qc_status: "Pending",
       is_locked: false
     };
+    ordersPayload.push(vialOrderRow);
 
-    let savedThisOrderId = thisOrderId;
-    const { error: insErr } = await supabase.from("orders").insert(vialOrderRow);
-    if (insErr) {
-      console.warn("Vial order insert notice:", insErr.message);
-      const safeId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}-${Date.now().toString().slice(-3)}`;
-      vialOrderRow.id = safeId;
-      await supabase.from("orders").upsert(vialOrderRow);
-      savedThisOrderId = safeId;
+    for (const t of testsForThisVial) {
+      orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
     }
 
-    // Attach ONLY this vial's tests in order_tests table!
-    const vialTestIds = testsForThisVial.map(t => t.id);
-    if (vialTestIds.length > 0) {
-      const orderTestRows = vialTestIds.map(tid => ({ order_id: savedThisOrderId, test_id: tid }));
-      try { await supabase.from("order_tests").insert(orderTestRows); } catch (e) {}
+    // Vial metadata goes through the results table under reserved
+    // parameter_id keys — SPECIMEN_VIALS, VIAL_DEPT_<bc>,
+    // VIAL_TESTS_<bc>, TEST_VIAL_<test_id>.
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: "SPECIMEN_VIALS",
+      result_value: JSON.stringify([v])
+    });
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: `VIAL_DEPT_${vialBarcode}`,
+      result_value: v.deptId
+    });
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: `VIAL_TESTS_${vialBarcode}`,
+      result_value: JSON.stringify(v.testNames)
+    });
+    for (const t of testsForThisVial) {
+      resultsMetadataPayload.push({
+        order_id: thisOrderId,
+        parameter_id: `TEST_VIAL_${t.id}`,
+        result_value: vialBarcode
+      });
     }
 
-    // Save vial mapping and specific parameters in results
-    try {
-      // Store ONLY this vial's own entry — sibling vials live on their
-      // own order rows. Previously the full departmentVials array was
-      // written here, which caused every order to appear to own every
-      // sibling vial's tests.
-      await saveTestResult(savedThisOrderId, "SPECIMEN_VIALS", JSON.stringify([v]));
-      await saveTestResult(savedThisOrderId, `VIAL_DEPT_${vialBarcode}`, v.deptId);
-      await saveTestResult(savedThisOrderId, `VIAL_TESTS_${vialBarcode}`, JSON.stringify(v.testNames));
-      for (const t of testsForThisVial) {
-        await saveTestResult(savedThisOrderId, `TEST_VIAL_${t.id}`, vialBarcode);
-      }
-    } catch (e) {
-      console.error("Vial metadata write failed:", e);
-    }
-
-    const completeVialOrder = {
+    createdVialOrders.push({
       ...vialOrderRow,
-      id: savedThisOrderId,
-      orderId: savedThisOrderId,
+      orderId: thisOrderId,
       date: todayDate,
       createdAt: nowIso,
       created_at: nowIso,
@@ -841,7 +862,6 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
         doctor: referringDoctor,
         address: `Ref: ${referringDoctor}`
       },
-      // ALWAYS scoped to this vial — never the full sibling set
       tests: testsForThisVial,
       vialTests: testsForThisVial,
       vials: [v],
@@ -859,16 +879,40 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
       verifierRemarks: "",
       dept_remarks: {},
       deptRemarks: {}
-    };
-
-    createdVialOrders.push(completeVialOrder);
+    });
   }
 
-  // Update local storage with all registered vial orders
+  // =========================================================================
+  // 3. ONE ROUND-TRIP. ONE TRANSACTION. ALL-OR-NOTHING.
+  // =========================================================================
+  const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_vial_orders", {
+    p_payload: {
+      orders: ordersPayload,
+      order_tests: orderTestsPayload,
+      results_metadata: resultsMetadataPayload
+    }
+  });
+
+  if (rpcErr) {
+    console.error("[createNewOrder] create_vial_orders failed:", rpcErr.message);
+    throw new Error("Could not save the order atomically: " + rpcErr.message);
+  }
+
+  // Sanity check: the function must return every row we sent.
+  const returnedIds = new Set((rpcResult || []).map((r) => r.id));
+  for (const p of ordersPayload) {
+    if (!returnedIds.has(p.id)) {
+      throw new Error("Order was not persisted: " + p.id);
+    }
+  }
+
+  // Cache locally (capped). The RPC already persisted everything to the
+  // database, so this is purely for offline resilience.
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const newIds = new Set(createdVialOrders.map(o => o.orderId));
-    localStorage.setItem("apex_local_orders", JSON.stringify([...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))]));
+    const merged = [...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))].slice(0, 500);
+    localStorage.setItem("apex_local_orders", JSON.stringify(merged));
   } catch (e) {}
 
   // Return a print-ready master order. The caller uses this to render the
@@ -919,19 +963,19 @@ export async function saveTestResult(orderId, parameterId, resultValue, statusFl
   }
 
   const cleanValue = (
-    resultValue === undefined || 
-    resultValue === null || 
-    String(resultValue).trim() === "undefined" || 
+    resultValue === undefined ||
+    resultValue === null ||
+    String(resultValue).trim() === "undefined" ||
     String(resultValue).trim() === "null"
   ) ? "" : String(resultValue).trim();
 
   const { data, error } = await supabase
     .from("results")
-    .upsert({ 
-      order_id: orderId, 
-      parameter_id: String(parameterId).trim(), 
-      result_value: cleanValue, 
-      status_flag: statusFlag 
+    .upsert({
+      order_id: orderId,
+      parameter_id: String(parameterId).trim(),
+      result_value: cleanValue,
+      status_flag: statusFlag
     }, { onConflict: "order_id,parameter_id" });
 
   if (error) throw error;
@@ -941,12 +985,12 @@ export async function saveTestResult(orderId, parameterId, resultValue, statusFl
 export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByName) {
   const { data, error } = await supabase
     .from("orders")
-    .update({ 
-      qc_status: "Verified", 
-      sample_status: "Verified", 
-      is_locked: true, 
-      verifier_remarks: verifierRemarks, 
-      verified_at: new Date().toISOString() 
+    .update({
+      qc_status: "Verified",
+      sample_status: "Verified",
+      is_locked: true,
+      verifier_remarks: verifierRemarks,
+      verified_at: new Date().toISOString()
     })
     .eq("id", orderId);
   if (error) throw error;
@@ -1057,8 +1101,6 @@ export async function toggleTestAvailability(testId, isAvailable) {
 }
 
 export async function createNewTestWithParameters(testData) {
-  // ID keeps its uppercase+alphanumeric sanitization (stable identifier).
-  // The display CODE preserves whatever case the user typed.
   const testId = `T-${testData.code.replace(/[^A-Za-z0-9]/g, "").toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
   const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
@@ -1072,7 +1114,7 @@ export async function createNewTestWithParameters(testData) {
 
   const testPayload = {
     id: testId,
-    code: testData.code.trim(),          // ← keep user's original casing
+    code: testData.code.trim(),
     name: testData.name.trim(),
     dept_id: deptId,
     price: parseFloat(testData.price) || 0,
@@ -1128,7 +1170,8 @@ export async function createNewTestWithParameters(testData) {
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-    localStorage.setItem("apex_local_tests", JSON.stringify([fullTestWithParams, ...local.filter(t => t.id !== testId)]));
+    const merged = [fullTestWithParams, ...local.filter(t => t.id !== testId)].slice(0, 3000);
+    localStorage.setItem("apex_local_tests", JSON.stringify(merged));
   } catch (e) {}
 
   return fullTestWithParams;
@@ -1144,7 +1187,7 @@ export async function updateExistingTest(testId, testData) {
   } catch (e) {}
 
   const testPayload = {
-    code: testData.code.trim(),          // ← keep user's original casing
+    code: testData.code.trim(),
     name: testData.name.trim(),
     dept_id: deptId,
     price: parseFloat(testData.price) || 0,
@@ -1217,7 +1260,8 @@ export async function updateExistingTest(testId, testData) {
         test_parameters: paramRows,
         parameters: paramRows
       };
-      localStorage.setItem("apex_local_tests", JSON.stringify([updatedTestObj, ...local.filter(t => t.id !== testId)]));
+      const merged = [updatedTestObj, ...local.filter(t => t.id !== testId)].slice(0, 3000);
+      localStorage.setItem("apex_local_tests", JSON.stringify(merged));
     } catch (e) {}
   }
 }
@@ -1247,7 +1291,7 @@ export async function deleteTest(testId) {
 // so that Navbar, VerificationQC, UserManagement, and printHelpers keep working.
 function mapStaffProfile(row) {
   return {
-    id: row.user_id,              // backward-compat alias
+    id: row.user_id,
     user_id: row.user_id,
     full_name: row.full_name,
     role: row.role,
@@ -1264,12 +1308,16 @@ export async function getStaffUsers() {
       .from("staff_profiles")
       .select("*")
       .order("created_at");
-    if (!error && data && data.length > 0) {
+    if (error) {
+      console.error("[getStaffUsers] query failed:", error.message, error);
+    } else if (data && data.length > 0) {
       const mapped = data.map(mapStaffProfile);
       try { localStorage.setItem("apex_local_staff", JSON.stringify(mapped)); } catch (e) {}
       return mapped;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error("[getStaffUsers] threw:", e);
+  }
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_staff") || "[]");
@@ -1277,9 +1325,6 @@ export async function getStaffUsers() {
   } catch (e) {}
   return [];
 }
-
-// registerStaffUser and deleteStaffUser now live in services/authApi.js
-// because they must go through the Supabase Edge Functions.
 
 export const DEFAULT_LAB_SETTINGS = {
   id: "MAIN_SETTINGS",
@@ -1407,70 +1452,86 @@ export async function saveLabSettings(settingsData) {
 }
 
 // ==========================================
-// 12. ROBUST SEQUENTIAL BARCODE GENERATOR
+// 12. SEQUENTIAL BARCODE GENERATOR — YYMM######
 // ==========================================
+// Barcode format: 10 digits
+//   YY      = last two digits of year   (e.g. "26" for 2026)
+//   MM      = month number, 01..12      (e.g. "10" for October)
+//   ######  = 6-digit sequence that RESETS to 000001 on the 1st
+//             of every month
+//
+//   January 2026  → 2601000001, 2601000002, …
+//   February 2026 → 2602000001, 2602000002, …   ← reset
+//   January 2027  → 2701000001, 2701000002, …   ← new YY
+//
+// The database function allocate_barcodes() is the authoritative
+// source and hands out sequences atomically. If it hasn't been
+// deployed yet (or the network is down), we fall back to a
+// client-side counter keyed by YYMM so the app keeps working.
 export async function getNextSequentialBarcode(count = 1) {
-  const yearPrefix = String(new Date().getFullYear());
-  let maxFoundSeq = 0;
+  const wanted = Math.max(1, Math.min(100, Number(count) || 1));
 
   try {
-    const { data: recentOrders } = await supabase
-      .from("orders")
-      .select("id, barcode, created_at")
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const { data, error } = await supabase.rpc("allocate_barcodes", {
+      p_count: wanted,
+    });
 
-    if (recentOrders && recentOrders.length > 0) {
-      for (const ord of recentOrders) {
-        // Inspect individual barcodes safely
-        const individualBarcodes = String(ord.barcode || "").split(/[\s,]+/).filter(Boolean);
-        for (const bc of individualBarcodes) {
-          const rawDigits = String(bc).replace(/\D/g, "");
-          if (rawDigits.startsWith(yearPrefix)) {
-            const seqStr = rawDigits.slice(yearPrefix.length);
-            if (seqStr.length >= 1 && seqStr.length <= 8) {
-              const num = parseInt(seqStr, 10);
-              if (!isNaN(num) && num > maxFoundSeq && num < 999999) {
-                maxFoundSeq = num;
-              }
-            }
-          }
-        }
+    if (error) {
+      console.warn(
+        "[getNextSequentialBarcode] RPC failed — falling back to local counter:",
+        error.message
+      );
+    } else if (Array.isArray(data) && data.length === wanted && data.every((b) => typeof b === "string" && b.length === 10)) {
+      return wanted === 1 ? data[0] : data;
+    } else {
+      console.warn(
+        "[getNextSequentialBarcode] RPC returned unexpected shape:",
+        data
+      );
+    }
+  } catch (err) {
+    console.warn("[getNextSequentialBarcode] RPC threw — falling back:", err?.message);
+  }
 
-        // Also inspect ID suffix to ensure no collisions
-        if (ord.id && typeof ord.id === "string") {
-          const parts = ord.id.split("-");
-          const lastPart = parts[parts.length - 1];
-          const idNum = parseInt(lastPart, 10);
-          if (!isNaN(idNum) && idNum > maxFoundSeq && idNum < 999999) {
-            maxFoundSeq = idNum;
-          }
+  return localBarcodeFallback(wanted);
+}
+
+// Client-side fallback used only when the RPC is unavailable.
+// Same YYMM###### format; counter keyed by YYMM in localStorage.
+function localBarcodeFallback(count) {
+  const d = new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yymm = `${yy}${mm}`;
+
+  let lastSeq = 0;
+
+  try {
+    const stored = parseInt(localStorage.getItem(`apex_barcode_seq_${yymm}`) || "0", 10);
+    if (!isNaN(stored) && stored >= 0) lastSeq = stored;
+  } catch (e) {}
+
+  try {
+    const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
+    for (const o of local) {
+      const barcodes = String(o.barcode || "").split(/[\s,]+/).filter(Boolean);
+      for (const bc of barcodes) {
+        if (bc.length === 10 && bc.startsWith(yymm)) {
+          const seq = parseInt(bc.slice(4), 10);
+          if (!isNaN(seq) && seq > lastSeq) lastSeq = seq;
         }
       }
     }
-  } catch (err) {
-    console.warn("Sequence lookup warning:", err);
-  }
-
-  try {
-    const localLast = parseInt(localStorage.getItem("apex_last_barcode_seq") || "0", 10);
-    if (localLast > maxFoundSeq && localLast < 999999) {
-      maxFoundSeq = localLast;
-    }
   } catch (e) {}
 
-  const startSeq = maxFoundSeq + 1;
-  const generatedBarcodes = [];
-
+  const out = [];
   for (let i = 0; i < count; i++) {
-    // 6-digit sequence + 4-digit year = 10 digits (even length for Code 128C)
-    const seqStr = String(startSeq + i).padStart(6, "0");
-    generatedBarcodes.push(`${yearPrefix}${seqStr}`);
+    out.push(`${yymm}${String(lastSeq + 1 + i).padStart(6, "0")}`);
   }
 
   try {
-    localStorage.setItem("apex_last_barcode_seq", String(startSeq + count - 1));
+    localStorage.setItem(`apex_barcode_seq_${yymm}`, String(lastSeq + count));
   } catch (e) {}
 
-  return count === 1 ? generatedBarcodes[0] : generatedBarcodes;
+  return count === 1 ? out[0] : out;
 }

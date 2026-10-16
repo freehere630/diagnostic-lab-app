@@ -24,13 +24,11 @@ export default function VerificationQC({
   labSettings
 }) {
   const [selectedDeptId, setSelectedDeptId] = useState("ALL");
-  const [localStatus, setLocalStatus] = useState(null);
 
   // CBC 3-Part Machine Quick Inputs
   const [cbcMachine, setCbcMachine] = useState({ wbc: "", gran: "", lymph: "", mid: "" });
 
   useEffect(() => {
-    setLocalStatus(null);
     setSelectedDeptId("ALL");
     setCbcMachine({ wbc: "", gran: "", lymph: "", mid: "" });
   }, [activeOrder?.orderId, activeOrder?.id]);
@@ -159,7 +157,7 @@ const resolvedOrderTests = useMemo(() => {
         deptId = "DEP-HEM";
         deptName = "Hematology & Coagulation";
         icon = "🩸";
-      } 
+      }
       // 2. Immunology & Endocrinology
       else if (deptId.includes("IMM") || code.includes("IMM") || name.includes("DSDNA") || name.includes("FT3") || name.includes("FT4") || name.includes("THYROID")) {
         deptId = "DEP-IMM";
@@ -178,13 +176,13 @@ const resolvedOrderTests = useMemo(() => {
         deptId = "DEP-MIC";
         deptName = "Microbiology & Serology";
         icon = "🔬";
-      } 
+      }
       // 4. Histopathology & Cytology
       else if (code.includes("HISTO") || code.includes("FNAC") || code.includes("BX") || deptId.includes("HISTO")) {
         deptId = "DEP-HISTO";
         deptName = "Histopathology & Cytology";
         icon = "🔬";
-      } 
+      }
       // 5. Explicitly Guard Electrolytes & Biochemistry (Never classify as Radiology!)
       else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE") || deptId.includes("BIO")) {
         deptId = "DEP-BIO";
@@ -689,7 +687,6 @@ const resolvedOrderTests = useMemo(() => {
   const handleUnlockRecollected = async () => {
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
-    setLocalStatus("Sample Recollected");
     try {
       await handleMarkRecollected(targetId);
     } catch (e) {}
@@ -699,7 +696,6 @@ const resolvedOrderTests = useMemo(() => {
     if (!window.confirm("Reject this specimen as Hemolyzed and request repeat collection?\n\nClick OK to also send the patient a WhatsApp notice.")) return;
     const targetId = activeOrder?.orderId || activeOrder?.id;
     if (!targetId) return;
-    setLocalStatus("Repeat Collection Required");
     try {
       await handleRejectSample(targetId, "Hemolyzed Specimen");
       // Open WhatsApp with the recollection message
@@ -717,7 +713,7 @@ const resolvedOrderTests = useMemo(() => {
 
   return (
     <div className="space-y-3.5 max-w-[1720px] mx-auto text-slate-900 font-sans">
-      
+
       {/* 1. RECOLLECTION WARNING BANNER */}
       {isAwaitingRecollection && (
         <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
@@ -972,7 +968,7 @@ const resolvedOrderTests = useMemo(() => {
 
           return (
             <div key={deptGroup.id} className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-xs">
-              
+
               {/* Department Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2 gap-2">
                 <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Search, User, Phone, Barcode as BarcodeIcon, X, Loader2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { sanitizeSearchInput } from "../services/api";
 
 export default function GlobalSearch({ onPickPatient, onPickOrder }) {
   const [open, setOpen] = useState(false);
@@ -36,9 +37,17 @@ export default function GlobalSearch({ onPickPatient, onPickOrder }) {
       return;
     }
     const timer = setTimeout(async () => {
+      // Sanitize before building the .or() filter — PostgREST treats
+      // , . : ( ) [ ] " ' % * and backslash as control characters, so a
+      // stray comma from a patient name can break the request line.
+      const q = sanitizeSearchInput(query);
+      if (q.length < 2) {
+        setResults([]);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const q = query.trim();
         // Search both patients and orders in parallel
         const [patRes, ordRes] = await Promise.all([
           supabase
