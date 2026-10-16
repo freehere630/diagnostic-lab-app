@@ -4,7 +4,6 @@ import { BarcodeSVG } from "../utils/barcode";
 
 export default function SampleTracking({
   activeOrder,
-  visitOrders = [],
   departmentalVials = [],
   handlePrintSpecificVialBarcode,
   trackingStatus = {}
@@ -32,10 +31,10 @@ export default function SampleTracking({
 
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
-      
+
       {/* 1. SLIM PROGRESSION STEPPER STRIP */}
       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-        
+
         {/* Patient Identity */}
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
@@ -59,8 +58,8 @@ export default function SampleTracking({
           {steps.map((step, idx) => (
             <div key={idx} className="flex items-center gap-1.5 shrink-0">
               <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                step.done 
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                step.done
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                   : "bg-slate-50 text-slate-400 border-slate-200"
               }`}>
                 {step.done ? <Check className="w-3 h-3 text-emerald-600" /> : <Circle className="w-2.5 h-2.5 text-slate-300" />}
@@ -77,7 +76,7 @@ export default function SampleTracking({
 
       {/* 2. SPECIMEN VIAL STICKER DIRECTORY */}
       <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
-        
+
         <div className="flex items-center justify-between pb-2 border-b border-slate-100">
           <div>
             <h3 className="font-bold text-xs uppercase tracking-wide text-slate-800">
@@ -96,13 +95,13 @@ export default function SampleTracking({
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {departmentalVials.map((vial, idx) => (
-              <div 
-                key={idx} 
+              <div
+                key={idx}
                 className="bg-slate-50/70 border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-2.5 hover:border-slate-300 transition"
               >
                 {/* Simulated 38mm x 25mm Thermal Label Preview */}
                 <div className="bg-white p-2.5 rounded-lg border border-slate-300 shadow-xs space-y-1">
-                  
+
                   {/* Label Header */}
                   <div className="flex justify-between items-baseline text-[10px] border-b border-slate-200 pb-1">
                     <span className="font-bold text-slate-900 truncate max-w-[120px]">{vial.patientName}</span>

@@ -35,11 +35,14 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
     setIsModalOpen(true);
   };
 
-  const onSubmit = (e) => {
+  // Await the parent's save; only close the modal on success so a
+  // failed save (network / RLS / duplicate) doesn't wipe the user's
+  // typed data. handleSaveDoctor returns true on success, false on error.
+  const onSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return alert("Doctor name is required.");
-    handleSaveDoctor(formData);
-    setIsModalOpen(false);
+    const ok = await handleSaveDoctor(formData);
+    if (ok) setIsModalOpen(false);
   };
 
   const filteredDoctors = doctorsList.filter((d) => {
@@ -55,7 +58,7 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
 
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
-      
+
       {/* 1. COMPACT TOOLBAR */}
       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2">
@@ -99,8 +102,8 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
           </div>
         ) : (
           filteredDoctors.map((doc) => (
-            <div 
-              key={doc.id} 
+            <div
+              key={doc.id}
               className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-slate-300 transition"
             >
               <div>
@@ -161,7 +164,7 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-4 sm:p-5 max-w-md w-full shadow-xl border border-slate-200 text-xs">
-            
+
             <div className="flex justify-between items-center border-b pb-2 mb-3">
               <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
                 <Stethoscope className="w-4 h-4 text-blue-600" />
@@ -241,9 +244,9 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-xs"
+                  className="px-4 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg font-bold shadow-xs"
                 >
-                  Save Doctor
+                  {isLoading ? "Saving…" : "Save Doctor"}
                 </button>
               </div>
             </form>

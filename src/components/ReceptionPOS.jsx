@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { 
-  Users, Search, Receipt, History, UserCheck, 
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import {
+  Users, Search, Receipt, History, UserCheck,
   AlertCircle, Clock, ChevronRight, Check, X
 } from "lucide-react";
 import { searchPatients, getPatientHistory } from "../services/api";
@@ -29,14 +29,17 @@ export default function ReceptionPOS({
   const [patientHistoryList, setPatientHistoryList] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
+  // Ref to the doctor input so the clear button can refocus it
+  const doctorInputRef = useRef(null);
+
   // Profile check helper
   const checkIsProfile = (test) => {
     if (!test) return false;
-    const isProfFlag = 
-      test.is_profile === true || 
-      test.is_profile === "true" || 
-      test.is_profile === 1 || 
-      test.isProfile === true || 
+    const isProfFlag =
+      test.is_profile === true ||
+      test.is_profile === "true" ||
+      test.is_profile === 1 ||
+      test.isProfile === true ||
       test.isProfile === "true";
 
     const params = test.test_parameters || test.parameters || [];
@@ -118,10 +121,10 @@ export default function ReceptionPOS({
 
   const discountAmount = (subTotal * discountVal) / 100;
   const netPayable = Math.max(0, subTotal - discountAmount);
-  
-// in the useMemo area:
-const currentPaid = paidVal !== undefined ? paidVal : 0;
-const currentDue = Math.max(0, netPayable - currentPaid);
+
+  // in the useMemo area:
+  const currentPaid = paidVal !== undefined ? paidVal : 0;
+  const currentDue = Math.max(0, netPayable - currentPaid);
 
   useEffect(() => {
     if (paidVal === undefined || paidVal === null) {
@@ -133,10 +136,10 @@ const currentDue = Math.max(0, netPayable - currentPaid);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 max-w-[1720px] mx-auto text-slate-900">
-      
+
       {/* LEFT SECTION (9 COLS): PATIENT FORM + TEST SELECTOR */}
       <div className="xl:col-span-8 2xl:col-span-9 space-y-3">
-        
+
         {/* RETURNING PATIENT AUTO-LOOKUP BAR (COMPACT) */}
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs relative">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 mb-2">
@@ -267,12 +270,31 @@ const currentDue = Math.max(0, netPayable - currentPaid);
             <div className="relative">
               <label className="font-semibold text-slate-600 text-[11px] block mb-1">Referring Doctor</label>
               <input
+                ref={doctorInputRef}
                 type="text"
                 value={patientForm.doctor}
                 onChange={(e) => setPatientForm({ ...patientForm, doctor: e.target.value })}
                 placeholder="Self / Dr. Name"
-                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium"
+                className="w-full pl-2.5 pr-8 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium"
               />
+
+              {/* Clear button — lets the user quickly change to a different
+                  doctor without manually selecting-all and deleting the
+                  formatted "Name (Degrees)" string. */}
+              {patientForm.doctor && patientForm.doctor.trim() !== "" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPatientForm({ ...patientForm, doctor: "" });
+                    doctorInputRef.current?.focus();
+                  }}
+                  className="absolute right-2 top-[26px] p-0.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition"
+                  title="Clear doctor"
+                  aria-label="Clear referring doctor"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               {safeDoctorsList.length > 0 && patientForm.doctor && patientForm.doctor.length >= 2 && !safeDoctorsList.some(d => d.name?.toLowerCase() === patientForm.doctor.toLowerCase()) && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-200 z-50 max-h-40 overflow-y-auto divide-y divide-slate-100">
@@ -300,7 +322,7 @@ const currentDue = Math.max(0, netPayable - currentPaid);
 
         {/* TEST CATALOG EXPLORER */}
         <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
-          
+
           {/* Controls toolbar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
             <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
@@ -361,13 +383,13 @@ const currentDue = Math.max(0, netPayable - currentPaid);
                     key={test.id}
                     type="button"
                     onClick={() => {
-                      setSelectedTestIds((prev) => 
+                      setSelectedTestIds((prev) =>
                         isSel ? prev.filter((id) => id !== test.id) : [...prev, test.id]
                       );
                     }}
                     className={`p-2.5 rounded-lg border text-left transition flex items-start justify-between gap-2 ${
-                      isSel 
-                        ? "border-blue-600 bg-blue-50/70 text-blue-950 shadow-xs ring-1 ring-blue-600/20" 
+                      isSel
+                        ? "border-blue-600 bg-blue-50/70 text-blue-950 shadow-xs ring-1 ring-blue-600/20"
                         : "border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/60 bg-white"
                     }`}
                   >
@@ -406,7 +428,7 @@ const currentDue = Math.max(0, netPayable - currentPaid);
       {/* RIGHT SECTION (3 COLS / 4 COLS): BILLING & CONFIRMATION */}
       <div className="xl:col-span-4 2xl:col-span-3">
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs sticky top-16 space-y-3.5">
-          
+
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <span className="font-bold text-xs text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
               <Receipt className="w-4 h-4 text-blue-600" /> Invoice Summary

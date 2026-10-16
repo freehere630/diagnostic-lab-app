@@ -42,6 +42,7 @@ export function sendReportReadyWhatsApp(order, labSettings = {}, targetWindow = 
   const pid = order.patient?.id || "N/A";
   const labName = labSettings?.lab_name || labSettings?.labName || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER";
   const phoneHotline = labSettings?.phone || "01723854472, 01624787444";
+  const labAddress = labSettings?.address || "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212";
   const reportUrl = `${window.location.origin}/?track=${encodeURIComponent(order.orderId || order.id)}&bc=${encodeURIComponent(order.barcode || "")}`;
   const dueAmount = parseFloat(order.billing?.due || 0);
 
@@ -65,7 +66,7 @@ Your diagnostic test report has been *clinically verified* by the Consultant Pat
 ${reportUrl}
 
 📞 *Hotline:* ${phoneHotline}
-_Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212_`;
+_${labAddress}_`;
   } else {
     message =
 `🏥 *${labName}*
@@ -82,7 +83,7 @@ Your diagnostic investigation report is now *clinically verified* and available 
 ${reportUrl}
 
 _For inquiries, please contact our hotline: ${phoneHotline}_
-_Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212_`;
+_${labAddress}_`;
   }
 
   // Universal URL for desktop WhatsApp Web and mobile WhatsApp app
@@ -98,6 +99,7 @@ _Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212_`;
     }
   }
 }
+
 /**
  * 2. Send Repeat Collection Notice directly into WhatsApp Web
  */
@@ -112,8 +114,9 @@ export function sendRecollectionWhatsApp(order, reason = "Hemolyzed Specimen", l
   const pid = order.patient?.id || "N/A";
   const labName = labSettings?.lab_name || "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER";
   const phoneHotline = labSettings?.phone || "01723854472, 01624787444";
+  const labAddress = labSettings?.address || "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212";
 
-  const message = 
+  const message =
 `⚠️ ${labName}
 *URGENT: REPEAT SAMPLE COLLECTION NOTICE*
 
@@ -123,7 +126,7 @@ During quality control analysis of your recent test sample, our laboratory noted
 To guarantee 100% medical accuracy for your physician, our consultant pathologist recommends a *complimentary (free) repeat sample collection*.
 
 📍 *Please visit our Diagnostic at your earliest convenience:*
-Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212
+${labAddress}
 📞 *Hotline:* ${phoneHotline}
 
 Thank you for your cooperation in ensuring the highest clinical standards.`;

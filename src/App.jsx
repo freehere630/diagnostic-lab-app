@@ -39,6 +39,7 @@ import UserManagement from "./components/UserManagement";
 import LabSettings from "./components/LabSettings";
 import PatientLivePortal from "./components/PatientLivePortal";
 import DoctorManagement from "./components/DoctorManagement";
+
 // Format a Date as YYYY-MM-DD in the USER'S local timezone.
 // Never use `toISOString().slice(0,10)` — that's UTC and shifts the date
 // by one day for eastern timezones (Bangladesh = UTC+6) between 00:00–06:00.
@@ -135,10 +136,6 @@ export default function App() {
   const lastActiveOrderRef = useRef(null);
   const resultWriteTimers = useRef({});
   const recentlyWrittenRef = useRef({});
-  // Monotonic counter. Every call to fetchPaginatedOrders() takes the next
-  // number. When an older fetch resolves after a newer one has started, its
-  // `mySeq` no longer equals the ref, and it drops its result instead of
-  // clobbering fresh data.
   const fetchSeqRef = useRef(0);
 
   // ============================================================
@@ -329,6 +326,7 @@ export default function App() {
       sub?.subscription?.unsubscribe?.();
     };
   }, []);
+
   // --- Persist the date filter to sessionStorage ---
   useEffect(() => {
     try {
@@ -343,7 +341,7 @@ export default function App() {
     } catch (e) { /* private mode etc. */ }
   }, [dateRange, activePreset]);
 
-    // --- Keep "Today" in sync if the app crosses midnight ---
+  // --- Keep "Today" in sync if the app crosses midnight ---
   useEffect(() => {
     if (activePreset !== "TODAY") return;
 
@@ -354,7 +352,6 @@ export default function App() {
       }
     };
 
-    // Runs when the tab regains focus, and every 2 minutes while it's open
     window.addEventListener("focus", check);
     const t = setInterval(check, 120000);
 
@@ -363,16 +360,14 @@ export default function App() {
       clearInterval(t);
     };
   }, [activePreset, dateRange]);
-    // --- Refetch when the tab regains focus (handles Chrome tab discards) ---
+
+  // --- Refetch when the tab regains focus (handles Chrome tab discards) ---
   useEffect(() => {
     if (!currentUser) return;
 
     const onFocus = () => {
       fetchPaginatedOrders(true);
     };
-    // Same handler reused for visibilitychange so the cleanup below can
-    // actually remove it. Previously this was an anonymous function and
-    // leaked a listener on every re-run of the effect.
     const onVisibility = () => {
       if (!document.hidden) onFocus();
     };
@@ -386,6 +381,7 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
   // --- Master data fetch ---
   useEffect(() => {
     if (!currentUser) return;
@@ -408,12 +404,9 @@ export default function App() {
   const fetchPaginatedOrders = async (silent = false) => {
     if (!currentUser) return;
 
-    // Take a ticket. Any fetch that started earlier and resolves later
-    // will see that its ticket is stale and bail out before touching state.
     const mySeq = ++fetchSeqRef.current;
 
     if (!silent) setIsLoading(true);
-    // Clear stale rows so a failed fetch doesn't leave yesterday's data on screen
     if (!silent) setOrders([]);
     try {
       const res = await getOrdersPaginated({
@@ -424,8 +417,6 @@ export default function App() {
         searchQuery: dashboardSearch,
       });
 
-      // A newer fetch superseded us while we were awaiting. Drop this
-      // result entirely — do not touch orders, pages, or loading state.
       if (mySeq !== fetchSeqRef.current) return;
 
       const localOrders = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
@@ -623,14 +614,10 @@ export default function App() {
         setSelectedOrderId(formatted[0].orderId);
       }
     } catch (err) {
-      // Only log if we're still the current fetch — a superseded fetch's
-      // error is noise.
       if (mySeq === fetchSeqRef.current) {
         console.error("Pagination load error:", err);
       }
     } finally {
-      // Only clear the loading flag if we still own the slot. If a newer
-      // fetch is in flight, it will clear it when it finishes.
       if (!silent && mySeq === fetchSeqRef.current) setIsLoading(false);
     }
   };
@@ -850,7 +837,6 @@ export default function App() {
             : o
         )
       );
-      // No hard refetch — in-place update keeps the current patient on screen.
     } catch (e) {
       console.warn("Reject background notice:", e);
     }
@@ -1069,7 +1055,6 @@ export default function App() {
   const handleVerifyInDb = async (targetDeptId = null) => {
     if (!activeOrder) return;
 
-    // Scope the verification set: all siblings, or just the ones for one dept
     let ordersToVerify = (visitOrders && visitOrders.length > 0) ? visitOrders : [activeOrder];
 
     if (targetDeptId) {
@@ -1162,13 +1147,13 @@ export default function App() {
         ? `${targetDeptId.replace("DEP-", "")} department`
         : "all department reports";
       alert(`✅ ${scopeText} Verified and Locked!`);
-      // No hard refetch — in-place update keeps the current patient on screen.
     } catch (e) {
       alert("Verification failed: " + e.message);
     } finally {
       setIsLoading(false);
     }
   };
+
   const handleSaveNewTest = async () => {
     if (!newTestForm.name || !newTestForm.code || !newTestForm.price) {
       return alert("Fill Name, Code, Price.");
@@ -1340,14 +1325,18 @@ export default function App() {
     }
   };
 
+  // Returns true on success, false on failure — DoctorManagement relies
+  // on this to keep the modal open when a save fails.
   const handleSaveDoctor = async (docData) => {
     setIsLoading(true);
     try {
       await createOrUpdateDoctor(docData);
       setDoctorsList((await getDoctorsList()) || []);
       alert("✅ Doctor Saved!");
+      return true;
     } catch (e) {
       alert("Error saving doctor: " + e.message);
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -1454,6 +1443,14 @@ export default function App() {
       activePreset={activePreset}
       setPreset={handlePresetSwitch}
       setCurrentPage={setCurrentPage}
+      onGlobalOrderPick={(orderId) => {
+        setSelectedOrderId(orderId);
+        setActiveTab("dashboard");
+      }}
+      onGlobalPatientPick={() => {
+        // Patient is pre-selected in the Reception lookup; just route there.
+        setActiveTab("reception");
+      }}
     >
       {saveStatus.state !== "idle" && (
         <div
@@ -1515,7 +1512,6 @@ export default function App() {
       {activeTab === "samples" && (
         <SampleTracking
           activeOrder={activeOrder}
-          visitOrders={visitOrders}
           departmentalVials={departmentalVials}
           handlePrintSpecificVialBarcode={(v) =>
             printSpecificVialBarcode(v, () =>

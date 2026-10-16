@@ -5,6 +5,7 @@ import {
   FileText, Settings, UserCheck, Building2, Stethoscope, ChevronDown,
   Calendar,
 } from "lucide-react";
+import GlobalSearch from "./GlobalSearch";
 
 // ============================================================
 // NAV CONFIG — grouped, role-aware. Add new pages here.
@@ -59,6 +60,9 @@ export default function AppLayout({
   activePreset,
   setPreset,
   setCurrentPage,
+  // Optional — callbacks from GlobalSearch
+  onGlobalOrderPick,
+  onGlobalPatientPick,
 }) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("apex_sidebar_collapsed") === "true"
@@ -219,6 +223,11 @@ export default function AppLayout({
 
             {/* Right: actions */}
             <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+              <GlobalSearch
+                onPickOrder={onGlobalOrderPick}
+                onPickPatient={onGlobalPatientPick}
+              />
+
               <button
                 type="button"
                 onClick={loadDatabaseData}
