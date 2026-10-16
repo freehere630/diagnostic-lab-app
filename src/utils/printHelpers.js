@@ -1,5 +1,6 @@
 import { generateQrSvgString } from "./qrcode";
 import { buildReportHeaderHtml, buildReportFooterHtml, getReportLayout } from "./reportLayout";
+import { encodeCode128C, encodeCode128B } from "./barcodeCode128";
 import html2pdf from "html2pdf.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -19,67 +20,6 @@ export const esc = (v) =>
 // Helper: escape, then convert newlines to <br>. Order matters —
 // escape FIRST so a stray "<br>" in user data becomes "&lt;br&gt;".
 const escWithBreaks = (v) => esc(v).replace(/\n/g, "<br>");
-
-// GS1 Code 128 Patterns
-const CODE128_PATTERNS = [
-  "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
-  "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
-  "221231","213212","223112","312131","311222","321122","321221","312212","322112","322211",
-  "212123","212321","232121","111323","131123","131321","112313","132113","132311","211313",
-  "231113","231311","112133","112331","132131","113123","113321","133121","313121","211331",
-  "231131","213113","213311","213131","311123","311321","331121","312113","312311","332111",
-  "314111","221411","431111","111224","111422","121124","121421","141122","141221","112214",
-  "112412","122114","122411","142112","142211","241211","221114","413111","241112","134111",
-  "111242","121142","121241","114212","124112","124211","411212","421112","421211","212141",
-  "214121","412121","111143","111341","131141","114113","114311","411113","411311","113141",
-  "114131","311141","411131","211412","211214","211232","2331112"
-];
-
-function encodeCode128C(numericText) {
-  const digits = String(numericText || "").replace(/\D/g, "");
-  if (!digits) return "";
-  const cleanDigits = digits.length % 2 !== 0 ? "0" + digits : digits;
-
-  let checksum = 105;
-  let patternStr = CODE128_PATTERNS[105];
-  let weight = 1;
-
-  for (let i = 0; i < cleanDigits.length; i += 2) {
-    const pairValue = parseInt(cleanDigits.substr(i, 2), 10);
-    checksum += pairValue * weight;
-    patternStr += CODE128_PATTERNS[pairValue];
-    weight++;
-  }
-
-  const checkDigit = checksum % 103;
-  patternStr += CODE128_PATTERNS[checkDigit];
-  patternStr += CODE128_PATTERNS[106];
-  return patternStr;
-}
-
-// Code 128B — for alphanumeric content such as "P-1644".
-// Character value = charCode - 32, valid range 32..127.
-function encodeCode128B(text) {
-  const str = String(text || "");
-  if (!str) return "";
-
-  let checksum = 104;
-  let patternStr = CODE128_PATTERNS[104];
-  let weight = 1;
-
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i) - 32;
-    if (code < 0 || code > 94) continue;
-    checksum += code * weight;
-    patternStr += CODE128_PATTERNS[code];
-    weight++;
-  }
-
-  const checkDigit = checksum % 103;
-  patternStr += CODE128_PATTERNS[checkDigit];
-  patternStr += CODE128_PATTERNS[106];
-  return patternStr;
-}
 
 export function generateSvgBarcodeHtml(codeText, height = 30) {
   const cleanInput = String(codeText || "2026000001").split(/[\s,]+/)[0];
@@ -1318,7 +1258,14 @@ export function renderDepartmentReportHtml({
   const footerHeightPx = (layout?.footer?.height) || 72;
   const headerHeightMm = (headerHeightPx * PX_TO_MM).toFixed(1);
   const footerHeightMm = (footerHeightPx * PX_TO_MM).toFixed(1);
-  const contentHeightMm = (297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm)).toFixed(1);
+  // Subtract a 1.5mm safety buffer to absorb fractional rounding drift
+  // between the CSS @page margin and Chrome's rendered content area.
+  // Without this, print output occasionally spills the signature block
+  // or last table row onto a second page.
+  const contentHeightMm = Math.max(
+    50,
+    297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm) - 1.5
+  ).toFixed(1);
 
   const owner = group.ownerOrder || activeOrder;
   const orderId = owner.orderId || owner.id || activeOrder.orderId || activeOrder.id || "";
