@@ -1,3 +1,8 @@
+import { consumeTestReagents } from "./services/inventoryApi";
+import InventoryReports from "./components/InventoryReports";
+import { saveTestConsumables, getTestConsumables } from "./services/inventoryApi";
+
+import StockOperations from "./components/StockOperations";
 import InventoryItems from "./components/InventoryItems";
 import SupplierManagement from "./components/SupplierManagement";
 import ReceiveStockModal from "./components/ReceiveStockModal";
@@ -6,6 +11,7 @@ import InventoryDashboard from "./components/InventoryDashboard";
 import PurchaseOrders from "./components/PurchaseOrders";
 import PurchaseOrderDetail from "./components/PurchaseOrderDetail";
 import ReceiveAgainstPOModal from "./components/ReceiveAgainstPOModal";
+import MachineDashboard from "./components/MachineDashboard";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
@@ -415,20 +421,22 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
+   // --- Master data fetch (Moved out so we can call it manually) ---
+  const fetchMaster = async () => {
+    try {
+      const { departments: depts, tests } = await getMasterData();
+      setDepartments(depts || []);
+      setTestCatalog(tests || []);
+      setStaffList((await getStaffUsers()) || []);
+      setDoctorsList((await getDoctorsList()) || []);
+      setLabSettings(await getLabSettings());
+    } catch (e) {
+      console.warn("Master fetch warning:", e);
+    }
+  };
+
   useEffect(() => {
     if (!currentUser) return;
-    const fetchMaster = async () => {
-      try {
-        const { departments: depts, tests } = await getMasterData();
-        setDepartments(depts || []);
-        setTestCatalog(tests || []);
-        setStaffList((await getStaffUsers()) || []);
-        setDoctorsList((await getDoctorsList()) || []);
-        setLabSettings(await getLabSettings());
-      } catch (e) {
-        console.warn("Master fetch warning:", e);
-      }
-    };
     fetchMaster();
   }, [currentUser]);
 
@@ -1185,6 +1193,13 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
             : remarksToSave;
 
         await verifyAndLockOrder(vo.orderId || vo.id, serializedRemarks, verifierName);
+        
+        // Deduct 1 test count from the active machine reagent
+        try {
+          await consumeTestReagents(vo.orderId || vo.id);
+        } catch (invErr) {
+          console.warn("Inventory deduction skipped:", invErr);
+        }
       }
 
       const verifiedIds = new Set(ordersToVerify.map((o) => o.orderId || o.id));
@@ -1218,6 +1233,12 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
     setIsLoading(true);
     try {
       const createdTest = await createNewTestWithParameters(newTestForm);
+      
+      // Save the mapped reagents
+      if (newTestForm.consumables && newTestForm.consumables.length > 0) {
+        await saveTestConsumables(createdTest.id, newTestForm.consumables);
+      }
+
       alert("✅ Test Added to Catalog!");
 
       const { tests } = await getMasterData();
@@ -1228,6 +1249,7 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
         name: "", code: "", deptId: departments[0]?.id || "DEP-BIO", price: "", sampleType: "Serum",
         tubeColor: "Red / Yellow (SST / Plain Clot)", isProfile: false, reportType: "tabular",
         parameters: [{ id: "1", name: "", param_type: "numeric", unit: "U/L", min: "", max: "", reference_text: "" }],
+        consumables: [], // Reset
       });
 
       setActiveTab("reception");
@@ -1238,7 +1260,7 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
     }
   };
 
-  const handleOpenEditModal = (t) => {
+  const handleOpenEditModal = async (t) => {
     const rawParams = t.test_parameters || t.parameters || [];
 
     const normalizedParams = rawParams.length > 0
@@ -1283,7 +1305,12 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
     const isDescriptiveTest =
       t.report_type === "descriptive" || normalizedParams.some((p) => p.param_type === "text");
 
-    setEditingTest({
+     let existingConsumables = [];
+        try {
+          const { getTestConsumables } = await import("./services/inventoryApi");
+          existingConsumables = await getTestConsumables(t.id);
+        } catch (e) { /* silent */ }
+      setEditingTest({
       ...t,
       id: t.id,
       name: t.name || "",
@@ -1298,6 +1325,7 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
       report_type: isDescriptiveTest ? "descriptive" : (t.report_type || "tabular"),
       is_available: t.is_available !== undefined ? t.is_available : true,
       parameters: normalizedParams,
+      consumables: existingConsumables || [],
     });
   };
 
@@ -1307,6 +1335,10 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
     setIsLoading(true);
     try {
       await updateExistingTest(editingTest.id, editingTest);
+      
+      // Save the mapped reagents
+      await saveTestConsumables(editingTest.id, editingTest.consumables || []);
+
       alert("✅ Test Updated!");
       setEditingTest(null);
       const { tests } = await getMasterData();
@@ -1654,6 +1686,9 @@ const openReceiveStock = (itemId = null) => {
         {activeTab === "inventory-ledger" && (
           <StockLedger />
         )}
+        {activeTab === "inventory-machines" && (
+            <MachineDashboard />
+          )}
         {activeTab === "inventory-po" && !selectedPOId && (
   <PurchaseOrders onOpenPO={(id) => setSelectedPOId(id)} />
 )}
@@ -1710,6 +1745,12 @@ const openReceiveStock = (itemId = null) => {
           isLoading={isLoading}
         />
       )}
+      {activeTab === "inventory-ops" && (
+        <StockOperations />
+      )}
+      {activeTab === "inventory-reports" && (
+        <InventoryReports />
+      )}
       <ReceiveStockModal
   open={receiveStockOpen}
   onClose={() => {
@@ -1717,13 +1758,19 @@ const openReceiveStock = (itemId = null) => {
     setReceiveStockInitialItemId(null);
   }}
   initialItemId={receiveStockInitialItemId}
-  onReceived={() => { /* no-op — each screen refreshes itself on remount */ }}
+  onReceived={() => {
+    fetchMaster(); // <--- THIS IS THE MAGIC FIX
+    fetchPaginatedOrders(true);
+  }}
 />
 <ReceiveAgainstPOModal
   open={!!receivePOId}
   poId={receivePOId}
   onClose={() => setReceivePOId(null)}
-  onReceived={() => { /* detail view refreshes on remount */ }}
+  onReceived={() => {
+    fetchMaster(); // <--- THIS IS THE MAGIC FIX
+    fetchPaginatedOrders(true);
+  }}
 />
     </AppLayout>
   );

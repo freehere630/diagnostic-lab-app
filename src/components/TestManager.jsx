@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Settings, Plus, Edit, Trash2, X, Sparkles, Search, 
-  Layers, Bookmark, AlignLeft, Check, FileCode, FileText
+  Layers, Bookmark, AlignLeft, Check, FileCode, FileText, Box
 } from "lucide-react";
 import {
   MASTER_CBC_PARAMETERS,
@@ -14,6 +14,7 @@ import {
   MASTER_SEMEN_PARAMETERS,
   DESCRIPTIVE_STANDARD_TEMPLATES
 } from "../services/api";
+import { getInventoryItems } from "../services/inventoryApi";
 
 export default function TestManager({
   departments = [],
@@ -35,6 +36,12 @@ export default function TestManager({
   const [searchCatalog, setSearchCatalog] = useState("");
   const [catalogDeptFilter, setCatalogDeptFilter] = useState("ALL");
   const [testFormatMode, setTestFormatMode] = useState("tabular"); // 'tabular' | 'descriptive'
+  const [invItems, setInvItems] = useState([]);
+
+  // Fetch inventory items to populate the reagent dropdowns
+  useEffect(() => {
+    getInventoryItems({}).then(setInvItems).catch(console.error);
+  }, []);
 
   // Pre-configured clinical templates
   const CLINICAL_PRESETS = [
@@ -59,7 +66,8 @@ export default function TestManager({
           min: p.min !== null && p.min !== undefined ? String(p.min) : "",
           max: p.max !== null && p.max !== undefined ? String(p.max) : "",
           reference_text: p.defaultRef || ""
-        }))
+        })),
+        consumables: []
       }
     },
     {
@@ -83,7 +91,8 @@ export default function TestManager({
           min: p.min !== null && p.min !== undefined ? String(p.min) : "",
           max: p.max !== null && p.max !== undefined ? String(p.max) : "",
           reference_text: p.defaultRef || ""
-        }))
+        })),
+        consumables: []
       }
     },
     {
@@ -107,7 +116,8 @@ export default function TestManager({
           min: "",
           max: "",
           reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.histopathology
-        }]
+        }],
+        consumables: []
       }
     },
     {
@@ -131,7 +141,8 @@ export default function TestManager({
           min: "",
           max: "",
           reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.fnacCytology
-        }]
+        }],
+        consumables: []
       }
     },
     {
@@ -155,7 +166,8 @@ export default function TestManager({
           min: "",
           max: "",
           reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest
-        }]
+        }],
+        consumables: []
       }
     },
     {
@@ -179,7 +191,8 @@ export default function TestManager({
           min: "",
           max: "",
           reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen
-        }]
+        }],
+        consumables: []
       }
     },
     {
@@ -203,7 +216,8 @@ export default function TestManager({
           min: "",
           max: "",
           reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead
-        }]
+        }],
+        consumables: []
       }
     }
   ];
@@ -213,7 +227,8 @@ export default function TestManager({
     if (!tpl) return;
     setTestFormatMode(tpl.format);
     setNewTestForm({
-      ...tpl.data
+      ...tpl.data,
+      consumables: tpl.data.consumables || []
     });
   };
 
@@ -296,6 +311,44 @@ export default function TestManager({
       parameters: editingTest.parameters.filter((_, i) => i !== idx)
     });
   };
+
+  // ─── Consumables Handlers ─────────────────────────────────────────────
+  const addCreateConsumable = () => {
+    setNewTestForm(prev => ({
+      ...prev,
+      consumables: [...(prev.consumables || []), { item_id: "", qty_required: "1" }]
+    }));
+  };
+  const updateCreateConsumable = (idx, patch) => {
+    const updated = [...(newTestForm.consumables || [])];
+    updated[idx] = { ...updated[idx], ...patch };
+    setNewTestForm({ ...newTestForm, consumables: updated });
+  };
+  const removeCreateConsumable = (idx) => {
+    setNewTestForm({
+      ...newTestForm,
+      consumables: (newTestForm.consumables || []).filter((_, i) => i !== idx)
+    });
+  };
+
+  const addEditConsumable = () => {
+    setEditingTest(prev => ({
+      ...prev,
+      consumables: [...(prev.consumables || []), { item_id: "", qty_required: "1" }]
+    }));
+  };
+  const updateEditConsumable = (idx, patch) => {
+    const updated = [...(editingTest.consumables || [])];
+    updated[idx] = { ...updated[idx], ...patch };
+    setEditingTest({ ...editingTest, consumables: updated });
+  };
+  const removeEditConsumable = (idx) => {
+    setEditingTest({
+      ...editingTest,
+      consumables: (editingTest.consumables || []).filter((_, i) => i !== idx)
+    });
+  };
+  // ──────────────────────────────────────────────────────────────────────
 
   const filteredCatalog = testCatalog.filter((t) => {
     const q = searchCatalog.trim().toLowerCase();
@@ -701,19 +754,64 @@ export default function TestManager({
               );
             })}
           </div>
+        </div>
 
-          <div className="flex justify-end pt-1">
+        {/* NEW: Create Form Consumables */}
+        <div className="border-t border-slate-100 pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase text-slate-500 flex items-center gap-1">
+              <Box className="w-3.5 h-3.5 text-indigo-600" /> Reagent Consumption (Inventory)
+            </span>
             <button
               type="button"
-              onClick={handleSaveNewTest}
-              disabled={isLoading}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition"
+              onClick={addCreateConsumable}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-bold flex items-center gap-1 transition shadow-2xs"
             >
-              <Plus className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Add to Catalog"}
+              <Plus className="w-3.5 h-3.5 text-indigo-600" /> Add Reagent
             </button>
+          </div>
+          
+          <div className="space-y-2">
+            {(newTestForm.consumables || []).map((c, i) => (
+              <div key={i} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <select
+                  value={c.item_id}
+                  onChange={(e) => updateCreateConsumable(i, { item_id: e.target.value })}
+                  className="flex-1 px-2 py-1.5 border border-slate-200 rounded bg-white text-xs outline-none"
+                >
+                  <option value="">-- Select Inventory Item --</option>
+                  {invItems.map(it => <option key={it.id} value={it.id}>{it.name} ({it.code})</option>)}
+                </select>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500 font-semibold">Qty:</span>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={c.qty_required}
+                    onChange={(e) => updateCreateConsumable(i, { qty_required: e.target.value })}
+                    className="w-20 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono text-center outline-none"
+                  />
+                </div>
+                <button type="button" onClick={() => removeCreateConsumable(i)} className="p-1 text-slate-400 hover:text-rose-600 rounded">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {(newTestForm.consumables || []).length === 0 && (
+              <p className="text-[10px] text-slate-400 italic">No reagents mapped to this test yet.</p>
+            )}
           </div>
         </div>
 
+        <div className="flex justify-end pt-1">
+          <button
+            type="button"
+            onClick={handleSaveNewTest}
+            disabled={isLoading}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition"
+          >
+            <Plus className="w-3.5 h-3.5" /> {isLoading ? "Saving..." : "Add to Catalog"}
+          </button>
+        </div>
       </div>
 
       {/* 3. DIAGNOSTIC CATALOG DIRECTORY */}
@@ -1187,6 +1285,52 @@ export default function TestManager({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* NEW: Edit Modal Consumables */}
+            <div className="border-t border-slate-100 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                  <Box className="w-3.5 h-3.5 text-indigo-600" /> Reagent Consumption (Inventory)
+                </span>
+                <button
+                  type="button"
+                  onClick={addEditConsumable}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-bold flex items-center gap-1 transition shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5 text-indigo-600" /> Add Reagent
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {(editingTest.consumables || []).map((c, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <select
+                      value={c.item_id}
+                      onChange={(e) => updateEditConsumable(i, { item_id: e.target.value })}
+                      className="flex-1 px-2 py-1.5 border border-slate-200 rounded bg-white text-xs outline-none"
+                    >
+                      <option value="">-- Select Inventory Item --</option>
+                      {invItems.map(it => <option key={it.id} value={it.id}>{it.name} ({it.code})</option>)}
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-500 font-semibold">Qty:</span>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={c.qty_required}
+                        onChange={(e) => updateEditConsumable(i, { qty_required: e.target.value })}
+                        className="w-20 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono text-center outline-none"
+                      />
+                    </div>
+                    <button type="button" onClick={() => removeEditConsumable(i)} className="p-1 text-slate-400 hover:text-rose-600 rounded">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                {(editingTest.consumables || []).length === 0 && (
+                  <p className="text-[10px] text-slate-400 italic">No reagents mapped to this test yet.</p>
+                )}
               </div>
             </div>
 

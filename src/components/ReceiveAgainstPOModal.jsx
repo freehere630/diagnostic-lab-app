@@ -35,27 +35,37 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
           location_id: h.location_id || locs.find((l) => l.kind === "main_store")?.id || locs[0]?.id || "",
         }));
 
-        // Pre-populate lines with outstanding quantities
+        // Pre-populate lines with outstanding quantities in PACKS
         const newLines = (p.items || [])
           .filter((it) => (parseFloat(it.qty_received) || 0) < (parseFloat(it.qty_ordered) || 0))
-          .map((it) => ({
-            _key: Math.random().toString(36).slice(2),
-            po_item_id: it.id,
-            item_id: it.item_id,
-            item_code: it.item?.code || "",
-            item_name: it.item?.name || "",
-            uom: it.item?.uom || "",
-            qty_ordered: parseFloat(it.qty_ordered) || 0,
-            qty_already: parseFloat(it.qty_received) || 0,
-            qty_remaining: (parseFloat(it.qty_ordered) || 0) - (parseFloat(it.qty_received) || 0),
-            qty_received: String((parseFloat(it.qty_ordered) || 0) - (parseFloat(it.qty_received) || 0)),
-            qty_rejected: "0",
-            unit_cost: String(it.unit_cost ?? 0),
-            lot_number: "",
-            expiry_date: "",
-            barcode: "",
-            notes: "",
-          }));
+          .map((it) => {
+            const packSize = parseFloat(it.item?.pack_size) || 1;
+            const qtyRemainingUom = (parseFloat(it.qty_ordered) || 0) - (parseFloat(it.qty_received) || 0);
+            const qtyRemainingPacks = qtyRemainingUom / packSize;
+            const defaultPackCost = (parseFloat(it.unit_cost) || 0) * packSize;
+
+            return {
+              _key: Math.random().toString(36).slice(2),
+              po_item_id: it.id,
+              item_id: it.item_id,
+              item_code: it.item?.code || "",
+              item_name: it.item?.name || "",
+              uom: it.item?.uom || "",
+              pack_size: packSize,
+              qty_ordered_uom: parseFloat(it.qty_ordered) || 0,
+              qty_ordered_packs: (parseFloat(it.qty_ordered) || 0) / packSize,
+              qty_already_uom: parseFloat(it.qty_received) || 0,
+              qty_remaining_uom: qtyRemainingUom,
+              qty_remaining_packs: qtyRemainingPacks,
+              qty_received: String(qtyRemainingPacks),
+              qty_rejected: "0",
+              unit_cost: String(defaultPackCost), // Pack Cost
+              lot_number: "",
+              expiry_date: "",
+              barcode: "",
+              notes: "",
+            };
+          });
         setLines(newLines);
       } catch (e) {
         alert("Load failed: " + e.message);
@@ -94,17 +104,21 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
         invoice_number: header.invoice_number || null,
         invoice_date: header.invoice_date || null,
         notes: header.notes || null,
-        lines: lines.map((l) => ({
-          po_item_id: l.po_item_id,
-          item_id: l.item_id,
-          qty_received: l.qty_received,
-          qty_rejected: l.qty_rejected,
-          unit_cost: l.unit_cost,
-          lot_number: l.lot_number,
-          expiry_date: l.expiry_date || null,
-          barcode: l.barcode || null,
-          notes: l.notes || null,
-        })),
+        lines: lines.map((l) => {
+          const packSize = l.pack_size || 1;
+          const packCost = parseFloat(l.unit_cost) || 0;
+          return {
+            po_item_id: l.po_item_id,
+            item_id: l.item_id,
+            qty_received: (parseFloat(l.qty_received) || 0) * packSize,
+            qty_rejected: (parseFloat(l.qty_rejected) || 0) * packSize,
+            unit_cost: packCost / packSize,
+            lot_number: l.lot_number,
+            expiry_date: l.expiry_date || null,
+            barcode: l.barcode || null,
+            notes: l.notes || null,
+          };
+        }),
       });
       alert(`✅ ${res.grn_number} recorded.`);
       onReceived?.();
@@ -145,7 +159,6 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
           </div>
         ) : (
           <form onSubmit={submit} className="p-4 space-y-4">
-
             {/* Header */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div>
@@ -201,21 +214,23 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
                     <thead className="bg-slate-50">
                       <tr className="border-b border-slate-200 text-slate-500 font-semibold text-[10px] uppercase">
                         <th className="py-2 px-2 w-[22%]">Item</th>
-                        <th className="py-2 px-2 text-right w-[8%]">Ordered</th>
-                        <th className="py-2 px-2 text-right w-[8%]">Already</th>
-                        <th className="py-2 px-2 text-right w-[8%]">Remaining</th>
-                        <th className="py-2 px-2 text-right w-[9%]">Recv Now</th>
-                        <th className="py-2 px-2 text-right w-[8%]">Rej'd</th>
+                        <th className="py-2 px-2 text-right w-[8%]">Ordered<br/>(Packs)</th>
+                        <th className="py-2 px-2 text-right w-[8%]">Already<br/>(Packs)</th>
+                        <th className="py-2 px-2 text-right w-[8%]">Remaining<br/>(Packs)</th>
+                        <th className="py-2 px-2 text-right w-[9%]">Recv Now<br/>(Packs)</th>
+                        <th className="py-2 px-2 text-right w-[8%]">Rej'd<br/>(Packs)</th>
                         <th className="py-2 px-2 w-[12%]">Lot #</th>
                         <th className="py-2 px-2 w-[10%]">Expiry</th>
-                        <th className="py-2 px-2 text-right w-[10%]">Unit Cost</th>
+                        <th className="py-2 px-2 text-right w-[10%]">Cost / Pack</th>
                         <th className="py-2 px-2 w-[10%]">Barcode</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {lines.map((l, i) => {
                         const rc = parseFloat(l.qty_received) || 0;
-                        const over = rc > l.qty_remaining;
+                        const over = rc > l.qty_remaining_packs;
+                        const packCost = parseFloat(l.unit_cost) || 0;
+                        
                         return (
                           <tr key={l._key} className={over ? "bg-amber-50/40" : ""}>
                             <td className="py-1.5 px-2">
@@ -223,13 +238,13 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
                               <div className="text-[10px] font-mono text-slate-400">{l.item_code}</div>
                             </td>
                             <td className="py-1.5 px-2 text-right font-mono text-slate-600 text-[11px]">
-                              {l.qty_ordered.toLocaleString()}
+                              {l.qty_ordered_packs.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </td>
                             <td className="py-1.5 px-2 text-right font-mono text-slate-600 text-[11px]">
-                              {l.qty_already.toLocaleString()}
+                              {(l.qty_already_uom / l.pack_size).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </td>
                             <td className="py-1.5 px-2 text-right font-mono text-amber-700 font-bold text-[11px]">
-                              {l.qty_remaining.toLocaleString()}
+                              {l.qty_remaining_packs.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </td>
                             <td className="py-1.5 px-2">
                               <input
@@ -272,6 +287,11 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
                                 onChange={(e) => updateLine(i, { unit_cost: e.target.value })}
                                 className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
                               />
+                              {l.pack_size > 1 && packCost > 0 && (
+                                <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
+                                  = ৳{(packCost / l.pack_size).toFixed(2)} / {l.uom}
+                                </div>
+                              )}
                             </td>
                             <td className="py-1.5 px-2">
                               <div className="relative">
@@ -291,20 +311,9 @@ export default function ReceiveAgainstPOModal({ open, poId, onClose, onReceived 
                     </tbody>
                   </table>
                 </div>
-
-                {lines.some((l) => (parseFloat(l.qty_received) || 0) > l.qty_remaining) && (
-                  <div className="bg-amber-50 border-t border-amber-200 px-3 py-2 text-[11px] text-amber-800 flex items-start gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>
-                      One or more lines exceed the outstanding quantity — this is an <b>over-delivery</b>. It will
-                      be recorded as-is, and the PO line will show it as "Over-delivered".
-                    </span>
-                  </div>
-                )}
               </div>
             )}
 
-            {/* Actions */}
             <div className="flex justify-end gap-2 pt-3 border-t">
               <button
                 type="button"

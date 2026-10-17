@@ -119,7 +119,9 @@ export default function PurchaseOrders({ onOpenPO }) {
 
   const handleItemChange = (idx, itemId) => {
     const it = items.find((i) => i.id === itemId);
-    updateLine(idx, { item_id: itemId, unit_cost: it ? String(it.unit_cost ?? 0) : "" });
+    const packSize = parseFloat(it?.pack_size) || 1;
+    const defaultPackCost = it ? (parseFloat(it.unit_cost || 0) * packSize).toFixed(2) : "";
+    updateLine(idx, { item_id: itemId, unit_cost: defaultPackCost });
   };
 
   const addLine = () => setLines((prev) => [...prev, newLine()]);
@@ -147,12 +149,19 @@ export default function PurchaseOrders({ onOpenPO }) {
     try {
       const res = await createPurchaseOrder({
         ...form,
-        lines: lines.map((l) => ({
-          item_id: l.item_id,
-          qty_ordered: l.qty_ordered,
-          unit_cost: l.unit_cost,
-          notes: l.notes,
-        })),
+        lines: lines.map((l) => {
+          const item = items.find(i => i.id === l.item_id);
+          const packSize = parseFloat(item?.pack_size) || 1;
+          const qtyPacks = parseFloat(l.qty_ordered) || 0;
+          const packCost = parseFloat(l.unit_cost) || 0;
+
+          return {
+            item_id: l.item_id,
+            qty_ordered: qtyPacks * packSize, // Save UoM to DB
+            unit_cost: packCost / packSize,   // Save cost per mL/pc to DB
+            notes: l.notes,
+          };
+        }),
       });
       alert(`✅ ${res.po_number} created.`);
       setIsNewOpen(false);
@@ -351,8 +360,8 @@ export default function PurchaseOrders({ onOpenPO }) {
                   <thead className="bg-slate-50">
                     <tr className="border-b border-slate-200 text-slate-500 font-semibold text-[10px] uppercase">
                       <th className="py-2 px-2 w-[40%]">Item</th>
-                      <th className="py-2 px-2 w-[12%] text-right">Qty</th>
-                      <th className="py-2 px-2 w-[15%] text-right">Unit Cost ৳</th>
+                      <th className="py-2 px-2 w-[12%] text-right">Qty (Packs)</th>
+                      <th className="py-2 px-2 w-[15%] text-right">Cost / Pack ৳</th>
                       <th className="py-2 px-2 w-[15%] text-right">Line Total ৳</th>
                       <th className="py-2 px-2 w-[12%]">Notes</th>
                       <th className="py-2 px-2 w-[6%] text-center">·</th>
@@ -360,7 +369,12 @@ export default function PurchaseOrders({ onOpenPO }) {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {lines.map((l, i) => {
-                      const lineTotal = (parseFloat(l.qty_ordered) || 0) * (parseFloat(l.unit_cost) || 0);
+                      const item = items.find(it => it.id === l.item_id);
+                      const packSize = parseFloat(item?.pack_size) || 1;
+                      const qtyPacks = parseFloat(l.qty_ordered) || 0;
+                      const packCost = parseFloat(l.unit_cost) || 0;
+                      const lineTotal = qtyPacks * packCost;
+
                       return (
                         <tr key={l._key}>
                           <td className="py-1.5 px-2">
@@ -384,6 +398,11 @@ export default function PurchaseOrders({ onOpenPO }) {
                               onChange={(e) => updateLine(i, { qty_ordered: e.target.value })}
                               className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
                             />
+                            {packSize > 1 && (
+                              <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
+                                = {qtyPacks * packSize} {item?.uom}
+                              </div>
+                            )}
                           </td>
                           <td className="py-1.5 px-2">
                             <input
@@ -392,6 +411,11 @@ export default function PurchaseOrders({ onOpenPO }) {
                               onChange={(e) => updateLine(i, { unit_cost: e.target.value })}
                               className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
                             />
+                            {packSize > 1 && packCost > 0 && (
+                              <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
+                                = ৳{(packCost / packSize).toFixed(2)} / {item?.uom}
+                              </div>
+                            )}
                           </td>
                           <td className="py-1.5 px-2 text-right font-mono font-bold text-slate-800">
                             ৳{lineTotal.toLocaleString()}

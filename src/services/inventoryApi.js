@@ -408,7 +408,7 @@ export async function getPurchaseOrderById(poId) {
       .from("purchase_order_items")
       .select(`
         *,
-        item:inventory_items(id, code, name, uom, category)
+        item:inventory_items(id, code, name, uom, category, pack_size)
       `)
       .eq("po_id", poId)
       .order("created_at", { ascending: true }),
@@ -577,4 +577,138 @@ export async function getProcurementStats() {
       .filter((p) => p.status === "approved" || p.status === "partially_received")
       .reduce((s, p) => s + (parseFloat(p.total_amount) || 0), 0),
   };
+}
+
+// ============================================================
+// Machines & Consumption
+// ============================================================
+export async function getLaboratoryMachines() {
+  const { data, error } = await supabase
+    .from("laboratory_machines")
+    .select(`
+      *,
+      location:inventory_locations(id, name)
+    `)
+    .eq("is_active", true);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getActiveMachineReagents(machineId) {
+  const { data, error } = await supabase
+    .from("machine_reagents")
+    .select(`
+      *,
+      item:inventory_items(id, code, name, uom),
+      batch:inventory_batches(id, lot_number, expiry_date)
+    `)
+    .eq("machine_id", machineId)
+    .eq("status", "active");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function installMachineReagent({ machineId, itemId, batchId, expectedTests }) {
+  const { data, error } = await supabase.rpc("install_machine_reagent", {
+    p_payload: {
+      machine_id: machineId,
+      item_id: itemId,
+      batch_id: batchId,
+      expected_tests: expectedTests || 500,
+    }
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function saveTestConsumables(testId, consumables) {
+  // Delete existing mappings for this test
+  await supabase.from("test_consumables").delete().eq("test_id", testId);
+  
+  if (!consumables || consumables.length === 0) return;
+
+  const rows = consumables.map(c => ({
+    id: `TC-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`,
+    test_id: testId,
+    item_id: c.item_id,
+    qty_required: parseFloat(c.qty_required) || 1
+  }));
+
+  const { error } = await supabase.from("test_consumables").insert(rows);
+  if (error) throw new Error(error.message);
+}
+
+export async function getTestConsumables(testId) {
+  const { data, error } = await supabase
+    .from("test_consumables")
+    .select(`
+      id, item_id, qty_required,
+      item:inventory_items(id, code, name)
+    `)
+    .eq("test_id", testId);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+// ============================================================
+// Machine Consumption
+// ============================================================
+export async function consumeTestReagents(orderId) {
+  if (!orderId) return;
+  const { error } = await supabase.rpc("consume_test_reagents", { p_order_id: orderId });
+  if (error) {
+    // Non-fatal — we don't want to block verification if inventory mapping is missing
+    console.warn("[consumeTestReagents] Inventory deduction failed:", error.message);
+  }
+}
+
+// ============================================================
+// Stock Operations
+// ============================================================
+export async function transferStock(payload) {
+  const clean = {
+    item_id: payload.item_id,
+    batch_id: payload.batch_id || null,
+    qty: parseFloat(payload.qty) || 0,
+    from_location_id: payload.from_location_id,
+    to_location_id: payload.to_location_id,
+    notes: payload.notes || null,
+  };
+  const { data, error } = await supabase.rpc("transfer_stock", { p_payload: clean });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function adjustStock(payload) {
+  const clean = {
+    item_id: payload.item_id,
+    batch_id: payload.batch_id || null,
+    location_id: payload.location_id,
+    qty_delta: parseFloat(payload.qty_delta) || 0,
+    transaction_type: payload.transaction_type,
+    reason: payload.reason,
+  };
+  const { data, error } = await supabase.rpc("adjust_stock", { p_payload: clean });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// ============================================================
+// Reports
+// ============================================================
+export async function getLowStockReport() {
+  const { data, error } = await supabase.rpc("report_low_stock");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getExpiringBatches(days = 90) {
+  const { data, error } = await supabase.rpc("report_expiring_batches", { p_days: days });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getStockValuation() {
+  const { data, error } = await supabase.rpc("report_stock_valuation");
+  if (error) throw new Error(error.message);
+  return data || [];
 }

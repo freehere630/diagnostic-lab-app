@@ -4,6 +4,7 @@ import {
   Plus, Bell, Activity, Receipt, QrCode, Layers, ShieldCheck,
   FileText, Settings, UserCheck, Building2, Stethoscope, ChevronDown,
   Calendar, Package, PackagePlus, Truck, ListChecks, Home, ClipboardList,
+  Cpu,ArrowRightLeft,BarChart3,
 } from "lucide-react";
 import GlobalSearch from "./GlobalSearch";
 
@@ -12,6 +13,7 @@ const NAV_GROUPS = [
     id: "workflow",
     label: "Workflow",
     items: [
+      { id: "inventory-machines", label: "Machine Dashboard", icon: Cpu, roles: ["developer","manager","admin","store_keeper","technologist"] },
       { id: "reception",  label: "Reception POS",     icon: Receipt,     roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
       { id: "samples",    label: "Vials & Barcodes",  icon: QrCode,      roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
       { id: "worklists",  label: "Worklists",         icon: Layers,      roles: ["developer","manager","admin","verifier","biochemist","technologist"] },
@@ -23,6 +25,8 @@ const NAV_GROUPS = [
   id: "inventory",
   label: "Inventory",
   items: [
+    { id: "inventory-reports", label: "Reports & Alerts", icon: BarChart3, roles: ["developer","manager","admin","store_keeper"] },
+    { id: "inventory-ops", label: "Stock Operations", icon: ArrowRightLeft,    roles: ["developer","manager","admin","store_keeper","technologist","biochemist"] },
     { id: "inventory-dashboard", label: "Inventory Home",  icon: Home,         roles: ["developer","manager","admin","store_keeper"] },
     { id: "inventory-items",     label: "Item Master",     icon: Package,      roles: ["developer","manager","admin","store_keeper"] },
     { id: "inventory-po",        label: "Purchase Orders", icon: ClipboardList,roles: ["developer","manager","admin","store_keeper"] },

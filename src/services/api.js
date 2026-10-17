@@ -264,31 +264,41 @@ IMPRESSION:
 Normal 12-Lead Electrocardiogram. No ischemic ST-T changes or arrhythmias detected.`
 };
 
-// ==========================================
-// 3. MASTER DATA FETCHER
-// ==========================================
 export async function getMasterData() {
   try {
     const { data: departments } = await supabase.from("departments").select("*");
-    const { data: tests } = await supabase.from("tests").select("*, test_parameters(*)").order("name");
+    
+    // 1. Try to get tests with smart availability
+    let { data: tests, error: testErr } = await supabase.rpc("get_tests_with_availability");
+    
+    // 2. FAILSAFE: If the RPC fails (or hasn't been created yet), grab raw tests
+    if (testErr || !tests) {
+      console.warn("Smart availability RPC failed, falling back to raw tests table:", testErr?.message);
+      const { data: rawTests } = await supabase.from("tests").select("*, test_parameters(*)").order("name");
+      tests = rawTests || [];
+    }
 
     let finalDepts = departments && departments.length > 0 ? departments : [...DEFAULT_DEPARTMENTS];
     DEFAULT_DEPARTMENTS.forEach((defDept) => {
       if (!finalDepts.some((d) => d.id === defDept.id)) finalDepts.push(defDept);
     });
 
-    let currentTests = tests || [];
+    // Map parameters to the shape the UI expects
+    let currentTests = (tests || []).map((t) => ({
+      ...t,
+      parameters: t.test_parameters || t.parameters || [],
+      is_available: t.is_available !== false // default to true if not present
+    }));
 
-    try {
-      const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-      if (local && local.length > 0) {
-        const localMap = new Map(local.map(lt => [lt.id, lt]));
-        currentTests = currentTests.map(t => localMap.has(t.id) ? localMap.get(t.id) : t);
-        local.forEach(lt => {
-          if (!currentTests.some(ct => ct.id === lt.id)) currentTests.push(lt);
-        });
-      }
-    } catch (e) {}
+    // 3. RESTORE CACHE: If the DB is empty, pull from local storage
+    if (currentTests.length === 0) {
+      try {
+        const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
+        if (local && local.length > 0) {
+          currentTests = local;
+        }
+      } catch (e) {}
+    }
 
     return {
       departments: finalDepts,
@@ -299,7 +309,6 @@ export async function getMasterData() {
     return { departments: DEFAULT_DEPARTMENTS, tests: [] };
   }
 }
-
 export async function seedRadiologyCatalog() {
   const radiologyDepts = [
     { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },

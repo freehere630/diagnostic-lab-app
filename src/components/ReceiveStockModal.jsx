@@ -69,10 +69,10 @@ export default function ReceiveStockModal({ open, onClose, initialItemId = null,
 
   const handleItemChange = (idx, itemId) => {
     const it = items.find((i) => i.id === itemId);
-    updateLine(idx, {
-      item_id: itemId,
-      unit_cost: it ? String(it.unit_cost ?? 0) : "",
-    });
+    const packSize = parseFloat(it?.pack_size) || 1;
+    // Default the pack cost to the item's base unit cost * pack size
+    const defaultPackCost = it ? (parseFloat(it.unit_cost || 0) * packSize).toFixed(2) : "";
+    updateLine(idx, { item_id: itemId, unit_cost: defaultPackCost });
   };
 
   const submit = async (e) => {
@@ -93,14 +93,21 @@ export default function ReceiveStockModal({ open, onClose, initialItemId = null,
         referenceType: header.reference_type,
         referenceId: header.reference_id || null,
         notes: header.notes || null,
-        lines: lines.map((l) => ({
-          item_id: l.item_id,
-          lot_number: l.lot_number || null,
-          expiry_date: l.expiry_date || null,
-          unit_cost: l.unit_cost || 0,
-          qty: l.qty,
-          barcode: l.barcode || null,
-        })),
+        lines: lines.map((l) => {
+          const item = items.find(it => it.id === l.item_id);
+          const packSize = parseFloat(item?.pack_size) || 1;
+          const qtyPacks = parseFloat(l.qty) || 0;
+          const packCost = parseFloat(l.unit_cost) || 0;
+
+          return {
+            item_id: l.item_id,
+            lot_number: l.lot_number || null,
+            expiry_date: l.expiry_date || null,
+            unit_cost: packCost / packSize, // Save cost per mL/pc to DB
+            qty: qtyPacks * packSize,       // Save total mL/pcs to DB
+            barcode: l.barcode || null,
+          };
+        }),
       });
       alert("✅ Stock received.");
       if (onReceived) onReceived();
@@ -195,88 +202,107 @@ export default function ReceiveStockModal({ open, onClose, initialItemId = null,
                     <th className="py-2 px-2 w-[26%]">Item</th>
                     <th className="py-2 px-2 w-[14%]">Lot No.</th>
                     <th className="py-2 px-2 w-[13%]">Expiry</th>
-                    <th className="py-2 px-2 w-[12%] text-right">Qty</th>
-                    <th className="py-2 px-2 w-[12%] text-right">Unit Cost ৳</th>
+                    <th className="py-2 px-2 w-[12%] text-right">Qty (Packs)</th>
+                    <th className="py-2 px-2 w-[15%] text-right">Cost / Pack ৳</th>
                     <th className="py-2 px-2 w-[15%]">Barcode</th>
                     <th className="py-2 px-2 w-[6%] text-center">·</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {lines.map((l, i) => (
-                    <tr key={l._key}>
-                      <td className="py-1.5 px-2">
-                        <select
-                          value={l.item_id}
-                          onChange={(e) => handleItemChange(i, e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-200 rounded-lg bg-white outline-none"
-                        >
-                          <option value="">-- choose item --</option>
-                          {items.map((it) => (
-                            <option key={it.id} value={it.id}>
-                              {it.code} — {it.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-1.5 px-2">
-                        <input
-                          type="text"
-                          value={l.lot_number}
-                          onChange={(e) => updateLine(i, { lot_number: e.target.value })}
-                          placeholder="SY-2026-A1"
-                          className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2">
-                        <input
-                          type="date"
-                          value={l.expiry_date}
-                          onChange={(e) => updateLine(i, { expiry_date: e.target.value })}
-                          className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-[11px]"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={l.qty}
-                          onChange={(e) => updateLine(i, { qty: e.target.value })}
-                          placeholder="0"
-                          className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={l.unit_cost}
-                          onChange={(e) => updateLine(i, { unit_cost: e.target.value })}
-                          className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2">
-                        <div className="relative">
-                          <Barcode className="w-3 h-3 absolute left-2 top-2 text-slate-400" />
+                  {lines.map((l, i) => {
+                    const item = items.find(it => it.id === l.item_id);
+                    const packSize = parseFloat(item?.pack_size) || 1;
+                    const packCost = parseFloat(l.unit_cost) || 0;
+                    const unitCost = packCost / packSize;
+
+                    return (
+                      <tr key={l._key}>
+                        <td className="py-1.5 px-2">
+                          <select
+                            value={l.item_id}
+                            onChange={(e) => handleItemChange(i, e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-200 rounded-lg bg-white outline-none"
+                          >
+                            <option value="">-- choose item --</option>
+                            {items.map((it) => (
+                              <option key={it.id} value={it.id}>
+                                {it.code} — {it.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-1.5 px-2">
                           <input
                             type="text"
-                            value={l.barcode}
-                            onChange={(e) => updateLine(i, { barcode: e.target.value })}
-                            placeholder="scan"
-                            className="w-full pl-7 pr-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-[11px]"
+                            value={l.lot_number}
+                            onChange={(e) => updateLine(i, { lot_number: e.target.value })}
+                            placeholder="SY-2026-A1"
+                            className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono"
                           />
-                        </div>
-                      </td>
-                      <td className="py-1.5 px-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => removeLine(i)}
-                          className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <input
+                            type="date"
+                            value={l.expiry_date}
+                            onChange={(e) => updateLine(i, { expiry_date: e.target.value })}
+                            className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-[11px]"
+                          />
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={l.qty}
+                            onChange={(e) => updateLine(i, { qty: e.target.value })}
+                            placeholder="e.g. 1"
+                            className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
+                            title="Number of boxes/drums received"
+                          />
+                          {packSize > 1 && (
+                            <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
+                              = {(parseFloat(l.qty) || 0) * packSize} {item?.uom}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={l.unit_cost}
+                            onChange={(e) => updateLine(i, { unit_cost: e.target.value })}
+                            className="w-full px-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-right"
+                            title="Total price of one full pack"
+                          />
+                          {packSize > 1 && packCost > 0 && (
+                            <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
+                              = ৳{unitCost.toFixed(2)} / {item?.uom}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <div className="relative">
+                            <Barcode className="w-3 h-3 absolute left-2 top-2 text-slate-400" />
+                            <input
+                              type="text"
+                              value={l.barcode}
+                              onChange={(e) => updateLine(i, { barcode: e.target.value })}
+                              placeholder="scan"
+                              className="w-full pl-7 pr-2 py-1 border border-slate-200 rounded-lg outline-none font-mono text-[11px]"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => removeLine(i)}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
