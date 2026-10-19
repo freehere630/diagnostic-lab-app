@@ -1,3 +1,4 @@
+import { onInventoryUpdate } from "../utils/inventoryEvents";
 import React, { useState, useEffect } from "react";
 import { ListChecks, RefreshCw, Filter, ArrowUpRight, ArrowDownLeft, Download } from "lucide-react";
 import {
@@ -72,7 +73,10 @@ export default function StockLedger() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
-
+  useEffect(() => {
+    const unsub = onInventoryUpdate(load);
+    return () => unsub();
+  }, []);
   const totals = rows.reduce(
     (acc, r) => {
       const d = parseFloat(r.qty_delta) || 0;

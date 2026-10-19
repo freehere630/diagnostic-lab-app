@@ -1,3 +1,4 @@
+import { onInventoryUpdate } from "../utils/inventoryEvents";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   ClipboardList, Plus, Search, RefreshCw, X, Trash2,
@@ -78,7 +79,11 @@ export default function PurchaseOrders({ onOpenPO }) {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterStatus]);
-
+  // Add this new effect
+  useEffect(() => {
+    const unsub = onInventoryUpdate(load);
+    return () => unsub();
+  }, []);
   useEffect(() => {
     (async () => {
       try {

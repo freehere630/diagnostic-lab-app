@@ -1,3 +1,4 @@
+import { emitInventoryUpdate } from "../utils/inventoryEvents";
 import { supabase } from "../supabaseClient";
 
 // ============================================================
@@ -213,6 +214,7 @@ export async function receiveStock({
 
   const { data, error } = await supabase.rpc("receive_stock", { p_payload: payload });
   if (error) throw new Error(error.message);
+  emitInventoryUpdate();
   return data;
 }
 
@@ -490,6 +492,7 @@ export async function receiveAgainstPO(payload) {
   };
   const { data, error } = await supabase.rpc("receive_against_po", { p_payload: clean });
   if (error) throw new Error(error.message);
+  emitInventoryUpdate();
   return data;
 }
 
@@ -618,6 +621,8 @@ export async function installMachineReagent({ machineId, itemId, batchId, expect
     }
   });
   if (error) throw new Error(error.message);
+  
+  emitInventoryUpdate();
   return data;
 }
 
@@ -659,6 +664,7 @@ export async function consumeTestReagents(orderId) {
     // Non-fatal — we don't want to block verification if inventory mapping is missing
     console.warn("[consumeTestReagents] Inventory deduction failed:", error.message);
   }
+  emitInventoryUpdate(); 
 }
 
 // ============================================================
@@ -675,6 +681,7 @@ export async function transferStock(payload) {
   };
   const { data, error } = await supabase.rpc("transfer_stock", { p_payload: clean });
   if (error) throw new Error(error.message);
+  emitInventoryUpdate();
   return data;
 }
 
@@ -689,6 +696,7 @@ export async function adjustStock(payload) {
   };
   const { data, error } = await supabase.rpc("adjust_stock", { p_payload: clean });
   if (error) throw new Error(error.message);
+  emitInventoryUpdate();
   return data;
 }
 
@@ -711,4 +719,28 @@ export async function getStockValuation() {
   const { data, error } = await supabase.rpc("report_stock_valuation");
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+export async function discardMachineReagent(machineReagentId, reason) {
+  const { data, error } = await supabase.rpc("discard_machine_reagent", {
+    p_mr_id: machineReagentId,
+    p_reason: reason || "Pack empty"
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+export async function createLaboratoryMachine(name, deptId) {
+  const { data, error } = await supabase.rpc("create_laboratory_machine", {
+    p_name: name,
+    p_dept_id: deptId || null,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+export async function deleteLaboratoryMachine(machineId) {
+  const { data, error } = await supabase.rpc("delete_laboratory_machine", {
+    p_machine_id: machineId,
+  });
+  if (error) throw new Error(error.message);
+  return data;
 }

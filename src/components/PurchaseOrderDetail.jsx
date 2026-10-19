@@ -1,3 +1,4 @@
+import { onInventoryUpdate } from "../utils/inventoryEvents";
 import React, { useState, useEffect } from "react";
 import {
   ArrowLeft, CheckCircle2, XCircle, Truck, RefreshCw, AlertTriangle,
@@ -49,7 +50,10 @@ export default function PurchaseOrderDetail({ poId, onBack, onReceive }) {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [poId]);
-
+useEffect(() => {
+    const unsub = onInventoryUpdate(load);
+    return () => unsub();
+  }, []);
   const handleApprove = async () => {
     if (!window.confirm("Approve this purchase order?")) return;
     setBusy(true);

@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from "react";
 import {
   Cpu, Plus, RefreshCw, AlertTriangle, CheckCircle2,
-  X, Trash2, Box, Barcode
+  X, Trash2, Box, Barcode, Settings
 } from "lucide-react";
 import {
   getLaboratoryMachines, getActiveMachineReagents, installMachineReagent,
-  getInventoryItems, getFefoBatches
+  getInventoryItems, getFefoBatches, discardMachineReagent,
+  createLaboratoryMachine, deleteLaboratoryMachine
 } from "../services/inventoryApi";
 
-export default function MachineDashboard() {
+export default function MachineDashboard({ departments = [] }) {
   const [machines, setMachines] = useState([]);
   const [activeReagents, setActiveReagents] = useState({});
   const [loading, setLoading] = useState(true);
 
+  // Install Modal State
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [items, setItems] = useState([]);
@@ -24,6 +26,11 @@ export default function MachineDashboard() {
     expected_tests: "500",
   });
   const [installing, setInstalling] = useState(false);
+
+  // Add Machine State
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newMachine, setNewMachine] = useState({ name: "", dept_id: "" });
+  const [addingMachine, setAddingMachine] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -53,7 +60,14 @@ export default function MachineDashboard() {
     setIsInstallOpen(true);
     try {
       const its = await getInventoryItems({});
-      setItems(its);
+      
+      // FILTER: Only show items that belong to the machine's department, 
+      // or items that have no department assigned (like universal consumables)
+      const filtered = its.filter(it => 
+        !it.department_id || it.department_id === machine.department_id
+      );
+      
+      setItems(filtered);
     } catch (e) { /* silent */ }
   };
 
@@ -63,7 +77,6 @@ export default function MachineDashboard() {
     if (!itemId) return;
 
     try {
-      // Get batches available in the Main Store for this item
       const batches = await getFefoBatches(itemId, "LOC-MAIN");
       setAvailableBatches(batches);
       if (batches.length > 0) {
@@ -83,7 +96,7 @@ export default function MachineDashboard() {
         batchId: form.batch_id,
         expectedTests: parseInt(form.expected_tests) || 500,
       });
-      await load(); // Refresh the machine view
+      await load();
       setIsInstallOpen(false);
     } catch (err) {
       alert("Install failed: " + err.message);
@@ -92,10 +105,48 @@ export default function MachineDashboard() {
     }
   };
 
+  const handleReplacePack = async (mrId) => {
+    if (!window.confirm("Are you sure you want to discard this pack? Any remaining liquid will be logged as Wastage.")) return;
+    try {
+      await discardMachineReagent(mrId, "Drum physically empty / QC variance");
+      await load(); 
+    } catch (e) {
+      alert("Failed to discard: " + e.message);
+    }
+  };
+
+  const handleDeleteMachine = async (machineId, machineName) => {
+    if (!window.confirm(`Are you sure you want to delete the machine "${machineName}"?\n\nAny reagents currently on this machine will be moved back to the Main Store.`)) return;
+    try {
+      await deleteLaboratoryMachine(machineId);
+      await load();
+    } catch (err) {
+      alert("Failed to delete machine: " + err.message);
+    }
+  };
+
+  const submitMachine = async (e) => {
+    e.preventDefault();
+    if (!newMachine.name.trim()) return alert("Enter a machine name (e.g., Mindray BC-6800)");
+    if (!newMachine.dept_id) return alert("Select a department for this machine.");
+    
+    setAddingMachine(true);
+    try {
+      await createLaboratoryMachine(newMachine.name, newMachine.dept_id);
+      setIsAddOpen(false);
+      setNewMachine({ name: "", dept_id: "" });
+      await load();
+    } catch (err) {
+      alert("Failed to add machine: " + err.message);
+    } finally {
+      setAddingMachine(false);
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
       
-      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between gap-3">
+      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
             <Cpu className="w-4 h-4" />
@@ -107,9 +158,18 @@ export default function MachineDashboard() {
             </p>
           </div>
         </div>
-        <button onClick={load} className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-lg">
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        
+        <div className="flex items-center gap-2">
+          <button onClick={load} className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-lg">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            onClick={() => setIsAddOpen(true)}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Machine
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -119,7 +179,7 @@ export default function MachineDashboard() {
         </div>
       ) : machines.length === 0 ? (
         <div className="py-16 text-center text-slate-400 text-xs italic bg-white rounded-xl border border-slate-200/80">
-          No machines found in the database. Run the SQL setup to add a machine.
+          No machines found. Click "Add Machine" to create one.
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -132,12 +192,22 @@ export default function MachineDashboard() {
                     <h3 className="font-bold text-sm text-slate-800">{machine.name}</h3>
                     <p className="text-[10px] text-slate-500 font-mono mt-0.5">Location: {machine.location?.name}</p>
                   </div>
-                  <button
-                    onClick={() => openInstall(machine)}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Install Pack
-                  </button>
+                  
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleDeleteMachine(machine.id, machine.name)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                      title="Delete Machine"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => openInstall(machine)}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Install Pack
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-3 space-y-3">
@@ -157,14 +227,23 @@ export default function MachineDashboard() {
                             <div>
                               <div className="font-bold text-xs text-slate-900">{r.item?.name}</div>
                               <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                                Lot: {r.batch?.lot_number} · Exp: {r.batch?.expiry_date}
+                                Lot: {r.batch?.lot_number || "—"} · Exp: {r.batch?.expiry_date || "—"}
                               </div>
                             </div>
-                            <div className="text-right">
-                              <span className={`text-xs font-bold ${isLow ? "text-rose-600" : "text-emerald-600"}`}>
-                                {remaining} tests
-                              </span>
-                              <div className="text-[9px] text-slate-400 uppercase">Remaining</div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <span className={`text-xs font-bold ${isLow ? "text-rose-600" : "text-emerald-600"}`}>
+                                  {remaining} tests
+                                </span>
+                                <div className="text-[9px] text-slate-400 uppercase">Remaining</div>
+                              </div>
+                              <button
+                                onClick={() => handleReplacePack(r.id)}
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md transition"
+                                title="Discard this empty pack"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
                           
@@ -175,7 +254,7 @@ export default function MachineDashboard() {
                             />
                           </div>
                           <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
-                            <span>{r.tests_used} used</span>
+                            <span>{r.tests_used} consumed (tests + waste)</span>
                             <span>{r.expected_tests} total</span>
                           </div>
                         </div>
@@ -189,7 +268,60 @@ export default function MachineDashboard() {
         </div>
       )}
 
-      {/* Install Modal */}
+      {/* ADD MACHINE MODAL */}
+      {isAddOpen && (
+        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full text-xs">
+            <div className="p-4 border-b border-slate-200 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-slate-700" />
+                <span className="font-bold text-sm">Add New Analyzer</span>
+              </div>
+              <button onClick={() => setIsAddOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <form onSubmit={submitMachine} className="p-4 space-y-3">
+              <div>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Machine Name *</label>
+                <input
+                  type="text"
+                  value={newMachine.name}
+                  onChange={(e) => setNewMachine({ ...newMachine, name: e.target.value })}
+                  placeholder="e.g. Mindray BC-6800"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department *</label>
+                <select
+                  value={newMachine.dept_id}
+                  onChange={(e) => setNewMachine({ ...newMachine, dept_id: e.target.value })}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50"
+                >
+                  <option value="">— choose department —</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setIsAddOpen(false)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-semibold">
+                  Cancel
+                </button>
+                <button type="submit" disabled={addingMachine} className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold">
+                  {addingMachine ? "Adding…" : "Create Machine"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* INSTALL MODAL */}
       {isInstallOpen && (
         <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full text-xs">
@@ -216,6 +348,7 @@ export default function MachineDashboard() {
                     <option key={it.id} value={it.id}>{it.name} ({it.code})</option>
                   ))}
                 </select>
+                <p className="text-[10px] text-slate-400 mt-1">Only showing reagents mapped to {selectedMachine?.department_id ? departments.find(d=>d.id===selectedMachine.department_id)?.name : 'this department'}.</p>
               </div>
 
               <div>
@@ -247,9 +380,6 @@ export default function MachineDashboard() {
                   onChange={(e) => setForm({ ...form, expected_tests: e.target.value })}
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Default is 500. Check the manufacturer's box.
-                </p>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">

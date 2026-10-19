@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
 import {
   ArrowRightLeft, SlidersHorizontal, RefreshCw, AlertTriangle,
-  ArrowRight, CheckCircle2, X, Box, Package, ShieldAlert
+  ArrowRight, CheckCircle2,Cpu, X, Box, Package, ShieldAlert
 } from "lucide-react";
 import {
   getInventoryItems, getInventoryLocations, getFefoBatches,
   transferStock, adjustStock
 } from "../services/inventoryApi";
 
-export default function StockOperations() {
+export default function StockOperations({ onNavigate }) {
   const [activeTab, setActiveTab] = useState("TRANSFER");
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -137,6 +137,12 @@ export default function StockOperations() {
             <p className="text-[10px] text-slate-400">Transfer between locations or adjust for wastage/counts</p>
           </div>
         </div>
+        <button
+          onClick={() => onNavigate && onNavigate("inventory-machines")}
+          className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"
+        >
+          <Cpu className="w-3.5 h-3.5" /> Analyzer Dashboard
+        </button>
       </div>
 
       <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">

@@ -1,3 +1,4 @@
+import { onInventoryUpdate } from "../utils/inventoryEvents";
 import React, { useState, useEffect } from "react";
 import {
   Package, AlertTriangle, Clock, TrendingDown, Wallet,
@@ -45,6 +46,10 @@ export default function InventoryDashboard({ onNavigate }) {
   };
 
   useEffect(() => { load(); }, []);
+    useEffect(() => {
+    const unsub = onInventoryUpdate(load);
+    return () => unsub();
+  }, []);
 
   const formatTime = (iso) => {
     try {

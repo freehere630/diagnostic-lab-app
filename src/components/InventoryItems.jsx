@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Package, Plus, Edit, Trash2, Search, X, AlertTriangle,
-  PackagePlus, RefreshCw, Filter, ChevronLeft, ChevronRight
+  PackagePlus, RefreshCw, Filter, ChevronLeft, ChevronRight, Cpu
 } from "lucide-react";
 import {
   getInventoryItems, saveInventoryItem, deleteInventoryItem,
@@ -41,7 +41,7 @@ const EMPTY_FORM = {
 
 const PAGE_SIZE = 20;
 
-export default function InventoryItems({ onReceiveStock }) {
+export default function InventoryItems({ onReceiveStock, onNavigate }) {
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -174,11 +174,11 @@ export default function InventoryItems({ onReceiveStock }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 sm:w-64">
+          <div className="relative flex-1 sm:w-56">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by name, code, manufacturer…"
+              placeholder="Search by name, code…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-slate-50 transition"
@@ -191,6 +191,15 @@ export default function InventoryItems({ onReceiveStock }) {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
+          
+          {/* Link to Analyzer Dashboard */}
+          <button
+            onClick={() => onNavigate && onNavigate("inventory-machines")}
+            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
+          >
+            <Cpu className="w-3.5 h-3.5" /> Analyzer Dashboard
+          </button>
+
           <button
             onClick={() => onReceiveStock && onReceiveStock()}
             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
@@ -628,6 +637,20 @@ export default function InventoryItems({ onReceiveStock }) {
                   {saving ? "Saving…" : (editing ? "Update Item" : "Create Item")}
                 </button>
               </div>
+              {/* Add this right below the Category field */}
+                <div>
+                  <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department</label>
+                  <select
+                    value={form.department_id || ""}
+                    onChange={(e) => setForm({ ...form, department_id: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
+                  >
+                    <option value="">— General / No Dept —</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
             </form>
           </div>
         </div>

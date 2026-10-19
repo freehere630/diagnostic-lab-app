@@ -1,3 +1,4 @@
+import { onInventoryUpdate } from "./utils/inventoryEvents";
 import { consumeTestReagents } from "./services/inventoryApi";
 import InventoryReports from "./components/InventoryReports";
 import { saveTestConsumables, getTestConsumables } from "./services/inventoryApi";
@@ -849,6 +850,15 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
       }
     };
   }, [selectedOrderId]);
+    // --- Listen for inventory changes to refresh the POS & Catalog ---
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = onInventoryUpdate(() => {
+      fetchMaster(); // Refreshes the test catalog (POS out-of-stock logic)
+      fetchPaginatedOrders(true); // Refreshes the dashboard orders
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
 
   const handlePresetSwitch = (preset) => {
     setActivePreset(preset);
@@ -1147,7 +1157,8 @@ const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null)
         for (const p of effectiveParams) {
           const raw = vo.results?.[p.id]?.value
             ?? vo.results?.[p.id]
-            ?? vo.results?.[t.id]?.value;
+            ?? vo.results?.[t.id]?.value
+            ?? vo.results?.[t.id]; // <--- ADD THIS MISSING FALLBACK
           const val = raw === undefined || raw === null ? "" : String(raw).trim();
           if (val === "" || val.toLowerCase() === "undefined" || val.toLowerCase() === "null") {
             missing.push(`${t.code || t.name} → ${p.name || "Result"}`);
@@ -1676,8 +1687,8 @@ const openReceiveStock = (itemId = null) => {
         )}
 
         {activeTab === "inventory-items" && (
-          <InventoryItems onReceiveStock={openReceiveStock} />
-        )}
+            <InventoryItems onReceiveStock={openReceiveStock} onNavigate={setActiveTab} departments={departments} />
+          )}
 
         {activeTab === "inventory-suppliers" && (
           <SupplierManagement />
@@ -1687,8 +1698,8 @@ const openReceiveStock = (itemId = null) => {
           <StockLedger />
         )}
         {activeTab === "inventory-machines" && (
-            <MachineDashboard />
-          )}
+  <MachineDashboard departments={departments} />
+)}
         {activeTab === "inventory-po" && !selectedPOId && (
   <PurchaseOrders onOpenPO={(id) => setSelectedPOId(id)} />
 )}
@@ -1746,8 +1757,8 @@ const openReceiveStock = (itemId = null) => {
         />
       )}
       {activeTab === "inventory-ops" && (
-        <StockOperations />
-      )}
+  <StockOperations onNavigate={setActiveTab} />
+)}
       {activeTab === "inventory-reports" && (
         <InventoryReports />
       )}
