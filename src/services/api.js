@@ -913,23 +913,60 @@ export async function getLabSettings() {
 }
 
 export async function saveLabSettings(settingsData) {
-  const layoutObj = settingsData.report_layout !== undefined ? settingsData.report_layout : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
-  try { if (layoutObj) localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj)); } catch (e) {}
+  const layoutObj = settingsData.report_layout !== undefined
+    ? settingsData.report_layout
+    : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
+
+  try {
+    if (layoutObj) {
+      localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj));
+    }
+  } catch (e) {}
 
   const payload = {
-    id: "MAIN_SETTINGS", lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name, tagline: settingsData.tagline || DEFAULT_LAB_SETTINGS.tagline,
-    address: settingsData.address || DEFAULT_LAB_SETTINGS.address, phone: settingsData.phone || DEFAULT_LAB_SETTINGS.phone, email: settingsData.email || DEFAULT_LAB_SETTINGS.email,
-    website: settingsData.website || DEFAULT_LAB_SETTINGS.website, logo_data: settingsData.logo_data || settingsData.logoData || "", header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
-    header_color: settingsData.header_color || settingsData.headerColor || "#ffffff", receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
-    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer, report_layout: layoutObj
+    id: "MAIN_SETTINGS",
+    lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name,
+    tagline: settingsData.tagline || DEFAULT_LAB_SETTINGS.tagline,
+    address: settingsData.address || DEFAULT_LAB_SETTINGS.address,
+    phone: settingsData.phone || DEFAULT_LAB_SETTINGS.phone,
+    email: settingsData.email || DEFAULT_LAB_SETTINGS.email,
+    website: settingsData.website || DEFAULT_LAB_SETTINGS.website,
+    logo_data: settingsData.logo_data || settingsData.logoData || "",
+    header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
+    header_color: settingsData.header_color || settingsData.headerColor || "#ffffff",
+    receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
+    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer,
+    report_layout: layoutObj,
+    updated_at: new Date().toISOString()
   };
 
-  try { localStorage.setItem("apex_lab_settings", JSON.stringify(payload)); } catch (e) {}
   try {
-    const { data, error } = await supabase.from("lab_settings").upsert(payload).select().single();
-    if (!error && data) { data.report_layout = data.report_layout || layoutObj; localStorage.setItem("apex_lab_settings", JSON.stringify(data)); return data; }
-    if (error) { const { report_layout, ...safePayload } = payload; const { data: safeData } = await supabase.from("lab_settings").upsert(safePayload).select().single(); const combined = { ...(safeData || payload), report_layout: layoutObj }; localStorage.setItem("apex_lab_settings", JSON.stringify(combined)); return combined; }
-  } catch (err) {}
+    localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
+  } catch (e) {}
+
+  // THIS IS THE FIX: We now throw an error if the DB rejects it
+  try {
+    const { data, error } = await supabase
+      .from("lab_settings")
+      .upsert(payload, { onConflict: "id" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Lab settings save failed:", error);
+      throw new Error(error.message);
+    }
+
+    if (data) {
+      data.report_layout = data.report_layout || layoutObj;
+      localStorage.setItem("apex_lab_settings", JSON.stringify(data));
+      return data;
+    }
+  } catch (err) {
+    console.warn("Cloud save failed for lab settings:", err.message);
+    throw err; // This triggers the alert in App.jsx!
+  }
+
   return payload;
 }
 

@@ -2079,10 +2079,13 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 250);
 }
+
 export function printDoctorPayoutReceipt(payout, doctor, labSettings = {}) {
-  const labName = labSettings?.lab_name || "AL FATTAH DIAGNOSTIC";
+  const labName = (labSettings?.lab_name || "AL FATTAH DIAGNOSTIC").toUpperCase();
   const labPhone = labSettings?.phone || "01723854472";
-  const labAddress = labSettings?.address || "Solmaid Purbo Para, Vatara, Dhaka 1212";
+  const labAddress = labSettings?.address || "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212";
+  const labEmail = labSettings?.email || "contact@lab.com";
+  const logoData = labSettings?.logo_data || "";
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -2099,69 +2102,269 @@ export function printDoctorPayoutReceipt(payout, doctor, labSettings = {}) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Payout Receipt - ${doctor.name}</title>
+        <title>Payout Receipt - ${esc(doctor.name)}</title>
         <style>
-          @page { size: 148mm 210mm; margin: 10mm; }
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; color: #000; }
-          .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
-          .header h1 { margin: 0; font-size: 18px; text-transform: uppercase; }
-          .header p { margin: 2px 0; font-size: 11px; color: #555; }
-          .title { text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; text-decoration: underline; }
-          .details { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 20px; }
-          .table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 30px; }
-          .table th, .table td { border: 1px solid #000; padding: 8px; }
-          .table th { text-align: left; background: #f0f0f0; }
-          .amount-box { text-align: right; font-size: 16px; font-weight: bold; margin-bottom: 40px; }
-          .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
-          .sig-line { border-top: 1px solid #000; width: 200px; text-align: center; padding-top: 5px; font-size: 12px; }
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@400;600;700&display=swap');
+          
+          @page { size: A4 portrait; margin: 20mm 20mm; }
+          
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            color: #000;
+            font-size: 11pt;
+            line-height: 1.5;
+            min-height: 257mm; /* A4 height minus margins */
+            display: flex;
+            flex-direction: column;
+          }
+
+          /* ─── HEADER ─────────────────────────────────────────────── */
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+          }
+          
+          .branding {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+          }
+          
+          .logo {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+          }
+          
+          .lab-name {
+            font-family: 'Lora', serif;
+            font-size: 18pt;
+            font-weight: 700;
+            margin: 0 0 4px 0;
+            text-transform: uppercase;
+          }
+          
+          .lab-details {
+            font-size: 8.5pt;
+            color: #333;
+            margin: 0;
+            line-height: 1.4;
+          }
+
+          .title {
+            text-align: right;
+          }
+          
+          .title h2 {
+            font-size: 16pt;
+            font-weight: 700;
+            margin: 0 0 5px 0;
+            letter-spacing: 1px;
+          }
+          
+          .title p {
+            margin: 0;
+            font-size: 10pt;
+          }
+
+          /* ─── INFO SECTION ───────────────────────────────────────── */
+          .info-grid {
+            border: 1px solid black;
+            border-radius: 4px;
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+          }
+          
+          .info-col p {
+            margin: 0 0 6px 0;
+            font-size: 10.5pt;
+          }
+          
+          .info-col strong {
+            font-weight: 600;
+            display: inline-block;
+            
+          }
+
+          /* ─── TABLE ──────────────────────────────────────────────── */
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 40px;
+          }
+          
+          th {
+        
+            border-top: 1px solid #000;
+            border-bottom: 1px solid #000;
+            padding: 12px 10px;
+            text-align: left;
+            font-size: 10pt;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+          
+          td {
+            padding: 15px 10px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 11pt;
+          }
+          
+          .amount-col {
+            text-align: right;
+            width: 150px;
+          }
+
+          /* ─── TOTALS ─────────────────────────────────────────────── */
+          .totals {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 60px;
+          }
+          
+          .totals-table {
+            width: 300px;
+          }
+          
+          .totals-table td {
+            padding: 8px 10px;
+            border: none;
+          }
+          
+          .totals-table td:last-child {
+            text-align: right;
+            font-weight: 600;
+          }
+          
+          .grand-total td {
+            border-top: 1px solid #000;
+            border-bottom: 1px solid #000;
+            font-size: 14pt;
+            font-weight: 700;
+            padding: 12px 10px !important;
+          }
+
+          /* ─── SIGNATURES ─────────────────────────────────────────── */
+          .signatures {
+            display: flex;
+            justify-content: space-between;
+            margin-top: auto;
+            padding-top: 50px;
+          }
+          
+          .sig-block {
+            width: 200px;
+            text-align: center;
+          }
+          
+          .sig-line {
+            border-top: 1px solid #000;
+            padding-top: 8px;
+            font-size: 10pt;
+            font-weight: 600;
+          }
+
+          /* ─── FOOTER ─────────────────────────────────────────────── */
+          .footer {
+            text-align: center;
+            font-size: 8pt;
+            color: #666;
+            margin-top: 40px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 10px;
+          }
         </style>
       </head>
       <body>
+        
         <div class="header">
-          <h1>${labName}</h1>
-          <p>${labAddress}</p>
-          <p>Phone: ${labPhone}</p>
-        </div>
-        
-        <div class="title">Doctor Commission Payout Receipt</div>
-        
-        <div class="details">
-          <div>
-            <strong>Doctor:</strong> ${doctor.name}<br>
-            <strong>Doctor ID:</strong> ${doctor.id || 'N/A'}
+          <div class="branding">
+            ${logoData ? `<img src="${logoData}" class="logo" />` : ''}
+            <div>
+              <h1 class="lab-name">${esc(labName)}</h1>
+              <p class="lab-details">${esc(labAddress)}</p>
+              <p class="lab-details">Tel: ${esc(labPhone)} | Email: ${esc(labEmail)}</p>
+            </div>
           </div>
-          <div style="text-align: right;">
-            <strong>Receipt No:</strong> ${payout.id}<br>
-            <strong>Date:</strong> ${payout.payout_date}
+          <div class="title">
+            <h2>PAYOUT RECEIPT</h2>
+            <p><strong>Receipt No:</strong> ${esc(payout.id)}</p>
+            <p><strong>Date:</strong> ${esc(payout.payout_date)}</p>
           </div>
         </div>
 
-        <table class="table">
+        <div class="info-grid">
+          <div class="info-col">
+            <p><strong>Paid To:</strong> ${esc(doctor.name)}</p>
+            <p><strong>Doctor ID:</strong> ${esc(doctor.id || 'N/A')}</p>
+            
+          </div>
+          <div class="info-col" style="text-align: right;">
+            <p><strong>Payment Method:</strong> ${esc(payout.reference_no || 'Cash')}</p>
+            <p><strong>Qualifications:</strong> ${esc(doctor.degrees || 'Consultant')}</p>
+          </div>
+        </div>
+
+        <table>
           <thead>
             <tr>
               <th>Description</th>
-              <th style="text-align: right;">Amount</th>
+              <th class="amount-col">Amount (৳)</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>
-                Commission Payout for Referring Patients<br>
-                ${payout.notes ? `<em>Note: ${payout.notes}</em>` : ''}
+                <strong>Commission Payout for Referring Patients</strong>
+                ${payout.notes ? `<br><span style="font-size: 10pt; color: #555; font-style: italic;">Note: ${esc(payout.notes)}</span>` : ''}
               </td>
-              <td style="text-align: right; font-weight: bold;">৳ ${parseFloat(payout.amount).toLocaleString()}</td>
+              <td class="amount-col">
+                ${parseFloat(payout.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </td>
             </tr>
           </tbody>
         </table>
 
-        <div class="amount-box">
-          Payment Method / Ref: ${payout.reference_no || 'Cash'} &nbsp; | &nbsp; Total Paid: ৳ ${parseFloat(payout.amount).toLocaleString()}
+        <div class="totals">
+          <table class="totals-table">
+            <tr>
+              <td>Subtotal:</td>
+              <td>৳ ${parseFloat(payout.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+            </tr>
+            <tr class="grand-total">
+              <td>Total Paid:</td>
+              <td>৳ ${parseFloat(payout.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+            </tr>
+          </table>
         </div>
 
         <div class="signatures">
-          <div class="sig-line">Doctor Signature</div>
-          <div class="sig-line">Authorized Signature (Cashier)</div>
+          <div class="sig-block">
+            <div class="sig-line">Doctor Signature</div>
+          </div>
+          <div class="sig-block">
+            <div class="sig-line">Authorized Signature</div>
+          </div>
         </div>
+
+        <div class="footer">
+          This is a system-generated document. No physical stamp is required.
+        </div>
+
       </body>
     </html>
   `);
