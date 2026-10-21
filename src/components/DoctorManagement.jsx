@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Stethoscope, Plus, Edit, Trash2, Phone, Building2, GraduationCap, X, Search } from "lucide-react";
+import { Stethoscope, Plus, Edit, Trash2, Phone, Building2, GraduationCap, X, Search, Percent } from "lucide-react";
 
 export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, handleDeleteDoctor, isLoading }) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -12,12 +12,13 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
     designation: "",
     chamber: "",
     phone: "",
-    email: ""
+    email: "",
+    commission_rate: "20", // <--- NEW DEFAULT
   });
 
   const openNewDoctorModal = () => {
     setEditingDoctor(null);
-    setFormData({ name: "", degrees: "", designation: "", chamber: "", phone: "", email: "" });
+    setFormData({ name: "", degrees: "", designation: "", chamber: "", phone: "", email: "", commission_rate: "20" });
     setIsModalOpen(true);
   };
 
@@ -30,14 +31,12 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
       designation: doc.designation || "",
       chamber: doc.chamber || "",
       phone: doc.phone || "",
-      email: doc.email || ""
+      email: doc.email || "",
+      commission_rate: doc.commission_rate !== undefined && doc.commission_rate !== null ? String(doc.commission_rate) : "20", // <--- LOAD FROM DB
     });
     setIsModalOpen(true);
   };
 
-  // Await the parent's save; only close the modal on success so a
-  // failed save (network / RLS / duplicate) doesn't wipe the user's
-  // typed data. handleSaveDoctor returns true on success, false on error.
   const onSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return alert("Doctor name is required.");
@@ -134,6 +133,13 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                     <span>{doc.phone}</span>
                   </p>
                 )}
+
+                {/* NEW: COMMISSION BADGE */}
+                <div className="mt-2">
+                  <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-bold inline-flex items-center gap-1">
+                    <Percent className="w-3 h-3" /> {doc.commission_rate || 20}% Commission
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-100">
@@ -210,9 +216,9 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-slate-600 text-[11px] block mb-1">Phone Number</label>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-1">
+                  <label className="font-semibold text-slate-600 text-[11px] block mb-1">Phone</label>
                   <input
                     type="text"
                     placeholder="017xxxxxxxx"
@@ -221,14 +227,26 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                     className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono"
                   />
                 </div>
-                <div>
+                <div className="col-span-1">
                   <label className="font-semibold text-slate-600 text-[11px] block mb-1">Designation</label>
                   <input
                     type="text"
-                    placeholder="e.g. Associate Professor"
+                    placeholder="e.g. Associate Prof."
                     value={formData.designation}
                     onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
                     className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none"
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="font-semibold text-slate-600 text-[11px] block mb-1 text-indigo-700">Commission %</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={formData.commission_rate}
+                    onChange={(e) => setFormData({ ...formData, commission_rate: e.target.value })}
+                    className="w-full px-2.5 py-1.5 border border-indigo-200 bg-indigo-50/30 rounded-lg outline-none font-mono font-bold text-indigo-800"
                   />
                 </div>
               </div>

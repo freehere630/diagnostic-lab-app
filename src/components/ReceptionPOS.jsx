@@ -13,8 +13,10 @@ export default function ReceptionPOS({
   setSelectedTestIds,
   discountVal = 0,
   setDiscountVal,
-  paidVal,
-  setPaidVal,
+  paidCashVal = 0,
+  setPaidCashVal,
+  paidOnlineVal = 0,
+  setPaidOnlineVal,
   handleSaveOrderToDb,
   isLoading,
   doctorsList = []
@@ -122,15 +124,15 @@ export default function ReceptionPOS({
   const discountAmount = (subTotal * discountVal) / 100;
   const netPayable = Math.max(0, subTotal - discountAmount);
 
-  // in the useMemo area:
-  const currentPaid = paidVal !== undefined ? paidVal : 0;
+  const currentPaid = (parseFloat(paidCashVal) || 0) + (parseFloat(paidOnlineVal) || 0);
   const currentDue = Math.max(0, netPayable - currentPaid);
 
   useEffect(() => {
-    if (paidVal === undefined || paidVal === null) {
-      setPaidVal(netPayable);
+    // Only auto-fill if both fields are completely empty
+    if (paidCashVal === "" && paidOnlineVal === "" && netPayable > 0) {
+      setPaidCashVal(netPayable);
     }
-  }, [netPayable, paidVal, setPaidVal]);
+  }, [netPayable]);
 
   const safeDoctorsList = Array.isArray(doctorsList) ? doctorsList : [];
 
@@ -278,9 +280,7 @@ export default function ReceptionPOS({
                 className="w-full pl-2.5 pr-8 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium"
               />
 
-              {/* Clear button — lets the user quickly change to a different
-                  doctor without manually selecting-all and deleting the
-                  formatted "Name (Degrees)" string. */}
+              {/* Clear button */}
               {patientForm.doctor && patientForm.doctor.trim() !== "" && (
                 <button
                   type="button"
@@ -304,7 +304,11 @@ export default function ReceptionPOS({
                       <button
                         key={doc.id}
                         type="button"
-                        onClick={() => setPatientForm({ ...patientForm, doctor: `${doc.name} (${doc.degrees || doc.chamber || ''})`.trim() })}
+                        onClick={() => {
+                          const details = (doc.degrees || doc.chamber || '').trim();
+                          const displayName = details ? `${doc.name} (${details})` : doc.name;
+                          setPatientForm({ ...patientForm, doctor: displayName });
+                        }}
                         className="w-full p-2 text-left text-xs hover:bg-slate-50 transition flex justify-between items-center"
                       >
                         <div>
@@ -367,7 +371,7 @@ export default function ReceptionPOS({
             </div>
           </div>
 
-          {/* Test Grid (Space-Saving Chips) */}
+          {/* Test Grid */}
           {filteredCatalog.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
               No matching investigations found.
@@ -490,15 +494,26 @@ export default function ReceptionPOS({
               <span className="font-mono text-base text-blue-600">৳{netPayable.toFixed(0)}</span>
             </div>
 
-            <div className="flex justify-between items-center text-slate-700">
-              <span className="font-semibold">Paid Amount:</span>
-              <input
-                type="number"
-                min="0"
-                value={paidVal !== undefined ? paidVal : netPayable}
-                onChange={(e) => setPaidVal(Math.max(0, Number(e.target.value)))}
-                className="w-24 px-2 py-1 border border-emerald-300 bg-emerald-50/50 rounded-lg text-right font-mono font-bold text-emerald-950 text-xs outline-none focus:ring-1 focus:ring-emerald-500"
-              />
+            {/* SPLIT PAYMENT INPUTS */}
+            <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 space-y-1.5 mt-2 mb-2">
+              <div className="flex justify-between items-center text-slate-700">
+                <span className="font-semibold text-[11px]">Paid (Cash):</span>
+                <input
+                  type="number" min="0"
+                  value={paidCashVal}
+                  onChange={(e) => setPaidCashVal(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-24 px-2 py-1 border border-slate-300 rounded text-right font-mono font-bold text-slate-800 text-xs outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="flex justify-between items-center text-slate-700">
+                <span className="font-semibold text-[11px]">Paid (Online):</span>
+                <input
+                  type="number" min="0"
+                  value={paidOnlineVal}
+                  onChange={(e) => setPaidOnlineVal(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-24 px-2 py-1 border border-slate-300 rounded text-right font-mono font-bold text-slate-800 text-xs outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
 
             {/* High-visibility due indicator */}

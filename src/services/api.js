@@ -1,4 +1,5 @@
 import { supabase } from "../supabaseClient";
+
 // Format a Date as YYYY-MM-DD in the USER'S local timezone.
 const toLocalDateStr = (d = new Date()) => {
   const year = d.getFullYear();
@@ -11,7 +12,7 @@ const toLocalDateStr = (d = new Date()) => {
 // PostgREST treats , . : ( ) [ ] " ' % * and backslash as control
 // characters inside .or() / .ilike() filters. Strip them and clamp
 // the length so a stray comma from a patient name can't break the
-// query, and a 10 KB paste can't flood the request line.
+// query.
 // ─────────────────────────────────────────────────────────────
 export const sanitizeSearchInput = (s) =>
   String(s ?? "")
@@ -19,33 +20,9 @@ export const sanitizeSearchInput = (s) =>
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 64);
-// Insert a department row if it doesn't exist yet, but NEVER
-// overwrite an existing name. Previously we did an upsert that
-// wrote `{ id, name: deptId.replace("DEP-", "") }`, which
-// silently shortened "Immunology & Endocrinology" to "IMM" every
-// time a test was saved.
-async function ensureDepartmentExists(deptId) {
-  if (!deptId) return;
-  try {
-    const { data } = await supabase
-      .from("departments")
-      .select("id")
-      .eq("id", deptId)
-      .maybeSingle();
-    if (data) return; // exists — leave its name and icon alone
 
-    const defaultDept = DEFAULT_DEPARTMENTS.find((d) => d.id === deptId);
-    await supabase.from("departments").insert({
-      id: deptId,
-      name: defaultDept?.name || deptId.replace("DEP-", ""),
-      icon: defaultDept?.icon || "🔬"
-    });
-  } catch (e) {
-    // Non-fatal — the row may already exist.
-  }
-}
 // ==========================================
-// 1. MASTER DEPARTMENTS (Includes DEP-IMM)
+// 1. MASTER DEPARTMENTS & CLINICAL PARAMETERS
 // ==========================================
 export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-HEM", name: "Hematology & Coagulation", icon: "🩸" },
@@ -59,10 +36,6 @@ export const DEFAULT_DEPARTMENTS = [
   { id: "DEP-PAT", name: "Clinical Pathology & Urine", icon: "🧫" },
   { id: "DEP-HISTO", name: "Histopathology & Cytology", icon: "🔬" }
 ];
-
-// ==========================================
-// 2. STANDARD CLINICAL PARAMETER MODELS
-// ==========================================
 
 export const MASTER_CBC_PARAMETERS = [
   { name: "Hemoglobin (Hb)", unit: "g/dL", min: 11.5, max: 16.5, type: "numeric", defaultRef: "Adult Men: 13.0 - 17.5, Women: 11.5 - 15.5" },
@@ -186,7 +159,7 @@ export const MASTER_SEMEN_PARAMETERS = [
 ];
 
 export const DESCRIPTIVE_STANDARD_TEMPLATES = {
-  radiologyChest:
+  radiologyChest: 
 `CLINICAL INDICATION: Routine health screening / Respiratory evaluation.
 TECHNIQUE: Standard digital chest radiograph (P/A projection).
 
@@ -201,7 +174,7 @@ FINDINGS:
 IMPRESSION:
 Normal chest radiograph (No acute cardiopulmonary abnormality detected).`,
 
-  usgAbdomen:
+  usgAbdomen: 
 `CLINICAL INDICATION: Abdominal pain / General health assessment.
 TECHNIQUE: Real-time high-resolution abdominal sonography with 3.5 MHz curvilinear probe.
 
@@ -219,7 +192,7 @@ FINDINGS:
 IMPRESSION:
 Normal ultrasonographic study of whole abdomen.`,
 
-  histopathology:
+  histopathology: 
 `SPECIMEN: Punch Biopsy / Excisional Tissue Specimen.
 CLINICAL HISTORY & SITE: Suspected lesion / Routine biopsy evaluation.
 
@@ -232,7 +205,7 @@ Sections show tissue fragments lined by stratified squamous epithelium showing u
 DIAGNOSIS / IMPRESSION:
 Benign fibro-epithelial tissue fragments. Negative for malignancy.`,
 
-  fnacCytology:
+  fnacCytology: 
 `SPECIMEN / SITE: Fine Needle Aspiration Cytology (FNAC) of palpable swelling.
 CLINICAL HISTORY: Palpable painless nodule, duration 3 months.
 
@@ -245,7 +218,7 @@ Smears are cellular and show cohesive clusters and sheets of benign epithelial /
 CYTOLOGICAL OPINION:
 Features consistent with benign nodule / hyperplasia. No evidence of malignant cytology.`,
 
-  ecg12Lead:
+  ecg12Lead: 
 `CLINICAL INDICATION: Chest discomfort / Pre-operative evaluation.
 TECHNIQUE: Standard 12-lead resting electrocardiogram (25 mm/sec, 10 mm/mV).
 
@@ -264,6 +237,9 @@ IMPRESSION:
 Normal 12-Lead Electrocardiogram. No ischemic ST-T changes or arrhythmias detected.`
 };
 
+// ==========================================
+// 2. MASTER DATA FETCHER
+// ==========================================
 export async function getMasterData() {
   try {
     const { data: departments } = await supabase.from("departments").select("*");
@@ -271,9 +247,8 @@ export async function getMasterData() {
     // 1. Try to get tests with smart availability
     let { data: tests, error: testErr } = await supabase.rpc("get_tests_with_availability");
     
-    // 2. FAILSAFE: If the RPC fails (or hasn't been created yet), grab raw tests
+    // 2. FAILSAFE: If the RPC fails, grab raw tests
     if (testErr || !tests) {
-      console.warn("Smart availability RPC failed, falling back to raw tests table:", testErr?.message);
       const { data: rawTests } = await supabase.from("tests").select("*, test_parameters(*)").order("name");
       tests = rawTests || [];
     }
@@ -287,16 +262,14 @@ export async function getMasterData() {
     let currentTests = (tests || []).map((t) => ({
       ...t,
       parameters: t.test_parameters || t.parameters || [],
-      is_available: t.is_available !== false // default to true if not present
+      is_available: t.is_available !== false
     }));
 
     // 3. RESTORE CACHE: If the DB is empty, pull from local storage
     if (currentTests.length === 0) {
       try {
         const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-        if (local && local.length > 0) {
-          currentTests = local;
-        }
+        if (local && local.length > 0) currentTests = local;
       } catch (e) {}
     }
 
@@ -309,6 +282,7 @@ export async function getMasterData() {
     return { departments: DEFAULT_DEPARTMENTS, tests: [] };
   }
 }
+
 export async function seedRadiologyCatalog() {
   const radiologyDepts = [
     { id: "DEP-RAD", name: "Radiology & X-Ray", icon: "🩻" },
@@ -318,60 +292,24 @@ export async function seedRadiologyCatalog() {
   ];
 
   for (const dept of radiologyDepts) {
-    try {
-      await supabase.from("departments").upsert(dept);
-    } catch (e) {}
+    try { await supabase.from("departments").upsert(dept); } catch (e) {}
   }
 
   const radiologyTests = [
-    {
-      code: "XRAY-CHEST",
-      name: "X-Ray Chest (P/A View)",
-      deptId: "DEP-RAD",
-      price: "500",
-      sampleType: "Radiological Study",
-      tubeColor: "No Specimen (Imaging)",
-      isProfile: false,
-      reportType: "descriptive",
-      parameters: [{ name: "Chest Radiography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest }]
-    },
-    {
-      code: "USG-ABD",
-      name: "USG of Whole Abdomen",
-      deptId: "DEP-USG",
-      price: "1500",
-      sampleType: "Ultrasound Protocol",
-      tubeColor: "No Specimen (Imaging)",
-      isProfile: false,
-      reportType: "descriptive",
-      parameters: [{ name: "Abdominal Sonography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }]
-    },
-    {
-      code: "ECG-12",
-      name: "12-Lead Electrocardiogram (ECG)",
-      deptId: "DEP-CARD",
-      price: "350",
-      sampleType: "12-Lead Tracing",
-      tubeColor: "No Specimen (Imaging)",
-      isProfile: false,
-      reportType: "descriptive",
-      parameters: [{ name: "Electrocardiogram Findings", param_type: "text", unit: "Tracing", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead }]
-    }
+    { code: "XRAY-CHEST", name: "X-Ray Chest (P/A View)", deptId: "DEP-RAD", price: "500", sampleType: "Radiological Study", tubeColor: "No Specimen (Imaging)", isProfile: false, reportType: "descriptive", parameters: [{ name: "Chest Radiography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest }] },
+    { code: "USG-ABD", name: "USG of Whole Abdomen", deptId: "DEP-USG", price: "1500", sampleType: "Ultrasound Protocol", tubeColor: "No Specimen (Imaging)", isProfile: false, reportType: "descriptive", parameters: [{ name: "Abdominal Sonography Findings", param_type: "text", unit: "Report", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.usgAbdomen }] },
+    { code: "ECG-12", name: "12-Lead Electrocardiogram (ECG)", deptId: "DEP-CARD", price: "350", sampleType: "12-Lead Tracing", tubeColor: "No Specimen (Imaging)", isProfile: false, reportType: "descriptive", parameters: [{ name: "Electrocardiogram Findings", param_type: "text", unit: "Tracing", reference_text: DESCRIPTIVE_STANDARD_TEMPLATES.ecg12Lead }] }
   ];
 
   const addedTests = [];
   for (const t of radiologyTests) {
-    try {
-      const created = await createNewTestWithParameters(t);
-      if (created) addedTests.push(created);
-    } catch (e) {}
+    try { const created = await createNewTestWithParameters(t); if (created) addedTests.push(created); } catch (e) {}
   }
-
   return addedTests;
 }
 
 // ==========================================
-// 4. DOCTOR MANAGEMENT
+// 3. DOCTOR MANAGEMENT
 // ==========================================
 export async function getDoctorsList() {
   try {
@@ -387,12 +325,11 @@ export async function getDoctorsList() {
     if (local.length > 0) return local;
   } catch (e) {}
 
-  const defaultDoctors = [
+  return [
     { id: "DOC-001", name: "Prof. Dr. M. A. Rahman", degrees: "MBBS, FCPS (Medicine)", chamber: "Dhaka Medical College Hospital", phone: "01711000001" },
     { id: "DOC-002", name: "Dr. Farhana Yasmin", degrees: "MBBS, DGO, MCPS (Gyne & Obs)", chamber: "Popular Diagnostic Center", phone: "01819000002" },
     { id: "DOC-003", name: "Dr. K. S. Hossain", degrees: "MBBS, MD (Cardiology)", chamber: "National Heart Foundation", phone: "01912000003" }
   ];
-  return defaultDoctors;
 }
 
 export async function createOrUpdateDoctor(docData) {
@@ -404,16 +341,19 @@ export async function createOrUpdateDoctor(docData) {
     designation: docData.designation || "",
     chamber: docData.chamber || "",
     phone: docData.phone || "",
-    email: docData.email || ""
+    email: docData.email || "",
+    commission_rate: parseFloat(docData.commission_rate) || 20
   };
 
-  try { await supabase.from("doctors").upsert(row); } catch (e) {}
+  const { data, error } = await supabase.from("doctors").upsert(row).select().single();
+  if (error) throw new Error(error.message); // <--- THROW ERROR SO UI SHOWS IT
+
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_doctors") || "[]");
     const updated = [row, ...local.filter((d) => d.id !== docId)].slice(0, 500);
     localStorage.setItem("apex_local_doctors", JSON.stringify(updated));
   } catch (e) {}
-
+  
   return row;
 }
 
@@ -426,7 +366,7 @@ export async function deleteDoctor(docId) {
 }
 
 // ==========================================
-// 5. PATIENT SEARCH & HISTORY
+// 4. PATIENT SEARCH & HISTORY
 // ==========================================
 export async function searchPatients(query) {
   if (!query || query.trim().length < 2) return [];
@@ -434,70 +374,38 @@ export async function searchPatients(query) {
   if (cleanQ.length < 2) return [];
 
   try {
-    const { data, error } = await supabase
-      .from("patients")
-      .select("*")
-      .or(`id.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,name.ilike.%${cleanQ}%`)
-      .limit(10);
+    const { data, error } = await supabase.from("patients").select("*").or(`id.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,name.ilike.%${cleanQ}%`).limit(10);
     if (!error && data) return data;
   } catch (err) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    return local.filter((p) =>
-      (p.id && p.id.toLowerCase().includes(cleanQ)) ||
-      (p.phone && p.phone.includes(cleanQ)) ||
-      (p.name && p.name.toLowerCase().includes(cleanQ))
-    );
-  } catch (e) {
-    return [];
-  }
+    return local.filter((p) => (p.id && p.id.toLowerCase().includes(cleanQ)) || (p.phone && p.phone.includes(cleanQ)) || (p.name && p.name.toLowerCase().includes(cleanQ)));
+  } catch (e) { return []; }
 }
 
-// Shallow history query — only the fields the history modal actually
-// renders. The previous version pulled `*, test_parameters(*), results(*)`
-// which returned ~800 rows for a patient with 20 past orders. This
-// version returns ~1 row per order.
 export async function getPatientHistory(patientId) {
   if (!patientId) return [];
   try {
-    const { data, error } = await supabase
-      .from("orders")
-      .select(`
-        id,
-        order_date,
-        paid_amount,
-        due_amount,
-        qc_status,
-        order_tests(test:tests(id, name, code))
-      `)
-      .eq("patient_id", patientId)
-      .order("order_date", { ascending: false });
+    const { data, error } = await supabase.from("orders").select(`id, order_date, paid_amount, due_amount, qc_status, order_tests(test:tests(id, name, code))`).eq("patient_id", patientId).order("order_date", { ascending: false });
     if (!error && data) return data;
   } catch (err) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     return local.filter((o) => o.patient_id === patientId || o.patient?.id === patientId);
-  } catch (e) {
-    return [];
-  }
+  } catch (e) { return []; }
 }
 
 // ==========================================
-// 6. PAGINATED ORDERS QUERY
+// 5. PAGINATED ORDERS QUERY
 // ==========================================
 export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "", dateTo = "", searchQuery = "" }) {
   const fromIndex = (page - 1) * pageSize;
   const toIndex = fromIndex + pageSize - 1;
 
   try {
-    let query = supabase.from("orders").select(`
-      *,
-      patient:patients(*),
-      order_tests(*, test:tests(*, test_parameters(*))),
-      results(*)
-    `, { count: "estimated" });
+    let query = supabase.from("orders").select(`*, patient:patients(*), order_tests(*, test:tests(*, test_parameters(*))), results(*)`, { count: "estimated" });
 
     if (dateFrom && dateTo) {
       if (dateFrom === dateTo) query = query.eq("order_date", dateFrom);
@@ -509,105 +417,46 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
     if (safeQ) {
       const q = safeQ;
       const cleanDigits = q.replace(/\D/g, "");
-
       let matchedOrderIds = [];
       try {
-        const { data: resMatches } = await supabase
-          .from("results")
-          .select("order_id")
-          .or(`parameter_id.ilike.%${q}%,result_value.ilike.%${q}%`)
-          .limit(20);
-        if (resMatches && resMatches.length > 0) {
-          matchedOrderIds = resMatches.map(r => r.order_id).filter(Boolean);
-        }
+        const { data: resMatches } = await supabase.from("results").select("order_id").or(`parameter_id.ilike.%${q}%,result_value.ilike.%${q}%`).limit(20);
+        if (resMatches && resMatches.length > 0) matchedOrderIds = resMatches.map(r => r.order_id).filter(Boolean);
       } catch (e) {}
 
-      let orClauses = [
-        `barcode.ilike.%${q}%`,
-        `patient_id.ilike.%${q}%`,
-        `id.ilike.%${q}%`
-      ];
-
+      let orClauses = [`barcode.ilike.%${q}%`, `patient_id.ilike.%${q}%`, `id.ilike.%${q}%`];
       if (cleanDigits.length >= 8) {
         const unpadded = cleanDigits.replace(/^0+/, "");
-        if (unpadded !== q) {
-          orClauses.push(`barcode.ilike.%${unpadded}%`);
-        }
+        if (unpadded !== q) orClauses.push(`barcode.ilike.%${unpadded}%`);
       }
-
       matchedOrderIds.forEach(mId => orClauses.push(`id.eq.${mId}`));
       query = query.or(orClauses.join(","));
     }
 
-    query = query
-      .order("order_date", { ascending: false })
-      .order("id", { ascending: false })
-      .range(fromIndex, toIndex);
-
+    query = query.order("order_date", { ascending: false }).order("id", { ascending: false }).range(fromIndex, toIndex);
     const { data, count, error } = await query;
 
-    if (error) {
-      console.warn("[getOrdersPaginated] Primary query error:", error.message);
-    } else if (data) {
+    if (error) console.warn("[getOrdersPaginated] Primary query error:", error.message);
+    else if (data) {
       const primaryCount = (count ?? data.length) || 0;
-      return {
-        orders: data,
-        totalCount: primaryCount,
-        page,
-        pageSize,
-        totalPages: Math.ceil(primaryCount / pageSize),
-      };
+      return { orders: data, totalCount: primaryCount, page, pageSize, totalPages: Math.ceil(primaryCount / pageSize) };
     }
-  } catch (err) {
-    console.warn("[getOrdersPaginated] Primary query threw:", err.message);
-  }
+  } catch (err) { console.warn("[getOrdersPaginated] Primary query threw:", err.message); }
 
   try {
     let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "estimated" });
     if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
     if (dateTo) fallback = fallback.lte("order_date", dateTo);
-
-    const { data, count, error: fallbackError } = await fallback
-      .order("order_date", { ascending: false })
-      .order("id", { ascending: false })
-      .range(fromIndex, toIndex);
-
-    if (fallbackError) {
-      console.warn("[getOrdersPaginated] Fallback query error:", fallbackError.message);
-    }
-
+    const { data, count, error: fallbackError } = await fallback.order("order_date", { ascending: false }).order("id", { ascending: false }).range(fromIndex, toIndex);
     const fallbackCount = (count ?? (data?.length || 0)) || 0;
-    return {
-      orders: data || [],
-      totalCount: fallbackCount,
-      page,
-      pageSize,
-      totalPages: Math.ceil(fallbackCount / pageSize),
-    };
-  } catch (e) {
-    console.warn("[getOrdersPaginated] Fallback threw:", e.message);
-    return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 };
-  }
+    return { orders: data || [], totalCount: fallbackCount, page, pageSize, totalPages: Math.ceil(fallbackCount / pageSize) };
+  } catch (e) { return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 }; }
 }
 
 export async function getAllOrders() {
   let ordersList = [];
-
   try {
-    const { data, error } = await supabase
-      .from("orders")
-      .select(`
-        *,
-        patient:patients(*),
-        order_tests(*, test:tests(*, test_parameters(*))),
-        results(*)
-      `)
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .order("order_date", { ascending: false });
-
-    if (!error && data && data.length > 0) {
-      ordersList = data;
-    }
+    const { data, error } = await supabase.from("orders").select(`*, patient:patients(*), order_tests(*, test:tests(*, test_parameters(*))), results(*)`).order("created_at", { ascending: false, nullsFirst: false }).order("order_date", { ascending: false });
+    if (!error && data && data.length > 0) ordersList = data;
   } catch (e) {}
 
   try {
@@ -619,38 +468,23 @@ export async function getAllOrders() {
     }
   } catch (e) {}
 
-  return ordersList.sort((a, b) => {
-    const timeA = new Date(a.created_at || a.createdAt || a.order_date || a.date).getTime() || 0;
-    const timeB = new Date(b.created_at || b.createdAt || b.order_date || b.date).getTime() || 0;
-    return timeB - timeA;
-  });
+  return ordersList.sort((a, b) => (new Date(b.created_at || b.createdAt || b.order_date || b.date).getTime() || 0) - (new Date(a.created_at || a.createdAt || a.order_date || a.date).getTime() || 0));
 }
 
 // ==========================================
-// 7. ORDER CREATION: ATOMIC VIAL REGISTRATION
+// 6. ORDER CREATION: ATOMIC + SPLIT PAYMENTS
 // ==========================================
-export async function createNewOrder({ patientData, testIds, discount, netPayable, paidAmount, dueAmount, testCatalog = [] }) {
-  const patientId = patientData.id && patientData.id.trim()
-    ? patientData.id.trim()
-    : `P-${Math.floor(1000 + Math.random() * 9000)}`;
+export async function createNewOrder({ patientData, testIds, discount, netPayable, paidCash, paidOnline, dueAmount, testCatalog = [] }) {
+  const patientId = patientData.id && patientData.id.trim() ? patientData.id.trim() : `P-${Math.floor(1000 + Math.random() * 9000)}`;
 
   const selectedTests = (testCatalog || []).filter((t) => testIds.includes(t.id)).map(t => {
     const rawParams = t.test_parameters || t.parameters || [];
     const resolvedParams = rawParams.length > 0 ? rawParams : [{
       id: `P-${(t.code || t.id || "TEST").toUpperCase().replace(/[^A-Z0-9]/g, "")}-01`,
-      test_id: t.id,
-      name: t.name || "Test",
-      param_type: t.report_type === "descriptive" ? "text" : "numeric",
-      unit: "",
-      min_range: null,
-      max_range: null,
-      reference_text: t.report_type === "descriptive" ? DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest : "Normal"
+      test_id: t.id, name: t.name || "Test", param_type: t.report_type === "descriptive" ? "text" : "numeric",
+      unit: "", min_range: null, max_range: null, reference_text: t.report_type === "descriptive" ? DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest : "Normal"
     }];
-    return {
-      ...t,
-      test_parameters: resolvedParams,
-      parameters: resolvedParams
-    };
+    return { ...t, test_parameters: resolvedParams, parameters: resolvedParams };
   });
 
   const departmentVials = [];
@@ -685,14 +519,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     const key = `${deptCode}-${tubeShort}`;
 
     if (!departmentVials.some((v) => v.key === key)) {
-      departmentVials.push({
-        key,
-        deptId: deptId,
-        deptCode: deptCode,
-        tubeColor: tubeColor,
-        testIds: [t.id, t.code, t.name],
-        testNames: [t.code || t.name]
-      });
+      departmentVials.push({ key, deptId: deptId, deptCode: deptCode, tubeColor: tubeColor, testIds: [t.id, t.code, t.name], testNames: [t.code || t.name] });
     } else {
       const existing = departmentVials.find((v) => v.key === key);
       existing.testIds.push(t.id, t.code, t.name);
@@ -710,9 +537,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   });
 
   selectedTests.forEach((t) => {
-    const matchedVial = departmentVials.find(v =>
-      v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)
-    ) || departmentVials[0];
+    const matchedVial = departmentVials.find(v => v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)) || departmentVials[0];
     t.vialBarcode = matchedVial.barcode;
     t.barcode = matchedVial.barcode;
   });
@@ -725,14 +550,7 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   let receiptSeq = 1;
   try {
-    const { data: recent } = await supabase
-      .from("orders")
-      .select("receipt_no")
-      .eq("order_date", todayDate)
-      .not("receipt_no", "is", null)
-      .order("receipt_no", { ascending: false })
-      .limit(50);
-
+    const { data: recent } = await supabase.from("orders").select("receipt_no").eq("order_date", todayDate).not("receipt_no", "is", null).order("receipt_no", { ascending: false }).limit(50);
     if (recent && recent.length > 0) {
       const prefix = `RCP-${todayCompact}-`;
       for (const r of recent) {
@@ -743,56 +561,28 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
         }
       }
     }
-  } catch (e) {
-    console.warn("Receipt sequence lookup warning:", e);
-  }
+  } catch (e) { console.warn("Receipt sequence lookup warning:", e); }
 
   const receiptNo = `RCP-${todayCompact}-${String(receiptSeq).padStart(4, "0")}`;
   const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
 
   const patientRow = {
-    id: patientId,
-    name: patientData.name,
-    age: parseInt(patientData.age) || 0,
-    gender: patientData.gender || "Other",
-    phone: patientData.phone || "N/A",
-    address: `Ref: ${referringDoctor}`
+    id: patientId, name: patientData.name, age: parseInt(patientData.age) || 0, gender: patientData.gender || "Other", phone: patientData.phone || "N/A", address: `Ref: ${referringDoctor}`
   };
 
   try {
     const { error: patErr } = await supabase.from("patients").upsert(patientRow);
-    if (patErr) {
-      await supabase.from("patients").upsert({
-        id: patientId,
-        name: patientData.name,
-        age: parseInt(patientData.age) || 0,
-        gender: patientData.gender || "Other",
-        phone: patientData.phone || "N/A"
-      });
-    }
-  } catch (e) {
-    console.warn("Patient upsert notice:", e);
-  }
+    if (patErr) await supabase.from("patients").upsert({ id: patientId, name: patientData.name, age: parseInt(patientData.age) || 0, gender: patientData.gender || "Other", phone: patientData.phone || "N/A" });
+  } catch (e) { console.warn("Patient upsert notice:", e); }
 
   try {
     const localPatients = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    const mergedPatients = [patientRow, ...localPatients.filter(p => p.id !== patientId)].slice(0, 1000);
-    localStorage.setItem("apex_local_patients", JSON.stringify(mergedPatients));
+    localStorage.setItem("apex_local_patients", JSON.stringify([patientRow, ...localPatients.filter(p => p.id !== patientId)].slice(0, 1000)));
   } catch (e) {}
 
   for (const t of selectedTests) {
     try {
-      await supabase.from("tests").upsert({
-        id: t.id,
-        code: (t.code || "TEST").toUpperCase(),
-        name: t.name,
-        dept_id: t.dept_id || t.deptId || "DEP-BIO",
-        price: parseFloat(t.price) || 0,
-        sample_type: t.sample_type || "Serum",
-        tube_color: t.tube_color || "Red / Yellow (SST / Plain Clot)",
-        is_profile: Boolean(t.is_profile),
-        is_available: true
-      });
+      await supabase.from("tests").upsert({ id: t.id, code: (t.code || "TEST").toUpperCase(), name: t.name, dept_id: t.dept_id || t.deptId || "DEP-BIO", price: parseFloat(t.price) || 0, sample_type: t.sample_type || "Serum", tube_color: t.tube_color || "Red / Yellow (SST / Plain Clot)", is_profile: Boolean(t.is_profile), is_available: true });
     } catch (e) {}
   }
 
@@ -800,8 +590,11 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const finalDiscountPercent = discount || 0;
   const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
   const finalNet = netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
-  const finalPaid = paidAmount !== undefined ? parseFloat(paidAmount) : finalNet;
-  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaid);
+  
+  const finalPaidCash = parseFloat(paidCash) || 0;
+  const finalPaidOnline = parseFloat(paidOnline) || 0;
+  const finalPaidTotal = finalPaidCash + finalPaidOnline;
+  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaidTotal);
 
   const ordersPayload = [];
   const orderTestsPayload = [];
@@ -814,107 +607,37 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     const isMaster = (i === 0);
     const thisOrderId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}`;
 
-    const testsForThisVial = selectedTests.filter(t =>
-      v.testIds.includes(t.id) ||
-      v.testIds.includes(t.code) ||
-      v.testNames.includes(t.name) ||
-      v.testNames.includes(t.code)
-    );
-
+    const testsForThisVial = selectedTests.filter(t => v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code));
     const vialSubtotal = testsForThisVial.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
     const vialNet = vialSubtotal - (vialSubtotal * finalDiscountPercent) / 100;
 
     const vialOrderRow = {
-      id: thisOrderId,
-      patient_id: patientId,
-      barcode: vialBarcode,
-      order_date: todayDate,
-      created_at: nowIso,
-      receipt_no: receiptNo,
-      subtotal: isMaster ? subTotal : vialSubtotal,
-      discount_percent: finalDiscountPercent,
-      net_payable: isMaster ? finalNet : vialNet,
-      paid_amount: isMaster ? finalPaid : 0,
-      due_amount: isMaster ? finalDue : 0,
-      sample_status: "Order Created",
-      qc_status: "Pending",
-      is_locked: false
+      id: thisOrderId, patient_id: patientId, barcode: vialBarcode, order_date: todayDate, created_at: nowIso, receipt_no: receiptNo,
+      subtotal: isMaster ? subTotal : vialSubtotal, discount_percent: finalDiscountPercent, net_payable: isMaster ? finalNet : vialNet,
+      paid_amount: isMaster ? finalPaidTotal : 0, due_amount: isMaster ? finalDue : 0, sample_status: "Order Created", qc_status: "Pending", is_locked: false
     };
     ordersPayload.push(vialOrderRow);
 
-    for (const t of testsForThisVial) {
-      orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
-    }
+    for (const t of testsForThisVial) orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
 
-    resultsMetadataPayload.push({
-      order_id: thisOrderId,
-      parameter_id: "SPECIMEN_VIALS",
-      result_value: JSON.stringify([v])
-    });
-    resultsMetadataPayload.push({
-      order_id: thisOrderId,
-      parameter_id: `VIAL_DEPT_${vialBarcode}`,
-      result_value: v.deptId
-    });
-    resultsMetadataPayload.push({
-      order_id: thisOrderId,
-      parameter_id: `VIAL_TESTS_${vialBarcode}`,
-      result_value: JSON.stringify(v.testNames)
-    });
-    for (const t of testsForThisVial) {
-      resultsMetadataPayload.push({
-        order_id: thisOrderId,
-        parameter_id: `TEST_VIAL_${t.id}`,
-        result_value: vialBarcode
-      });
-    }
+    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: "SPECIMEN_VIALS", result_value: JSON.stringify([v]) });
+    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `VIAL_DEPT_${vialBarcode}`, result_value: v.deptId });
+    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `VIAL_TESTS_${vialBarcode}`, result_value: JSON.stringify(v.testNames) });
+    for (const t of testsForThisVial) resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `TEST_VIAL_${t.id}`, result_value: vialBarcode });
 
     createdVialOrders.push({
-      ...vialOrderRow,
-      orderId: thisOrderId,
-      date: todayDate,
-      createdAt: nowIso,
-      created_at: nowIso,
-      barcode: vialBarcode,
-      allBarcodes: barcodeList,
-      barcodesList: barcodeList,
-      doctor: referringDoctor,
-      receiptNo: receiptNo,
-      patient: {
-        id: patientId,
-        name: patientData.name,
-        age: patientData.age,
-        gender: patientData.gender,
-        phone: patientData.phone,
-        doctor: referringDoctor,
-        address: `Ref: ${referringDoctor}`
-      },
-      tests: testsForThisVial,
-      vialTests: testsForThisVial,
-      vials: [v],
+      ...vialOrderRow, orderId: thisOrderId, date: todayDate, createdAt: nowIso, created_at: nowIso, barcode: vialBarcode,
+      allBarcodes: barcodeList, barcodesList: barcodeList, doctor: referringDoctor, receiptNo: receiptNo,
+      patient: { id: patientId, name: patientData.name, age: patientData.age, gender: patientData.gender, phone: patientData.phone, doctor: referringDoctor, address: `Ref: ${referringDoctor}` },
+      tests: testsForThisVial, vialTests: testsForThisVial, vials: [v],
       order_tests: testsForThisVial.map(t => ({ test_id: t.id, test: t })),
-      billing: {
-        subTotal: vialSubtotal,
-        discount: finalDiscountPercent,
-        netPayable: vialNet,
-        paid: isMaster ? finalPaid : vialNet,
-        due: isMaster ? finalDue : 0
-      },
-      results: {},
-      qcStatus: "Pending",
-      isLocked: false,
-      verifierRemarks: "",
-      dept_remarks: {},
-      deptRemarks: {}
+      billing: { subTotal: vialSubtotal, discount: finalDiscountPercent, netPayable: vialNet, paid: isMaster ? finalPaidTotal : vialNet, due: isMaster ? finalDue : 0, paidCash: isMaster ? finalPaidCash : vialNet, paidOnline: isMaster ? finalPaidOnline : 0 },
+      results: {}, qcStatus: "Pending", isLocked: false, verifierRemarks: "", dept_remarks: {}, deptRemarks: {}
     });
   }
 
   const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_vial_orders", {
-    p_payload: {
-      orders: ordersPayload,
-      order_tests: orderTestsPayload,
-      results_metadata: resultsMetadataPayload
-    }
+    p_payload: { orders: ordersPayload, order_tests: orderTestsPayload, results_metadata: resultsMetadataPayload }
   });
 
   if (rpcErr) {
@@ -924,136 +647,111 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
 
   const returnedIds = new Set((rpcResult || []).map((r) => r.id));
   for (const p of ordersPayload) {
-    if (!returnedIds.has(p.id)) {
-      throw new Error("Order was not persisted: " + p.id);
-    }
+    if (!returnedIds.has(p.id)) throw new Error("Order was not persisted: " + p.id);
+  }
+
+  // LOG SPLIT PAYMENTS
+  if (finalPaidTotal > 0) {
+    try {
+      if (finalPaidCash > 0) {
+        await supabase.from("payments").insert({
+          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+          payment_date: todayDate, amount: finalPaidCash, payment_method: "Cash", order_id: createdVialOrders[0].orderId
+        });
+      }
+      if (finalPaidOnline > 0) {
+        await supabase.from("payments").insert({
+          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+          payment_date: todayDate, amount: finalPaidOnline, payment_method: "Online", order_id: createdVialOrders[0].orderId
+        });
+      }
+    } catch (e) { console.warn("Payment log failed:", e); }
   }
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     const newIds = new Set(createdVialOrders.map(o => o.orderId));
-    const merged = [...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))].slice(0, 500);
-    localStorage.setItem("apex_local_orders", JSON.stringify(merged));
+    localStorage.setItem("apex_local_orders", JSON.stringify([...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))].slice(0, 500)));
   } catch (e) {}
 
   const masterForPrint = {
-    ...createdVialOrders[0],
-    tests: selectedTests,
-    order_tests: selectedTests.map(t => ({ test_id: t.id, test: t })),
-    vials: departmentVials,
-    allBarcodes: barcodeList,
-    barcodesList: barcodeList,
-    billing: {
-      subTotal: subTotal,
-      discount: finalDiscountPercent,
-      netPayable: finalNet,
-      paid: finalPaid,
-      due: finalDue
-    }
+    ...createdVialOrders[0], tests: selectedTests, order_tests: selectedTests.map(t => ({ test_id: t.id, test: t })), vials: departmentVials, allBarcodes: barcodeList, barcodesList: barcodeList,
+    billing: { subTotal: subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaidTotal, due: finalDue, paidCash: finalPaidCash, paidOnline: finalPaidOnline }
   };
 
   return masterForPrint;
 }
 
 // ==========================================
-// 8. SETTLE DUE & RESULT ENTRY
+// 7. SETTLE DUE & RESULT ENTRY
 // ==========================================
-export async function settleOrderDue(orderId, collectedAmount) {
-  const amountToClear = parseFloat(collectedAmount) || 0;
+export async function settleOrderDue(orderId, collectedCash, collectedOnline) {
+  const amtCash = parseFloat(collectedCash) || 0;
+  const amtOnline = parseFloat(collectedOnline) || 0;
+  const totalClear = amtCash + amtOnline;
+  
   const { data: currentOrd } = await supabase.from("orders").select("paid_amount, due_amount").eq("id", orderId).single();
 
-  let newPaid = amountToClear;
+  let newPaid = totalClear;
   let newDue = 0;
   if (currentOrd) {
     const prevPaid = parseFloat(currentOrd.paid_amount) || 0;
     const prevDue = parseFloat(currentOrd.due_amount) || 0;
-    newPaid = prevPaid + Math.min(amountToClear, prevDue);
-    newDue = Math.max(0, prevDue - amountToClear);
+    newPaid = prevPaid + Math.min(totalClear, prevDue);
+    newDue = Math.max(0, prevDue - totalClear);
   }
 
   await supabase.from("orders").update({ paid_amount: newPaid, due_amount: newDue }).eq("id", orderId);
+
+  // LOG SPLIT PAYMENTS
+  if (amtCash > 0) {
+    await supabase.from("payments").insert({
+      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+      payment_date: new Date().toISOString().slice(0, 10), amount: amtCash, payment_method: "Cash", order_id: orderId
+    });
+  }
+  if (amtOnline > 0) {
+    await supabase.from("payments").insert({
+      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
+      payment_date: new Date().toISOString().slice(0, 10), amount: amtOnline, payment_method: "Online", order_id: orderId
+    });
+  }
+
   return { newPaid, newDue };
 }
 
 export async function saveTestResult(orderId, parameterId, resultValue, statusFlag = "ENTERED") {
-  if (!orderId || !parameterId || String(parameterId).trim() === "" || parameterId === "undefined") {
-    return null;
-  }
+  if (!orderId || !parameterId || String(parameterId).trim() === "" || parameterId === "undefined") return null;
 
-  const cleanValue = (
-    resultValue === undefined ||
-    resultValue === null ||
-    String(resultValue).trim() === "undefined" ||
-    String(resultValue).trim() === "null"
-  ) ? "" : String(resultValue).trim();
+  const cleanValue = (resultValue === undefined || resultValue === null || String(resultValue).trim() === "undefined" || String(resultValue).trim() === "null") ? "" : String(resultValue).trim();
 
-  const { data, error } = await supabase
-    .from("results")
-    .upsert({
-      order_id: orderId,
-      parameter_id: String(parameterId).trim(),
-      result_value: cleanValue,
-      status_flag: statusFlag
-    }, { onConflict: "order_id,parameter_id" });
+  const { data, error } = await supabase.from("results").upsert({ order_id: orderId, parameter_id: String(parameterId).trim(), result_value: cleanValue, status_flag: statusFlag }, { onConflict: "order_id,parameter_id" });
 
   if (error) throw error;
   return data;
 }
 
 export async function verifyAndLockOrder(orderId, verifierRemarks, verifiedByName) {
-  const { data, error } = await supabase
-    .from("orders")
-    .update({
-      qc_status: "Verified",
-      sample_status: "Verified",
-      is_locked: true,
-      verifier_remarks: verifierRemarks,
-      verified_at: new Date().toISOString()
-    })
-    .eq("id", orderId);
+  const { data, error } = await supabase.from("orders").update({ qc_status: "Verified", sample_status: "Verified", is_locked: true, verifier_remarks: verifierRemarks, verified_at: new Date().toISOString() }).eq("id", orderId);
   if (error) throw error;
   return data;
 }
 
 // ==========================================
-// 9. REJECTION & RECOLLECTION WORKFLOW
+// 8. REJECTION & RECOLLECTION WORKFLOW
 // ==========================================
 export async function requestSampleRecollection(orderId, reason = "Hemolyzed Specimen", remarks = "") {
   const fullRemarks = `[RECOLLECTION REQUIRED: ${reason}] ${remarks}`.trim();
   const targetId = String(orderId || "").trim();
 
   try {
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        sample_status: "Repeat Collection Required",
-        qc_status: "Pending",
-        verifier_remarks: fullRemarks
-      })
-      .eq("id", targetId);
-
-    if (error) {
-      await supabase.from("orders").update({ verifier_remarks: fullRemarks }).eq("id", targetId);
-    }
-  } catch (err) {
-    console.warn("Supabase notice on reject:", err);
-  }
+    const { error } = await supabase.from("orders").update({ sample_status: "Repeat Collection Required", qc_status: "Pending", verifier_remarks: fullRemarks }).eq("id", targetId);
+    if (error) await supabase.from("orders").update({ verifier_remarks: fullRemarks }).eq("id", targetId);
+  } catch (err) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    const updated = local.map((o) =>
-      (o.id === targetId || o.orderId === targetId || o.barcode === targetId)
-        ? {
-            ...o,
-            sample_status: "Repeat Collection Required",
-            sampleStatus: "Repeat Collection Required",
-            qc_status: "Pending",
-            qcStatus: "Pending",
-            verifier_remarks: fullRemarks,
-            verifierRemarks: fullRemarks
-          }
-        : o
-    );
+    const updated = local.map((o) => (o.id === targetId || o.orderId === targetId || o.barcode === targetId) ? { ...o, sample_status: "Repeat Collection Required", sampleStatus: "Repeat Collection Required", qc_status: "Pending", qcStatus: "Pending", verifier_remarks: fullRemarks, verifierRemarks: fullRemarks } : o);
     localStorage.setItem("apex_local_orders", JSON.stringify(updated));
   } catch (e) {}
 
@@ -1065,34 +763,13 @@ export async function markSampleRecollected(orderId) {
   const targetId = String(orderId || "").trim();
 
   try {
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        sample_status: "Sample Recollected",
-        verifier_remarks: cleanRemarks
-      })
-      .eq("id", targetId);
-
-    if (error) {
-      await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetId);
-    }
-  } catch (err) {
-    console.warn("Supabase notice for recollection:", err);
-  }
+    const { error } = await supabase.from("orders").update({ sample_status: "Sample Recollected", verifier_remarks: cleanRemarks }).eq("id", targetId);
+    if (error) await supabase.from("orders").update({ verifier_remarks: cleanRemarks }).eq("id", targetId);
+  } catch (err) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    const updated = local.map((o) =>
-      (o.id === targetId || o.orderId === targetId || o.barcode === targetId)
-        ? {
-            ...o,
-            sample_status: "Sample Recollected",
-            sampleStatus: "Sample Recollected",
-            verifierRemarks: cleanRemarks,
-            verifier_remarks: cleanRemarks
-          }
-        : o
-    );
+    const updated = local.map((o) => (o.id === targetId || o.orderId === targetId || o.barcode === targetId) ? { ...o, sample_status: "Sample Recollected", sampleStatus: "Sample Recollected", verifierRemarks: cleanRemarks, verifier_remarks: cleanRemarks } : o);
     localStorage.setItem("apex_local_orders", JSON.stringify(updated));
   } catch (e) {}
 
@@ -1100,50 +777,26 @@ export async function markSampleRecollected(orderId) {
 }
 
 // ==========================================
-// 10. TEST CATALOG CRUD & PARAMETERS UPSERT
+// 9. TEST CATALOG CRUD
 // ==========================================
 export async function toggleTestAvailability(testId, isAvailable) {
-  const { data, error } = await supabase
-    .from("tests")
-    .update({ is_available: isAvailable })
-    .eq("id", testId);
-
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-    const updated = local.map(t => t.id === testId ? { ...t, is_available: isAvailable } : t);
-    localStorage.setItem("apex_local_tests", JSON.stringify(updated));
-  } catch (e) {}
-
+  const { data, error } = await supabase.from("tests").update({ is_available: isAvailable }).eq("id", testId);
+  try { localStorage.setItem("apex_local_tests", JSON.stringify(JSON.parse(localStorage.getItem("apex_local_tests") || "[]").map(t => t.id === testId ? { ...t, is_available: isAvailable } : t))); } catch (e) {}
   if (error) throw error;
   return data;
 }
 
-// ==========================================
-// createNewTestWithParameters
-// Single atomic RPC. If the SQL function hasn't been deployed, the
-// error surfaces clearly instead of half-creating the test.
-// ==========================================
 export async function createNewTestWithParameters(testData) {
   const testId = `T-${testData.code.replace(/[^A-Za-z0-9]/g, "").toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-
-  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
-    (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
-
+  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" || (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
   const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
 
-  await ensureDepartmentExists(deptId);
+  try { await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") }); } catch (e) {}
 
   const testPayload = {
-    id: testId,
-    code: testData.code.trim(),
-    name: testData.name.trim(),
-    dept_id: deptId,
-    price: parseFloat(testData.price) || 0,
-    sample_type: testData.sampleType || testData.sample_type || "Serum",
-    tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
-    report_type: isDescriptive ? "descriptive" : "tabular",
-    is_available: testData.is_available !== undefined ? testData.is_available : true
+    id: testId, code: testData.code.trim(), name: testData.name.trim(), dept_id: deptId, price: parseFloat(testData.price) || 0,
+    sample_type: testData.sampleType || testData.sample_type || "Serum", tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile), report_type: isDescriptive ? "descriptive" : "tabular", is_available: testData.is_available !== undefined ? testData.is_available : true
   };
 
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
@@ -1151,75 +804,30 @@ export async function createNewTestWithParameters(testData) {
     const minVal = p.min !== "" && p.min !== null && p.min !== undefined && !isNaN(parseFloat(p.min)) ? parseFloat(p.min) : null;
     const maxVal = p.max !== "" && p.max !== null && p.max !== undefined && !isNaN(parseFloat(p.max)) ? parseFloat(p.max) : null;
     const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
-
     let safeType = p.param_type || "numeric";
     if (safeType === "multirange") safeType = "numeric";
     if (safeType === "descriptive") safeType = "text";
-
-    return {
-      id: p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}`,
-      test_id: testId,
-      name: p.name.trim(),
-      param_type: safeType,
-      unit: (p.unit || "").trim(),
-      min_range: minVal,
-      max_range: maxVal,
-      reference_text: refText || null
-    };
+    return { id: p.id && String(p.id).startsWith("P-") ? p.id : `P-${testId}-${idx + 1}`, test_id: testId, name: p.name.trim(), param_type: safeType, unit: (p.unit || "").trim(), min_range: minVal, max_range: maxVal, reference_text: refText || null };
   });
 
-  const { error: rpcErr } = await supabase.rpc("create_test_with_parameters", {
-    p_test: testPayload,
-    p_params: paramRows
-  });
+  const { error: rpcErr } = await supabase.rpc("create_test_with_parameters", { p_test: testPayload, p_params: paramRows });
+  if (rpcErr) throw new Error("Could not save the test atomically. " + rpcErr.message);
 
-  if (rpcErr) {
-    console.error("[createNewTestWithParameters] RPC failed:", rpcErr.message);
-    throw new Error(
-      "Could not save the test atomically. " +
-      (rpcErr.message || "") +
-      " — make sure the SQL functions from Batch 4 have been deployed."
-    );
-  }
-
-  const fullTestWithParams = {
-    ...testPayload,
-    id: testId,
-    test_parameters: paramRows,
-    parameters: paramRows
-  };
-
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-    const merged = [fullTestWithParams, ...local.filter(t => t.id !== testId)].slice(0, 3000);
-    localStorage.setItem("apex_local_tests", JSON.stringify(merged));
-  } catch (e) {}
-
+  const fullTestWithParams = { ...testPayload, id: testId, test_parameters: paramRows, parameters: paramRows };
+  try { localStorage.setItem("apex_local_tests", JSON.stringify([fullTestWithParams, ...JSON.parse(localStorage.getItem("apex_local_tests") || "[]").filter(t => t.id !== testId)].slice(0, 3000))); } catch (e) {}
   return fullTestWithParams;
 }
 
-// ==========================================
-// updateExistingTest
-// Single atomic RPC. Removed parameters, their orphan results, and
-// the updated rows commit together or not at all.
-// ==========================================
 export async function updateExistingTest(testId, testData) {
-  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" ||
-    (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
-
+  const isDescriptive = testData.reportType === "descriptive" || testData.report_type === "descriptive" || (testData.parameters || []).some(p => p.param_type === "text" || p.param_type === "descriptive");
   const deptId = testData.deptId || testData.dept_id || "DEP-BIO";
-  await ensureDepartmentExists(deptId);
+
+  try { await supabase.from("departments").upsert({ id: deptId, name: deptId.replace("DEP-", "") }); } catch (e) {}
 
   const testPayload = {
-    code: testData.code.trim(),
-    name: testData.name.trim(),
-    dept_id: deptId,
-    price: parseFloat(testData.price) || 0,
-    sample_type: testData.sampleType || testData.sample_type || "Serum",
-    tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
-    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile),
-    report_type: isDescriptive ? "descriptive" : "tabular",
-    is_available: testData.is_available !== undefined ? testData.is_available : true
+    code: testData.code.trim(), name: testData.name.trim(), dept_id: deptId, price: parseFloat(testData.price) || 0,
+    sample_type: testData.sampleType || testData.sample_type || "Serum", tube_color: testData.tubeColor || testData.tube_color || "Red / Yellow (SST / Plain Clot)",
+    is_profile: isDescriptive ? false : Boolean(testData.isProfile || testData.is_profile), report_type: isDescriptive ? "descriptive" : "tabular", is_available: testData.is_available !== undefined ? testData.is_available : true
   };
 
   const validParams = (testData.parameters || []).filter((p) => p.name && p.name.trim() !== "");
@@ -1229,277 +837,109 @@ export async function updateExistingTest(testId, testData) {
     const minVal = rawMin !== "" && !isNaN(parseFloat(rawMin)) ? parseFloat(rawMin) : null;
     const maxVal = rawMax !== "" && !isNaN(parseFloat(rawMax)) ? parseFloat(rawMax) : null;
     const refText = (p.reference_text || p.ref_text || p.default_template || p.template_text || "").trim();
-
-    const pId = p.id && String(p.id).trim() !== "" && !String(p.id).startsWith("p-")
-      ? String(p.id).trim()
-      : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
-
+    const pId = p.id && String(p.id).trim() !== "" && !String(p.id).startsWith("p-") ? String(p.id).trim() : `P-${testId}-${idx + 1}-${Date.now().toString().slice(-4)}`;
     let safeType = p.param_type || "numeric";
     if (safeType === "multirange") safeType = "numeric";
     if (safeType === "descriptive") safeType = "text";
-
-    return {
-      id: pId,
-      test_id: testId,
-      name: p.name.trim(),
-      param_type: safeType,
-      unit: (p.unit || "").trim(),
-      min_range: minVal,
-      max_range: maxVal,
-      reference_text: refText || null
-    };
+    return { id: pId, test_id: testId, name: p.name.trim(), param_type: safeType, unit: (p.unit || "").trim(), min_range: minVal, max_range: maxVal, reference_text: refText || null };
   });
 
   if (paramRows.length > 0) {
-    const { error: rpcErr } = await supabase.rpc("update_test_with_parameters", {
-      p_test_id: testId,
-      p_test: testPayload,
-      p_params: paramRows
-    });
-
-    if (rpcErr) {
-      console.error("[updateExistingTest] RPC failed:", rpcErr.message);
-      throw new Error(
-        "Could not update the test atomically. " +
-        (rpcErr.message || "") +
-        " — make sure the SQL functions from Batch 4 have been deployed."
-      );
-    }
+    const { error: rpcErr } = await supabase.rpc("update_test_with_parameters", { p_test_id: testId, p_test: testPayload, p_params: paramRows });
+    if (rpcErr) throw new Error("Could not update the test atomically. " + rpcErr.message);
   } else {
-    // No parameters provided — just update the header row.
     const { error: updErr } = await supabase.from("tests").update(testPayload).eq("id", testId);
     if (updErr) throw new Error(updErr.message);
   }
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-    const updatedTestObj = {
-      ...testPayload,
-      id: testId,
-      test_parameters: paramRows,
-      parameters: paramRows
-    };
-    const merged = [updatedTestObj, ...local.filter(t => t.id !== testId)].slice(0, 3000);
-    localStorage.setItem("apex_local_tests", JSON.stringify(merged));
+    localStorage.setItem("apex_local_tests", JSON.stringify([{ ...testPayload, id: testId, test_parameters: paramRows, parameters: paramRows }, ...local.filter(t => t.id !== testId)].slice(0, 3000)));
   } catch (e) {}
 }
 
-// ==========================================
-// deleteTest
-// Single atomic RPC. Cascades through results, order_tests, and
-// test_parameters as one unit.
-// ==========================================
 export async function deleteTest(testId) {
-  const { error: rpcErr } = await supabase.rpc("delete_test_cascade", {
-    p_test_id: testId
-  });
-
-  if (rpcErr) {
-    console.error("[deleteTest] RPC failed:", rpcErr.message);
-    throw new Error(
-      "Could not delete the test atomically. " +
-      (rpcErr.message || "") +
-      " — make sure the SQL functions from Batch 4 have been deployed."
-    );
-  }
-
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_tests") || "[]");
-    localStorage.setItem("apex_local_tests", JSON.stringify(local.filter(t => t.id !== testId)));
-  } catch (e) {}
+  const { error: rpcErr } = await supabase.rpc("delete_test_cascade", { p_test_id: testId });
+  if (rpcErr) throw new Error("Could not delete the test atomically. " + rpcErr.message);
+  try { localStorage.setItem("apex_local_tests", JSON.stringify(JSON.parse(localStorage.getItem("apex_local_tests") || "[]").filter(t => t.id !== testId))); } catch (e) {}
 }
 
-// Reads from staff_profiles (joined conceptually with auth.users).
+// ==========================================
+// 10. STAFF, SETTINGS & BARCODE
+// ==========================================
 function mapStaffProfile(row) {
-  return {
-    id: row.user_id,
-    user_id: row.user_id,
-    full_name: row.full_name,
-    role: row.role,
-    designation: row.designation || "",
-    signature_data: row.signature_data || row.full_name,
-    is_active: row.is_active,
-    created_at: row.created_at,
-  };
+  return { id: row.user_id, user_id: row.user_id, full_name: row.full_name, role: row.role, designation: row.designation || "", signature_data: row.signature_data || row.full_name, is_active: row.is_active, created_at: row.created_at };
 }
 
 export async function getStaffUsers() {
   try {
-    const { data, error } = await supabase
-      .from("staff_profiles")
-      .select("*")
-      .order("created_at");
-    if (error) {
-      console.error("[getStaffUsers] query failed:", error.message, error);
-    } else if (data && data.length > 0) {
+    const { data, error } = await supabase.from("staff_profiles").select("*").order("created_at");
+    if (error) console.error("[getStaffUsers] query failed:", error.message, error);
+    else if (data && data.length > 0) {
       const mapped = data.map(mapStaffProfile);
       try { localStorage.setItem("apex_local_staff", JSON.stringify(mapped)); } catch (e) {}
       return mapped;
     }
-  } catch (e) {
-    console.error("[getStaffUsers] threw:", e);
-  }
+  } catch (e) { console.error("[getStaffUsers] threw:", e); }
 
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_local_staff") || "[]");
-    if (local.length > 0) return local;
-  } catch (e) {}
+  try { const local = JSON.parse(localStorage.getItem("apex_local_staff") || "[]"); if (local.length > 0) return local; } catch (e) {}
   return [];
 }
 
 export const DEFAULT_LAB_SETTINGS = {
-  id: "MAIN_SETTINGS",
-  lab_name: "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER",
-  tagline: "With Al-Fattah on the Journey to Wellness",
-  address: "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212",
-  phone: "01723854472, 01624787444",
-  email: "alfattahdiagnostic@gmail.com",
-  website: "www.alfattahlab.com",
-  logo_data: "",
-  header_bg: "#20122e",
-  header_color: "#ffffff",
-  receipt_footer: "Please scan the QR code to check real-time report status & download results.",
-  report_footer: "",
-  report_layout: null
+  id: "MAIN_SETTINGS", lab_name: "AL FATTAH DIAGNOSTIC & CONSULTATION CENTER", tagline: "With Al-Fattah on the Journey to Wellness", address: "Solmaid Purbo Para, Panir pump, Vatara, Dhaka 1212",
+  phone: "01723854472, 01624787444", email: "alfattahdiagnostic@gmail.com", website: "www.alfattahlab.com", logo_data: "", header_bg: "#20122e", header_color: "#ffffff",
+  receipt_footer: "Please scan the QR code to check real-time report status & download results.", report_footer: "", report_layout: null
 };
 
 export function getLocalReportLayout() {
-  try {
-    const raw = localStorage.getItem("apex_report_layout");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.header?.elements && parsed?.footer?.elements) {
-        return parsed;
-      }
-    }
-  } catch (e) {}
+  try { const raw = localStorage.getItem("apex_report_layout"); if (raw) { const parsed = JSON.parse(raw); if (parsed?.header?.elements && parsed?.footer?.elements) return parsed; } } catch (e) {}
   return null;
 }
 
 export async function getLabSettings() {
   const localLayout = getLocalReportLayout();
-
   try {
-    const { data, error } = await supabase
-      .from("lab_settings")
-      .select("*")
-      .eq("id", "MAIN_SETTINGS")
-      .maybeSingle();
-
+    const { data, error } = await supabase.from("lab_settings").select("*").eq("id", "MAIN_SETTINGS").maybeSingle();
     if (!error && data && data.lab_name) {
       const resolvedLayout = data.report_layout || localLayout || DEFAULT_LAB_SETTINGS.report_layout;
       const mergedData = { ...data, report_layout: resolvedLayout };
-
-      try {
-        localStorage.setItem("apex_lab_settings", JSON.stringify(mergedData));
-        if (resolvedLayout) {
-          localStorage.setItem("apex_report_layout", JSON.stringify(resolvedLayout));
-        }
-      } catch (e) {}
-
+      try { localStorage.setItem("apex_lab_settings", JSON.stringify(mergedData)); if (resolvedLayout) localStorage.setItem("apex_report_layout", JSON.stringify(resolvedLayout)); } catch (e) {}
       return mergedData;
     }
-  } catch (err) {
-    console.warn("Lab settings cloud fetch notice:", err);
-  }
-
-  try {
-    const local = JSON.parse(localStorage.getItem("apex_lab_settings") || "null");
-    if (local && local.lab_name) {
-      if (!local.report_layout && localLayout) {
-        local.report_layout = localLayout;
-      }
-      return local;
-    }
-  } catch (e) {}
-
-  return {
-    ...DEFAULT_LAB_SETTINGS,
-    report_layout: localLayout || DEFAULT_LAB_SETTINGS.report_layout
-  };
+  } catch (err) {}
+  try { const local = JSON.parse(localStorage.getItem("apex_lab_settings") || "null"); if (local && local.lab_name) { if (!local.report_layout && localLayout) local.report_layout = localLayout; return local; } } catch (e) {}
+  return { ...DEFAULT_LAB_SETTINGS, report_layout: localLayout || DEFAULT_LAB_SETTINGS.report_layout };
 }
 
 export async function saveLabSettings(settingsData) {
-  const layoutObj = settingsData.report_layout !== undefined
-    ? settingsData.report_layout
-    : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
-
-  try {
-    if (layoutObj) {
-      localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj));
-    }
-  } catch (e) {}
+  const layoutObj = settingsData.report_layout !== undefined ? settingsData.report_layout : (getLocalReportLayout() || DEFAULT_LAB_SETTINGS.report_layout);
+  try { if (layoutObj) localStorage.setItem("apex_report_layout", JSON.stringify(layoutObj)); } catch (e) {}
 
   const payload = {
-    id: "MAIN_SETTINGS",
-    lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name,
-    tagline: settingsData.tagline || DEFAULT_LAB_SETTINGS.tagline,
-    address: settingsData.address || DEFAULT_LAB_SETTINGS.address,
-    phone: settingsData.phone || DEFAULT_LAB_SETTINGS.phone,
-    email: settingsData.email || DEFAULT_LAB_SETTINGS.email,
-    website: settingsData.website || DEFAULT_LAB_SETTINGS.website,
-    logo_data: settingsData.logo_data || settingsData.logoData || "",
-    header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
-    header_color: settingsData.header_color || settingsData.headerColor || "#ffffff",
-    receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
-    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer,
-    report_layout: layoutObj
+    id: "MAIN_SETTINGS", lab_name: settingsData.lab_name || settingsData.labName || DEFAULT_LAB_SETTINGS.lab_name, tagline: settingsData.tagline || DEFAULT_LAB_SETTINGS.tagline,
+    address: settingsData.address || DEFAULT_LAB_SETTINGS.address, phone: settingsData.phone || DEFAULT_LAB_SETTINGS.phone, email: settingsData.email || DEFAULT_LAB_SETTINGS.email,
+    website: settingsData.website || DEFAULT_LAB_SETTINGS.website, logo_data: settingsData.logo_data || settingsData.logoData || "", header_bg: settingsData.header_bg || settingsData.headerBg || "#20122e",
+    header_color: settingsData.header_color || settingsData.headerColor || "#ffffff", receipt_footer: settingsData.receipt_footer || settingsData.receiptFooter || DEFAULT_LAB_SETTINGS.receipt_footer,
+    report_footer: settingsData.report_footer || settingsData.reportFooter || DEFAULT_LAB_SETTINGS.report_footer, report_layout: layoutObj
   };
 
-  try {
-    localStorage.setItem("apex_lab_settings", JSON.stringify(payload));
-  } catch (e) {}
-
+  try { localStorage.setItem("apex_lab_settings", JSON.stringify(payload)); } catch (e) {}
   try {
     const { data, error } = await supabase.from("lab_settings").upsert(payload).select().single();
-    if (!error && data) {
-      data.report_layout = data.report_layout || layoutObj;
-      localStorage.setItem("apex_lab_settings", JSON.stringify(data));
-      return data;
-    }
-
-    if (error) {
-      const { report_layout, ...safePayload } = payload;
-      const { data: safeData } = await supabase.from("lab_settings").upsert(safePayload).select().single();
-      const combined = { ...(safeData || payload), report_layout: layoutObj };
-      localStorage.setItem("apex_lab_settings", JSON.stringify(combined));
-      return combined;
-    }
-  } catch (err) {
-    console.warn("Cloud save notice for lab settings:", err.message);
-  }
-
+    if (!error && data) { data.report_layout = data.report_layout || layoutObj; localStorage.setItem("apex_lab_settings", JSON.stringify(data)); return data; }
+    if (error) { const { report_layout, ...safePayload } = payload; const { data: safeData } = await supabase.from("lab_settings").upsert(safePayload).select().single(); const combined = { ...(safeData || payload), report_layout: layoutObj }; localStorage.setItem("apex_lab_settings", JSON.stringify(combined)); return combined; }
+  } catch (err) {}
   return payload;
 }
 
-// ==========================================
-// 12. SEQUENTIAL BARCODE GENERATOR — YYMM######
-// ==========================================
 export async function getNextSequentialBarcode(count = 1) {
   const wanted = Math.max(1, Math.min(100, Number(count) || 1));
-
   try {
-    const { data, error } = await supabase.rpc("allocate_barcodes", {
-      p_count: wanted,
-    });
-
-    if (error) {
-      console.warn(
-        "[getNextSequentialBarcode] RPC failed — falling back to local counter:",
-        error.message
-      );
-    } else if (Array.isArray(data) && data.length === wanted && data.every((b) => typeof b === "string" && b.length === 10)) {
-      return wanted === 1 ? data[0] : data;
-    } else {
-      console.warn(
-        "[getNextSequentialBarcode] RPC returned unexpected shape:",
-        data
-      );
-    }
-  } catch (err) {
-    console.warn("[getNextSequentialBarcode] RPC threw — falling back:", err?.message);
-  }
-
+    const { data, error } = await supabase.rpc("allocate_barcodes", { p_count: wanted });
+    if (error) console.warn("[getNextSequentialBarcode] RPC failed — falling back to local counter:", error.message);
+    else if (Array.isArray(data) && data.length === wanted && data.every((b) => typeof b === "string" && b.length === 10)) return wanted === 1 ? data[0] : data;
+  } catch (err) { console.warn("[getNextSequentialBarcode] RPC threw — falling back:", err?.message); }
   return localBarcodeFallback(wanted);
 }
 
@@ -1508,35 +948,44 @@ function localBarcodeFallback(count) {
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const yymm = `${yy}${mm}`;
-
   let lastSeq = 0;
 
-  try {
-    const stored = parseInt(localStorage.getItem(`apex_barcode_seq_${yymm}`) || "0", 10);
-    if (!isNaN(stored) && stored >= 0) lastSeq = stored;
-  } catch (e) {}
+  try { const stored = parseInt(localStorage.getItem(`apex_barcode_seq_${yymm}`) || "0", 10); if (!isNaN(stored) && stored >= 0) lastSeq = stored; } catch (e) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
     for (const o of local) {
       const barcodes = String(o.barcode || "").split(/[\s,]+/).filter(Boolean);
-      for (const bc of barcodes) {
-        if (bc.length === 10 && bc.startsWith(yymm)) {
-          const seq = parseInt(bc.slice(4), 10);
-          if (!isNaN(seq) && seq > lastSeq) lastSeq = seq;
-        }
-      }
+      for (const bc of barcodes) { if (bc.length === 10 && bc.startsWith(yymm)) { const seq = parseInt(bc.slice(4), 10); if (!isNaN(seq) && seq > lastSeq) lastSeq = seq; } }
     }
   } catch (e) {}
 
   const out = [];
-  for (let i = 0; i < count; i++) {
-    out.push(`${yymm}${String(lastSeq + 1 + i).padStart(6, "0")}`);
-  }
-
-  try {
-    localStorage.setItem(`apex_barcode_seq_${yymm}`, String(lastSeq + count));
-  } catch (e) {}
-
+  for (let i = 0; i < count; i++) out.push(`${yymm}${String(lastSeq + 1 + i).padStart(6, "0")}`);
+  try { localStorage.setItem(`apex_barcode_seq_${yymm}`, String(lastSeq + count)); } catch (e) {}
   return count === 1 ? out[0] : out;
+}
+
+// ==========================================
+// Role Permissions
+// ==========================================
+export async function getRolePermissions() {
+  try {
+    const { data, error } = await supabase.from("role_permissions").select("*");
+    if (error) throw error;
+    
+    const map = {};
+    data.forEach(r => { map[r.role] = r.allowed_tabs; });
+    return map;
+  } catch (e) {
+    console.warn("Failed to fetch role permissions:", e);
+    return {};
+  }
+}
+
+export async function saveRolePermissions(role, allowedTabs) {
+  const { error } = await supabase
+    .from("role_permissions")
+    .upsert({ role, allowed_tabs: allowedTabs, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
 }

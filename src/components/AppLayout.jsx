@@ -4,11 +4,20 @@ import {
   Plus, Bell, Activity, Receipt, QrCode, Layers, ShieldCheck,
   FileText, Settings, UserCheck, Building2, Stethoscope, ChevronDown,
   Calendar, Package, PackagePlus, Truck, ListChecks, Home, ClipboardList,
-  Cpu,ArrowRightLeft,BarChart3,
+  Cpu, ShieldAlert , ArrowRightLeft,BarChart3, Wallet,Calculator,
 } from "lucide-react";
 import GlobalSearch from "./GlobalSearch";
 
 const NAV_GROUPS = [
+  {
+    id: "business",
+    label: "Business",
+    items: [
+      { id: "dashboard",      label: "Dashboard", icon: Activity,    roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
+      { id: "doctor-manager", label: "Doctors",   icon: Stethoscope, roles: ["developer","manager","admin","receptionist"] },
+      { id: "doctor-commissions", label: "Doctor Payouts", icon: Stethoscope, roles: ["developer","manager","admin"] },
+    ],
+  },
   {
     id: "workflow",
     label: "Workflow",
@@ -25,6 +34,8 @@ const NAV_GROUPS = [
   id: "inventory",
   label: "Inventory",
   items: [
+    { id: "finance", label: "Finance & Accounts", icon: Wallet, roles: ["developer","manager","admin"] },
+    { id: "finance-closing", label: "Cash Closing", icon: Calculator, roles: ["developer","manager","admin","receptionist"] },
     { id: "inventory-reports", label: "Reports & Alerts", icon: BarChart3, roles: ["developer","manager","admin","store_keeper"] },
     { id: "inventory-ops", label: "Stock Operations", icon: ArrowRightLeft,    roles: ["developer","manager","admin","store_keeper","technologist","biochemist"] },
     { id: "inventory-dashboard", label: "Inventory Home",  icon: Home,         roles: ["developer","manager","admin","store_keeper"] },
@@ -34,18 +45,13 @@ const NAV_GROUPS = [
     { id: "inventory-ledger",    label: "Stock Ledger",    icon: ListChecks,   roles: ["developer","manager","admin","store_keeper","verifier","biochemist","technologist"] },
   ],
 },
-  {
-    id: "business",
-    label: "Business",
-    items: [
-      { id: "dashboard",      label: "Dashboard", icon: Activity,    roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
-      { id: "doctor-manager", label: "Doctors",   icon: Stethoscope, roles: ["developer","manager","admin","receptionist"] },
-    ],
-  },
+  
   {
     id: "setup",
     label: "Setup",
     items: [
+      { id: "role-permissions", label: "Role Permissions", icon: ShieldCheck, roles: ["developer"] },
+      { id: "audit-log", label: "Audit Logs", icon: ShieldAlert, roles: ["developer","manager","admin"] },
       { id: "test-manager",  label: "Test Catalog", icon: Settings,  roles: ["developer","manager","admin"] },
       { id: "staff-manager", label: "Staff",        icon: UserCheck, roles: ["developer","manager","admin"] },
       { id: "lab-settings",  label: "Branding",     icon: Building2, roles: ["developer"] },
@@ -100,7 +106,7 @@ export default function AppLayout({
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex">
       {/* Desktop sidebar */}
       <aside
-        className={`hidden lg:flex flex-col bg-white border-r border-slate-200 transition-all duration-200 ${
+        className={`hidden lg:flex flex-col bg-white border-r border-slate-200 transition-all duration-200 sticky top-0 h-screen ${
           collapsed ? "w-[68px]" : "w-64"
         }`}
       >

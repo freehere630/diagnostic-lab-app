@@ -8,6 +8,7 @@ import {
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
 import { markSampleRecollected } from "../services/api";
 import { getAllOrderVials } from "../utils/printHelpers";
+import { supabase } from "../supabaseClient";
 
 export default function Dashboard({
   orders = [],
@@ -479,24 +480,42 @@ useEffect(() => {
                             <Barcode className="w-3 h-3" /> Vials
                           </button>
 
-                          <button
-                            onClick={() => {
-                              const fullVisitOrder = {
-                                ...g.master,
-                                tests: g.allTests,
-                                allBarcodes: g.allBarcodes,
-                                barcodesList: g.allBarcodes,
-                                vials: g.vials,
-                                billing: {
-                                  ...g.master.billing,
-                                  subTotal: g.allTests.reduce(
-                                    (s, t) => s + parseFloat(t.price || 0),
-                                    0
-                                  ),
-                                },
-                              };
-                              handlePrintMoneyReceipt(fullVisitOrder);
-                            }}
+                                                  <button
+                          onClick={async () => {
+                            // Fetch the split payments for this visit from the database
+                            const orderIds = g.vials.map(v => v.orderId || v.id);
+                            const { data: pays } = await supabase.from('payments').select('*').in('order_id', orderIds);
+                            
+                            let paidCash = 0;
+                            let paidOnline = 0;
+                            if (pays && pays.length > 0) {
+                              pays.forEach(p => {
+                                if (p.payment_method === 'Cash') paidCash += parseFloat(p.amount);
+                                else paidOnline += parseFloat(p.amount);
+                              });
+                            } else {
+                              // Fallback for older orders that didn't have the payments table
+                              paidCash = parseFloat(g.master.billing?.paid) || 0;
+                            }
+
+                            const fullVisitOrder = {
+                              ...g.master,
+                              tests: g.allTests,
+                              allBarcodes: g.allBarcodes,
+                              barcodesList: g.allBarcodes,
+                              vials: g.vials,
+                              billing: {
+                                ...(g.master.billing || {}),
+                                paidCash,     // Injecting the fetched split
+                                paidOnline,   // Injecting the fetched split
+                                subTotal: g.allTests.reduce(
+                                  (s, t) => s + parseFloat(t.price || 0),
+                                  0
+                                ),
+                              },
+                            };
+                            handlePrintMoneyReceipt(fullVisitOrder);
+                          }}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
                           >
                             <Receipt className="w-3 h-3" /> Receipt

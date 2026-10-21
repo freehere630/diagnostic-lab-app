@@ -31,7 +31,7 @@ const CATEGORY_COLOR = {
 };
 
 const EMPTY_FORM = {
-  id: "", code: "", name: "", category: "reagent", uom: "mL", pack_size: "1",
+  id: "", code: "", name: "", category: "reagent", department_id: "", uom: "mL", pack_size: "1",
   unit_cost: "0", unit_sell_price: "0", tax_percent: "0",
   reorder_level: "0", minimum_stock: "0", maximum_stock: "0", safety_stock: "0",
   is_batch_tracked: true, is_expiry_tracked: true,
@@ -41,7 +41,7 @@ const EMPTY_FORM = {
 
 const PAGE_SIZE = 20;
 
-export default function InventoryItems({ onReceiveStock, onNavigate }) {
+export default function InventoryItems({ onReceiveStock, onNavigate, departments = [] }) {
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +108,7 @@ export default function InventoryItems({ onReceiveStock, onNavigate }) {
       code: it.code || "",
       name: it.name || "",
       category: it.category || "reagent",
+      department_id: it.department_id || "",
       uom: it.uom || "",
       pack_size: String(it.pack_size ?? 1),
       unit_cost: String(it.unit_cost ?? 0),
@@ -192,7 +193,6 @@ export default function InventoryItems({ onReceiveStock, onNavigate }) {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
           
-          {/* Link to Analyzer Dashboard */}
           <button
             onClick={() => onNavigate && onNavigate("inventory-machines")}
             className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
@@ -433,7 +433,7 @@ export default function InventoryItems({ onReceiveStock, onNavigate }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
                   <label className="font-semibold text-slate-600 text-[11px] block mb-1">Category *</label>
                   <select
@@ -443,6 +443,19 @@ export default function InventoryItems({ onReceiveStock, onNavigate }) {
                   >
                     {CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department</label>
+                  <select
+                    value={form.department_id || ""}
+                    onChange={(e) => setForm({ ...form, department_id: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
+                  >
+                    <option value="">— General / No Dept —</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
                 </div>
@@ -637,20 +650,6 @@ export default function InventoryItems({ onReceiveStock, onNavigate }) {
                   {saving ? "Saving…" : (editing ? "Update Item" : "Create Item")}
                 </button>
               </div>
-              {/* Add this right below the Category field */}
-                <div>
-                  <label className="font-semibold text-slate-600 text-[11px] block mb-1">Department</label>
-                  <select
-                    value={form.department_id || ""}
-                    onChange={(e) => setForm({ ...form, department_id: e.target.value })}
-                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-medium"
-                  >
-                    <option value="">— General / No Dept —</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
-                </div>
             </form>
           </div>
         </div>

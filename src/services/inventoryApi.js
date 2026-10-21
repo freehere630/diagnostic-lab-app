@@ -83,7 +83,7 @@ export async function getInventoryItems({
   reorder_level, minimum_stock, maximum_stock, safety_stock,
   is_batch_tracked, is_expiry_tracked,
   default_location_id, barcode, manufacturer, notes,
-  is_active, created_at, updated_at
+  is_active, created_at,department_id, updated_at
 `)
     .order("name", { ascending: true });
 
@@ -161,6 +161,7 @@ export async function saveInventoryItem(input) {
     notes: input.notes || null,
     is_active: input.is_active !== false,
     updated_at: new Date().toISOString(),
+    department_id: input.department_id || null,
   };
   if (!row.code) throw new Error("Item code is required.");
   if (!row.name) throw new Error("Item name is required.");

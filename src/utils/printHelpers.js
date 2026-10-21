@@ -1932,7 +1932,12 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
                 <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 9pt;">
                   <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.netPayable) || 0}</td>
                 </tr>
-                <tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${esc(activeOrd.billing?.paid) || 0}</td></tr>
+                ${(activeOrd.billing?.paidCash !== undefined && activeOrd.billing?.paidOnline !== undefined) ? `
+                  ${activeOrd.billing.paidCash > 0 ? `<tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing.paidCash}</td></tr>` : ''}
+                  ${activeOrd.billing.paidOnline > 0 ? `<tr><td>PAID (ONLINE):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing.paidOnline}</td></tr>` : ''}
+                ` : `
+                  <tr><td>PAID (TOTAL):</td><td style="text-align: right; font-weight: bold;">৳ ${esc(activeOrd.billing?.paid) || 0}</td></tr>
+                `}
                 <tr style="font-weight: bold; color: ${activeOrd.billing?.due > 0 ? '#b91c1c' : '#000'};">
                   <td>DUE BALANCE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.due) || 0}</td>
                 </tr>
@@ -2073,4 +2078,98 @@ export function printSpecificVialBarcode(vial, onPrintedCallback) {
     iframe.contentWindow.print();
     setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
   }, 250);
+}
+export function printDoctorPayoutReceipt(payout, doctor, labSettings = {}) {
+  const labName = labSettings?.lab_name || "AL FATTAH DIAGNOSTIC";
+  const labPhone = labSettings?.phone || "01723854472";
+  const labAddress = labSettings?.address || "Solmaid Purbo Para, Vatara, Dhaka 1212";
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payout Receipt - ${doctor.name}</title>
+        <style>
+          @page { size: 148mm 210mm; margin: 10mm; }
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; color: #000; }
+          .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
+          .header h1 { margin: 0; font-size: 18px; text-transform: uppercase; }
+          .header p { margin: 2px 0; font-size: 11px; color: #555; }
+          .title { text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; text-decoration: underline; }
+          .details { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 20px; }
+          .table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 30px; }
+          .table th, .table td { border: 1px solid #000; padding: 8px; }
+          .table th { text-align: left; background: #f0f0f0; }
+          .amount-box { text-align: right; font-size: 16px; font-weight: bold; margin-bottom: 40px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
+          .sig-line { border-top: 1px solid #000; width: 200px; text-align: center; padding-top: 5px; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${labName}</h1>
+          <p>${labAddress}</p>
+          <p>Phone: ${labPhone}</p>
+        </div>
+        
+        <div class="title">Doctor Commission Payout Receipt</div>
+        
+        <div class="details">
+          <div>
+            <strong>Doctor:</strong> ${doctor.name}<br>
+            <strong>Doctor ID:</strong> ${doctor.id || 'N/A'}
+          </div>
+          <div style="text-align: right;">
+            <strong>Receipt No:</strong> ${payout.id}<br>
+            <strong>Date:</strong> ${payout.payout_date}
+          </div>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style="text-align: right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                Commission Payout for Referring Patients<br>
+                ${payout.notes ? `<em>Note: ${payout.notes}</em>` : ''}
+              </td>
+              <td style="text-align: right; font-weight: bold;">৳ ${parseFloat(payout.amount).toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="amount-box">
+          Payment Method / Ref: ${payout.reference_no || 'Cash'} &nbsp; | &nbsp; Total Paid: ৳ ${parseFloat(payout.amount).toLocaleString()}
+        </div>
+
+        <div class="signatures">
+          <div class="sig-line">Doctor Signature</div>
+          <div class="sig-line">Authorized Signature (Cashier)</div>
+        </div>
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  setTimeout(() => {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
+  }, 500);
 }
