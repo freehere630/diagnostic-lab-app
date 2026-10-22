@@ -1026,3 +1026,95 @@ export async function saveRolePermissions(role, allowedTabs) {
     .upsert({ role, allowed_tabs: allowedTabs, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
 }
+
+
+// ==========================================
+// Analyzer Settings & Bridges
+// ==========================================
+export async function getAnalyzerMappings() {
+  const { data, error } = await supabase
+    .from("analyzer_mappings")
+    .select(`
+      *,
+      parameter:test_parameters!lims_parameter_id(
+        id, 
+        name, 
+        test:tests(name, code)
+      )
+    `)
+    .order("analyzer_name", { ascending: true });
+    
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function saveAnalyzerMapping(payload) {
+  const row = {
+    id: payload.id || `MAP-${Date.now().toString(36).toUpperCase()}`,
+    analyzer_name: payload.analyzer_name,
+    machine_code: payload.machine_code,
+    lims_parameter_id: payload.lims_parameter_id,
+  };
+  const { error } = await supabase.from("analyzer_mappings").upsert(row);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteAnalyzerMapping(id) {
+  const { error } = await supabase.from("analyzer_mappings").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function getAllTestParameters() {
+  const { data, error } = await supabase
+    .from("test_parameters")
+    .select(`
+      id, 
+      name, 
+      test_id, 
+      test:tests(name, code, dept_id)
+    `)
+    .order("name");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getBridgeStatus() {
+  const { data, error } = await supabase.from("bridge_heartbeats").select("*");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+export async function getAnalyzers() {
+  const { data, error } = await supabase.from("analyzers").select("*").order("name");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function saveAnalyzer(payload) {
+  const row = {
+    id: payload.id || `ANL-${Date.now().toString(36).toUpperCase()}`,
+    name: payload.name,
+    // This line now checks for either 'department_ids' or 'departments'
+    department_ids: payload.department_ids || payload.departments || [], 
+  };
+  const { error } = await supabase.from("analyzers").upsert(row);
+  if (error) throw new Error(error.message);
+  return row;
+}
+
+export async function deleteAnalyzer(analyzerId, analyzerName) {
+  // 1. First, delete all mappings associated with this analyzer
+  const { error: mapErr } = await supabase
+    .from("analyzer_mappings")
+    .delete()
+    .eq("analyzer_name", analyzerName);
+  
+  if (mapErr) throw new Error(mapErr.message);
+
+  // 2. Then delete the analyzer itself
+  const { error } = await supabase
+    .from("analyzers")
+    .delete()
+    .eq("id", analyzerId);
+
+  if (error) throw new Error(error.message);
+}

@@ -50,6 +50,7 @@ const NAV_GROUPS = [
     id: "setup",
     label: "Setup",
     items: [
+      { id: "analyzer-settings", label: "Analyzer Settings", icon: Cpu, roles: ["developer","manager","admin"] },
       { id: "role-permissions", label: "Role Permissions", icon: ShieldCheck, roles: ["developer"] },
       { id: "audit-log", label: "Audit Logs", icon: ShieldAlert, roles: ["developer","manager","admin"] },
       { id: "test-manager",  label: "Test Catalog", icon: Settings,  roles: ["developer","manager","admin"] },

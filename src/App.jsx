@@ -1,4 +1,5 @@
 import RolePermissions from "./components/RolePermissions";
+import AnalyzerSettings from "./components/AnalyzerSettings";
 import AuditLog from "./components/AuditLog";
 import DoctorProfile from "./components/DoctorProfile";
 import React, { useState, useEffect, useMemo, useRef } from "react";
@@ -1090,6 +1091,7 @@ export default function App() {
         />
       )}
       {activeTab === "audit-log" && <AuditLog />}
+      {activeTab === "analyzer-settings" && <AnalyzerSettings />}
       {/* MODALS */}
       <ReceiveStockModal open={receiveStockOpen} onClose={() => { setReceiveStockOpen(false); setReceiveStockInitialItemId(null); }} initialItemId={receiveStockInitialItemId} onReceived={() => { fetchMaster(); fetchPaginatedOrders(true); }} />
       <ReceiveAgainstPOModal open={!!receivePOId} poId={receivePOId} onClose={() => setReceivePOId(null)} onReceived={() => { fetchMaster(); fetchPaginatedOrders(true); }} />
