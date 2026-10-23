@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Cpu, Plus, Trash2, Search, RefreshCw, X, Activity, Settings
 } from "lucide-react";
 import {
   getAnalyzerMappings, saveAnalyzerMapping, deleteAnalyzerMapping,
   getAllTestParameters, getBridgeStatus, getAnalyzers, saveAnalyzer,
-  deleteAnalyzer // <--- IMPORT THE NEW FUNCTION
+  deleteAnalyzer
 } from "../services/api";
 
 const DEPARTMENTS = [
@@ -40,6 +40,7 @@ export default function AnalyzerSettings() {
   });
 
   const [search, setSearch] = useState("");
+  const [paramSearch, setParamSearch] = useState(""); // <--- NEW SEARCH STATE
 
   const loadData = async () => {
     setLoading(true);
@@ -94,10 +95,24 @@ export default function AnalyzerSettings() {
     if (!mappingForm.machine_code.trim() || !mappingForm.lims_parameter_id || !mappingForm.analyzer_name) {
       return alert("Please fill all fields.");
     }
+
+    // --- DUPLICATE CHECK ---
+    const isDuplicate = mappings.some(
+      m => m.analyzer_name === mappingForm.analyzer_name &&
+           m.machine_code.toUpperCase() === mappingForm.machine_code.toUpperCase() &&
+           m.lims_parameter_id === mappingForm.lims_parameter_id
+    );
+
+    if (isDuplicate) {
+      return alert("⚠️ Duplicate Mapping!\n\nThis exact machine code is already mapped to this parameter for this analyzer.");
+    }
+    // -----------------------
+
     try {
       await saveAnalyzerMapping(mappingForm);
       setIsMappingModalOpen(false);
       setMappingForm({ ...mappingForm, machine_code: "", lims_parameter_id: "" });
+      setParamSearch(""); // Reset search on save
       await loadData();
     } catch (e) { alert("Error: " + e.message); }
   };
@@ -108,7 +123,6 @@ export default function AnalyzerSettings() {
       return alert("Enter a name and select at least one department.");
     }
     try {
-      // Explicitly pass department_ids so there is no confusion
       await saveAnalyzer({
         name: analyzerForm.name,
         department_ids: analyzerForm.departments
@@ -130,10 +144,23 @@ export default function AnalyzerSettings() {
   };
 
   const selectedAnalyzer = analyzers.find(a => a.name === mappingForm.analyzer_name);
-  const availableParams = parameters.filter(p => {
-    if (!selectedAnalyzer || !selectedAnalyzer.department_ids) return false;
-    return selectedAnalyzer.department_ids.includes(p.test?.dept_id);
-  });
+  
+  // --- FILTER PARAMS BY DEPARTMENT AND SEARCH ---
+  const availableParams = useMemo(() => {
+    if (!selectedAnalyzer || !selectedAnalyzer.department_ids) return [];
+    
+    let filtered = parameters.filter(p => selectedAnalyzer.department_ids.includes(p.test?.dept_id));
+    
+    if (paramSearch.trim()) {
+      const q = paramSearch.toLowerCase();
+      filtered = filtered.filter(p => 
+        (p.name || "").toLowerCase().includes(q) || 
+        (p.test?.name || "").toLowerCase().includes(q)
+      );
+    }
+    return filtered;
+  }, [parameters, selectedAnalyzer, paramSearch]);
+  // ----------------------------------------------
 
   const filteredMappings = mappings.filter(m => 
     m.machine_code.toLowerCase().includes(search.toLowerCase()) ||
@@ -352,7 +379,7 @@ export default function AnalyzerSettings() {
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full text-xs">
             <div className="p-4 border-b border-slate-200 flex justify-between items-center">
               <span className="font-bold text-sm">Add Analyzer Mapping</span>
-              <button onClick={() => setIsMappingModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => { setIsMappingModalOpen(false); setParamSearch(""); }} className="text-slate-400 hover:text-slate-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -362,7 +389,10 @@ export default function AnalyzerSettings() {
                 <label className="font-semibold text-slate-600 text-[11px] block mb-1">Analyzer</label>
                 <select
                   value={mappingForm.analyzer_name}
-                  onChange={(e) => setMappingForm({ ...mappingForm, analyzer_name: e.target.value, lims_parameter_id: "" })}
+                  onChange={(e) => {
+                    setMappingForm({ ...mappingForm, analyzer_name: e.target.value, lims_parameter_id: "" });
+                    setParamSearch("");
+                  }}
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none bg-slate-50 font-semibold"
                 >
                   {analyzers.map(a => (
@@ -383,29 +413,43 @@ export default function AnalyzerSettings() {
                 />
               </div>
 
+              {/* NEW SEARCH BAR FOR PARAMETERS */}
               <div>
                 <label className="font-semibold text-slate-600 text-[11px] block mb-1 flex justify-between">
                   <span>Target LIMS Parameter</span>
                   <span className="text-indigo-600">{availableParams.length} available</span>
                 </label>
+                
+                <div className="relative mb-1.5">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search parameter or test name..."
+                    value={paramSearch}
+                    onChange={(e) => setParamSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                  />
+                </div>
+
                 <select
                   required
                   value={mappingForm.lims_parameter_id}
                   onChange={(e) => setMappingForm({ ...mappingForm, lims_parameter_id: e.target.value })}
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none bg-white"
+                  size={5} // Makes it a list box so you can see more options at once
                 >
-                  <option value="">— Select Parameter —</option>
+                  <option value="" disabled>— Select Parameter —</option>
                   {availableParams.map(p => (
                     <option key={p.id} value={p.id}>
                       {p.test?.name} → {p.name}
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-slate-400 mt-1">Only showing parameters for the selected analyzer's departments.</p>
+                <p className="text-[10px] text-slate-400 mt-1">Hold Ctrl/Cmd to select multiple? No, only one parameter per mapping.</p>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setIsMappingModalOpen(false)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-semibold">
+                <button type="button" onClick={() => { setIsMappingModalOpen(false); setParamSearch(""); }} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-semibold">
                   Cancel
                 </button>
                 <button type="submit" className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">
