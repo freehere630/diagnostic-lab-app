@@ -374,13 +374,43 @@ export async function searchPatients(query) {
   if (cleanQ.length < 2) return [];
 
   try {
-    const { data, error } = await supabase.from("patients").select("*").or(`id.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,name.ilike.%${cleanQ}%`).limit(10);
-    if (!error && data) return data;
+    // 1. Search directly in the patients table
+    const { data: directPatients } = await supabase
+      .from("patients")
+      .select("*")
+      .or(`id.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,name.ilike.%${cleanQ}%`)
+      .limit(10);
+
+    // 2. Search in orders by receipt number or barcode to find linked patients
+    const { data: matchedOrders } = await supabase
+      .from("orders")
+      .select("patient_id")
+      .or(`receipt_no.ilike.%${cleanQ}%,barcode.ilike.%${cleanQ}%`)
+      .limit(10);
+
+    let orderPatients = [];
+    if (matchedOrders && matchedOrders.length > 0) {
+      const pIds = [...new Set(matchedOrders.map(o => o.patient_id).filter(Boolean))];
+      if (pIds.length > 0) {
+        const { data: pts } = await supabase.from("patients").select("*").in("id", pIds);
+        orderPatients = pts || [];
+      }
+    }
+
+    // 3. Merge and deduplicate
+    const allPatients = [...(directPatients || []), ...orderPatients];
+    const uniquePatients = Array.from(new Map(allPatients.map(p => [p.id, p])).values());
+
+    if (uniquePatients.length > 0) return uniquePatients;
   } catch (err) {}
 
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    return local.filter((p) => (p.id && p.id.toLowerCase().includes(cleanQ)) || (p.phone && p.phone.includes(cleanQ)) || (p.name && p.name.toLowerCase().includes(cleanQ)));
+    return local.filter((p) => 
+      (p.id && p.id.toLowerCase().includes(cleanQ)) || 
+      (p.phone && p.phone.includes(cleanQ)) || 
+      (p.name && p.name.toLowerCase().includes(cleanQ))
+    );
   } catch (e) { return []; }
 }
 
@@ -399,57 +429,67 @@ export async function getPatientHistory(patientId) {
 
 // ==========================================
 // 5. PAGINATED ORDERS QUERY
-// ==========================================
 export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "", dateTo = "", searchQuery = "" }) {
+  const safeQ = sanitizeSearchInput(searchQuery);
+  
+  // 1. Fetch orders to find UNIQUE receipts
+  let query = supabase
+    .from("orders")
+    .select("receipt_no, order_date, barcode, patient_id, id")
+    .order("order_date", { ascending: false });
+
+  if (dateFrom && dateTo) {
+    if (dateFrom === dateTo) query = query.eq("order_date", dateFrom);
+    else query = query.gte("order_date", dateFrom).lte("order_date", dateTo);
+  } else if (dateFrom) query = query.gte("order_date", dateFrom);
+  else if (dateTo) query = query.lte("order_date", dateTo);
+
+  if (safeQ) {
+    query = query.or(`barcode.ilike.%${safeQ}%,patient_id.ilike.%${safeQ}%,id.ilike.%${safeQ}%,receipt_no.ilike.%${safeQ}%`);
+  }
+
+  const { data: allOrders, error: fetchErr } = await query;
+  if (fetchErr) throw new Error(fetchErr.message);
+
+  // 2. Group by receipt_no to get unique visits
+  const uniqueReceiptsMap = new Map();
+  (allOrders || []).forEach(o => {
+    if (!uniqueReceiptsMap.has(o.receipt_no)) {
+      uniqueReceiptsMap.set(o.receipt_no, o.order_date);
+    }
+  });
+
+  const uniqueReceipts = Array.from(uniqueReceiptsMap.entries()).map(([receiptNo, date]) => ({ receiptNo, date }));
+  uniqueReceipts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const totalReceiptCount = uniqueReceipts.length;
+  const totalPages = Math.max(1, Math.ceil(totalReceiptCount / pageSize));
+
+  // 3. Paginate UNIQUE receipts
   const fromIndex = (page - 1) * pageSize;
-  const toIndex = fromIndex + pageSize - 1;
+  const toIndex = fromIndex + pageSize;
+  const paginatedReceipts = uniqueReceipts.slice(fromIndex, toIndex).map(r => r.receiptNo);
 
-  try {
-    let query = supabase.from("orders").select(`*, patient:patients(*), order_tests(*, test:tests(*, test_parameters(*))), results(*)`, { count: "estimated" });
+  if (paginatedReceipts.length === 0) {
+    return { orders: [], totalCount: totalReceiptCount, page, pageSize, totalPages };
+  }
 
-    if (dateFrom && dateTo) {
-      if (dateFrom === dateTo) query = query.eq("order_date", dateFrom);
-      else query = query.gte("order_date", dateFrom).lte("order_date", dateTo);
-    } else if (dateFrom) query = query.gte("order_date", dateFrom);
-    else if (dateTo) query = query.lte("order_date", dateTo);
+  // 4. Fetch the full details for ONLY the paginated receipts
+  const { data: fullOrders, error: fullErr } = await supabase
+    .from("orders")
+    .select(`*, patient:patients(*), order_tests(*, test:tests(*, test_parameters(*))), results(*)`)
+    .in("receipt_no", paginatedReceipts)
+    .order("created_at", { ascending: false });
 
-    const safeQ = sanitizeSearchInput(searchQuery);
-    if (safeQ) {
-      const q = safeQ;
-      const cleanDigits = q.replace(/\D/g, "");
-      let matchedOrderIds = [];
-      try {
-        const { data: resMatches } = await supabase.from("results").select("order_id").or(`parameter_id.ilike.%${q}%,result_value.ilike.%${q}%`).limit(20);
-        if (resMatches && resMatches.length > 0) matchedOrderIds = resMatches.map(r => r.order_id).filter(Boolean);
-      } catch (e) {}
+  if (fullErr) throw new Error(fullErr.message);
 
-      let orClauses = [`barcode.ilike.%${q}%`, `patient_id.ilike.%${q}%`, `id.ilike.%${q}%`];
-      if (cleanDigits.length >= 8) {
-        const unpadded = cleanDigits.replace(/^0+/, "");
-        if (unpadded !== q) orClauses.push(`barcode.ilike.%${unpadded}%`);
-      }
-      matchedOrderIds.forEach(mId => orClauses.push(`id.eq.${mId}`));
-      query = query.or(orClauses.join(","));
-    }
-
-    query = query.order("order_date", { ascending: false }).order("id", { ascending: false }).range(fromIndex, toIndex);
-    const { data, count, error } = await query;
-
-    if (error) console.warn("[getOrdersPaginated] Primary query error:", error.message);
-    else if (data) {
-      const primaryCount = (count ?? data.length) || 0;
-      return { orders: data, totalCount: primaryCount, page, pageSize, totalPages: Math.ceil(primaryCount / pageSize) };
-    }
-  } catch (err) { console.warn("[getOrdersPaginated] Primary query threw:", err.message); }
-
-  try {
-    let fallback = supabase.from("orders").select("*, patient:patients(*)", { count: "estimated" });
-    if (dateFrom) fallback = fallback.gte("order_date", dateFrom);
-    if (dateTo) fallback = fallback.lte("order_date", dateTo);
-    const { data, count, error: fallbackError } = await fallback.order("order_date", { ascending: false }).order("id", { ascending: false }).range(fromIndex, toIndex);
-    const fallbackCount = (count ?? (data?.length || 0)) || 0;
-    return { orders: data || [], totalCount: fallbackCount, page, pageSize, totalPages: Math.ceil(fallbackCount / pageSize) };
-  } catch (e) { return { orders: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 }; }
+  return {
+    orders: fullOrders || [],
+    totalCount: totalReceiptCount, // Now correctly returns the count of RECEIPTS, not vials
+    page,
+    pageSize,
+    totalPages
+  };
 }
 
 export async function getAllOrders() {
@@ -471,31 +511,23 @@ export async function getAllOrders() {
   return ordersList.sort((a, b) => (new Date(b.created_at || b.createdAt || b.order_date || b.date).getTime() || 0) - (new Date(a.created_at || a.createdAt || a.order_date || a.date).getTime() || 0));
 }
 
-// ==========================================
-// 6. ORDER CREATION: ATOMIC + SPLIT PAYMENTS
-// ==========================================
-export async function createNewOrder({ patientData, testIds, discount, netPayable, paidCash, paidOnline, dueAmount, testCatalog = [] }) {
-  const patientId = patientData.id && patientData.id.trim() ? patientData.id.trim() : `P-${Math.floor(1000 + Math.random() * 9000)}`;
+// ─────────────────────────────────────────────────────────────
+// Shared vial-splitting logic. Used by both the Reception POS
+// (for the "X labels will print" preview) and createNewOrder
+// (for the actual barcode assignment). Keeping it in one place
+// prevents the preview from drifting from reality.
+// ─────────────────────────────────────────────────────────────
+export function computeDepartmentVials(selectedTests = []) {
+  const vials = [];
 
-  const selectedTests = (testCatalog || []).filter((t) => testIds.includes(t.id)).map(t => {
-    const rawParams = t.test_parameters || t.parameters || [];
-    const resolvedParams = rawParams.length > 0 ? rawParams : [{
-      id: `P-${(t.code || t.id || "TEST").toUpperCase().replace(/[^A-Z0-9]/g, "")}-01`,
-      test_id: t.id, name: t.name || "Test", param_type: t.report_type === "descriptive" ? "text" : "numeric",
-      unit: "", min_range: null, max_range: null, reference_text: t.report_type === "descriptive" ? DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest : "Normal"
-    }];
-    return { ...t, test_parameters: resolvedParams, parameters: resolvedParams };
-  });
-
-  const departmentVials = [];
-  selectedTests.forEach((t) => {
+  for (const t of selectedTests) {
     let deptId = (t.dept_id || t.deptId || "").toUpperCase();
     const code = (t.code || "").toUpperCase();
     const name = (t.name || "").toUpperCase();
 
     if (!deptId || deptId === "DEP-GEN") {
       if (code.includes("CBC") || name.includes("BLOOD COUNT")) deptId = "DEP-HEM";
-      else if (code.includes("IMM") || deptId.includes("IMM") || name.includes("DSDNA") || name.includes("FT3") || name.includes("FT4") || name.includes("THYROID")) deptId = "DEP-IMM";
+      else if (code.includes("IMM") || name.includes("DSDNA") || name.includes("FT3") || name.includes("FT4") || name.includes("THYROID")) deptId = "DEP-IMM";
       else if (code.includes("ELECTROLYTE") || name.includes("ELECTROLYTE") || deptId.includes("BIO")) deptId = "DEP-BIO";
       else if (code.startsWith("XRAY") || name.includes("X-RAY")) deptId = "DEP-RAD";
       else if (code.startsWith("USG") || name.includes("ULTRASO")) deptId = "DEP-USG";
@@ -507,29 +539,91 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
     }
 
     const deptCode = deptId.replace("DEP-", "").replace("-CBC", "");
+
     let tubeColor = (t.tube_color || t.tubeColor || "Standard").trim();
-    if (tubeColor === "Standard") {
+    if (!tubeColor || tubeColor === "Standard") {
       if (deptCode.includes("HEM")) tubeColor = "Purple / Lavender (EDTA)";
       else if (deptCode.includes("RAD") || deptCode.includes("USG") || deptCode.includes("CARD") || deptCode.includes("CT")) tubeColor = "Imaging Requisition";
       else if (deptCode.includes("HISTO")) tubeColor = "Formalin Container";
       else if (deptCode.includes("PAT") && (code.includes("URINE") || name.includes("URINE"))) tubeColor = "Sterile Urine Cup";
       else tubeColor = "Red / Yellow (SST / Plain Clot)";
     }
+
     const tubeShort = tubeColor.split(" ")[0];
     const key = `${deptCode}-${tubeShort}`;
 
-    if (!departmentVials.some((v) => v.key === key)) {
-      departmentVials.push({ key, deptId: deptId, deptCode: deptCode, tubeColor: tubeColor, testIds: [t.id, t.code, t.name], testNames: [t.code || t.name] });
-    } else {
-      const existing = departmentVials.find((v) => v.key === key);
+    const existing = vials.find((v) => v.key === key);
+    if (existing) {
       existing.testIds.push(t.id, t.code, t.name);
       existing.testNames.push(t.code || t.name);
+      existing.count++;
+    } else {
+      vials.push({
+        key,
+        deptId,
+        deptCode,
+        tubeColor,
+        testIds: [t.id, t.code, t.name],
+        testNames: [t.code || t.name],
+        count: 1,
+      });
     }
-  });
+  }
+
+  return vials;
+}
+// ==========================================
+// 6. ORDER CREATION: ATOMIC + SPLIT PAYMENTS
+export async function createNewOrder({
+  patientData,
+  testIds,
+  discount,
+  netPayable,
+  paidCash,
+  paidOnline,
+  dueAmount,
+  testCatalog = [],
+}) {
+  const patientId =
+    patientData.id && patientData.id.trim()
+      ? patientData.id.trim()
+      : `P-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const selectedTests = (testCatalog || [])
+    .filter((t) => testIds.includes(t.id))
+    .map((t) => {
+      const rawParams = t.test_parameters || t.parameters || [];
+      const resolvedParams =
+        rawParams.length > 0
+          ? rawParams
+          : [
+              {
+                id: `P-${(t.code || t.id || "TEST")
+                  .toUpperCase()
+                  .replace(/[^A-Z0-9]/g, "")}-01`,
+                test_id: t.id,
+                name: t.name || "Test",
+                param_type: t.report_type === "descriptive" ? "text" : "numeric",
+                unit: "",
+                min_range: null,
+                max_range: null,
+                reference_text:
+                  t.report_type === "descriptive"
+                    ? DESCRIPTIVE_STANDARD_TEMPLATES.radiologyChest
+                    : "Normal",
+              },
+            ];
+      return { ...t, test_parameters: resolvedParams, parameters: resolvedParams };
+    });
+
+  // ── Vial split (delegated to the shared helper) ──
+  const departmentVials = computeDepartmentVials(selectedTests);
 
   const vialsCount = Math.max(1, departmentVials.length);
   const assignedBarcodes = await getNextSequentialBarcode(vialsCount);
-  const barcodeList = Array.isArray(assignedBarcodes) ? assignedBarcodes : [assignedBarcodes];
+  const barcodeList = Array.isArray(assignedBarcodes)
+    ? assignedBarcodes
+    : [assignedBarcodes];
 
   departmentVials.forEach((v, i) => {
     v.barcode = barcodeList[i];
@@ -537,9 +631,16 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   });
 
   selectedTests.forEach((t) => {
-    const matchedVial = departmentVials.find(v => v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code)) || departmentVials[0];
-    t.vialBarcode = matchedVial.barcode;
-    t.barcode = matchedVial.barcode;
+    const matchedVial =
+      departmentVials.find(
+        (v) =>
+          v.testIds.includes(t.id) ||
+          v.testIds.includes(t.code) ||
+          v.testNames.includes(t.name) ||
+          v.testNames.includes(t.code)
+      ) || departmentVials[0];
+    t.vialBarcode = matchedVial?.barcode;
+    t.barcode = matchedVial?.barcode;
   });
 
   const primaryBarcode = barcodeList[0];
@@ -548,9 +649,16 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   const todayDate = toLocalDateStr(now);
   const todayCompact = todayDate.replace(/-/g, "");
 
+  // Receipt sequence
   let receiptSeq = 1;
   try {
-    const { data: recent } = await supabase.from("orders").select("receipt_no").eq("order_date", todayDate).not("receipt_no", "is", null).order("receipt_no", { ascending: false }).limit(50);
+    const { data: recent } = await supabase
+      .from("orders")
+      .select("receipt_no")
+      .eq("order_date", todayDate)
+      .not("receipt_no", "is", null)
+      .order("receipt_no", { ascending: false })
+      .limit(50);
     if (recent && recent.length > 0) {
       const prefix = `RCP-${todayCompact}-`;
       for (const r of recent) {
@@ -561,40 +669,102 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
         }
       }
     }
-  } catch (e) { console.warn("Receipt sequence lookup warning:", e); }
+  } catch (e) {
+    console.warn("Receipt sequence lookup warning:", e);
+  }
 
   const receiptNo = `RCP-${todayCompact}-${String(receiptSeq).padStart(4, "0")}`;
-  const referringDoctor = (patientData.doctor && patientData.doctor.trim()) ? patientData.doctor.trim() : "Self";
+  const referringDoctor =
+    patientData.doctor && patientData.doctor.trim()
+      ? patientData.doctor.trim()
+      : "Self";
 
+  // ── Patient upsert (keep the doctor in address so commissions work) ──
   const patientRow = {
-    id: patientId, name: patientData.name, age: parseInt(patientData.age) || 0, gender: patientData.gender || "Other", phone: patientData.phone || "N/A", address: `Ref: ${referringDoctor}`
+    id: patientId,
+    name: patientData.name,
+    age: parseInt(patientData.age) || 0,
+    gender: patientData.gender || "Other",
+    phone: patientData.phone || "N/A",
+    address: `Ref: ${referringDoctor}`,
   };
 
   try {
     const { error: patErr } = await supabase.from("patients").upsert(patientRow);
-    if (patErr) await supabase.from("patients").upsert({ id: patientId, name: patientData.name, age: parseInt(patientData.age) || 0, gender: patientData.gender || "Other", phone: patientData.phone || "N/A" });
-  } catch (e) { console.warn("Patient upsert notice:", e); }
-
-  try {
-    const localPatients = JSON.parse(localStorage.getItem("apex_local_patients") || "[]");
-    localStorage.setItem("apex_local_patients", JSON.stringify([patientRow, ...localPatients.filter(p => p.id !== patientId)].slice(0, 1000)));
-  } catch (e) {}
-
-  for (const t of selectedTests) {
-    try {
-      await supabase.from("tests").upsert({ id: t.id, code: (t.code || "TEST").toUpperCase(), name: t.name, dept_id: t.dept_id || t.deptId || "DEP-BIO", price: parseFloat(t.price) || 0, sample_type: t.sample_type || "Serum", tube_color: t.tube_color || "Red / Yellow (SST / Plain Clot)", is_profile: Boolean(t.is_profile), is_available: true });
-    } catch (e) {}
+    if (patErr) {
+      console.warn("Patient upsert failed — trying minimal fallback:", patErr.message);
+      // If the full row failed (e.g. missing address column in a
+      // very old schema), retry without `address` — but loudly,
+      // because it means doctor commissions will not match this
+      // order until the schema is fixed.
+      await supabase.from("patients").upsert({
+        id: patientId,
+        name: patientData.name,
+        age: parseInt(patientData.age) || 0,
+        gender: patientData.gender || "Other",
+        phone: patientData.phone || "N/A",
+      });
+    }
+  } catch (e) {
+    console.warn("Patient upsert notice:", e);
   }
 
-  const subTotal = selectedTests.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+  try {
+    const localPatients = JSON.parse(
+      localStorage.getItem("apex_local_patients") || "[]"
+    );
+    localStorage.setItem(
+      "apex_local_patients",
+      JSON.stringify(
+        [patientRow, ...localPatients.filter((p) => p.id !== patientId)].slice(0, 1000)
+      )
+    );
+  } catch {}
+
+  // ── Test catalog upsert ──
+  for (const t of selectedTests) {
+    try {
+      await supabase.from("tests").upsert({
+        id: t.id,
+        code: (t.code || "TEST").toUpperCase(),
+        name: t.name,
+        dept_id: t.dept_id || t.deptId || "DEP-BIO",
+        price: parseFloat(t.price) || 0,
+        sample_type: t.sample_type || "Serum",
+        tube_color: t.tube_color || "Red / Yellow (SST / Plain Clot)",
+        is_profile: Boolean(t.is_profile),
+        is_available: true,
+      });
+    } catch {}
+  }
+
+  const subTotal = selectedTests.reduce(
+    (acc, t) => acc + parseFloat(t.price || 0),
+    0
+  );
   const finalDiscountPercent = discount || 0;
-  const calculatedNet = subTotal - (subTotal * finalDiscountPercent) / 100;
-  const finalNet = netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
-  
-  const finalPaidCash = parseFloat(paidCash) || 0;
-  const finalPaidOnline = parseFloat(paidOnline) || 0;
+  const calculatedNet =
+    subTotal - (subTotal * finalDiscountPercent) / 100;
+  const finalNet =
+    netPayable !== undefined ? parseFloat(netPayable) : calculatedNet;
+
+  // ── Payment capping (defensive, mirrors App.jsx) ──
+  let cashIn = Math.max(0, parseFloat(paidCash) || 0);
+  let onlineIn = Math.max(0, parseFloat(paidOnline) || 0);
+  const rawPaid = cashIn + onlineIn;
+  if (rawPaid > finalNet) {
+    const overage = rawPaid - finalNet;
+    const cashCut = Math.min(cashIn, overage);
+    cashIn -= cashCut;
+    onlineIn = Math.max(0, onlineIn - (overage - cashCut));
+  }
+  const finalPaidCash = cashIn;
+  const finalPaidOnline = onlineIn;
   const finalPaidTotal = finalPaidCash + finalPaidOnline;
-  const finalDue = dueAmount !== undefined ? parseFloat(dueAmount) : Math.max(0, finalNet - finalPaidTotal);
+  const finalDue =
+    dueAmount !== undefined
+      ? Math.max(0, parseFloat(dueAmount) || 0)
+      : Math.max(0, finalNet - finalPaidTotal);
 
   const ordersPayload = [];
   const orderTestsPayload = [];
@@ -604,120 +774,268 @@ export async function createNewOrder({ patientData, testIds, discount, netPayabl
   for (let i = 0; i < departmentVials.length; i++) {
     const v = departmentVials[i];
     const vialBarcode = v.barcode;
-    const isMaster = (i === 0);
+    const isMaster = i === 0;
     const thisOrderId = `ORD-${todayCompact.slice(2)}-${vialBarcode.slice(-4)}`;
 
-    const testsForThisVial = selectedTests.filter(t => v.testIds.includes(t.id) || v.testIds.includes(t.code) || v.testNames.includes(t.name) || v.testNames.includes(t.code));
-    const vialSubtotal = testsForThisVial.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
-    const vialNet = vialSubtotal - (vialSubtotal * finalDiscountPercent) / 100;
+    const testsForThisVial = selectedTests.filter(
+      (t) =>
+        v.testIds.includes(t.id) ||
+        v.testIds.includes(t.code) ||
+        v.testNames.includes(t.name) ||
+        v.testNames.includes(t.code)
+    );
+    const vialSubtotal = testsForThisVial.reduce(
+      (acc, t) => acc + parseFloat(t.price || 0),
+      0
+    );
+    const vialNet =
+      vialSubtotal - (vialSubtotal * finalDiscountPercent) / 100;
 
     const vialOrderRow = {
-      id: thisOrderId, patient_id: patientId, barcode: vialBarcode, order_date: todayDate, created_at: nowIso, receipt_no: receiptNo,
-      subtotal: isMaster ? subTotal : vialSubtotal, discount_percent: finalDiscountPercent, net_payable: isMaster ? finalNet : vialNet,
-      paid_amount: isMaster ? finalPaidTotal : 0, due_amount: isMaster ? finalDue : 0, sample_status: "Order Created", qc_status: "Pending", is_locked: false
+      id: thisOrderId,
+      patient_id: patientId,
+      barcode: vialBarcode,
+      order_date: todayDate,
+      created_at: nowIso,
+      receipt_no: receiptNo,
+      subtotal: isMaster ? subTotal : vialSubtotal,
+      discount_percent: finalDiscountPercent,
+      net_payable: isMaster ? finalNet : vialNet,
+      paid_amount: isMaster ? finalPaidTotal : 0,
+      due_amount: isMaster ? finalDue : 0,
+      sample_status: "Order Created",
+      qc_status: "Pending",
+      is_locked: false,
     };
     ordersPayload.push(vialOrderRow);
 
-    for (const t of testsForThisVial) orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
+    for (const t of testsForThisVial) {
+      orderTestsPayload.push({ order_id: thisOrderId, test_id: t.id });
+    }
 
-    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: "SPECIMEN_VIALS", result_value: JSON.stringify([v]) });
-    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `VIAL_DEPT_${vialBarcode}`, result_value: v.deptId });
-    resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `VIAL_TESTS_${vialBarcode}`, result_value: JSON.stringify(v.testNames) });
-    for (const t of testsForThisVial) resultsMetadataPayload.push({ order_id: thisOrderId, parameter_id: `TEST_VIAL_${t.id}`, result_value: vialBarcode });
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: "SPECIMEN_VIALS",
+      result_value: JSON.stringify([v]),
+    });
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: `VIAL_DEPT_${vialBarcode}`,
+      result_value: v.deptId,
+    });
+    resultsMetadataPayload.push({
+      order_id: thisOrderId,
+      parameter_id: `VIAL_TESTS_${vialBarcode}`,
+      result_value: JSON.stringify(v.testNames),
+    });
+    for (const t of testsForThisVial) {
+      resultsMetadataPayload.push({
+        order_id: thisOrderId,
+        parameter_id: `TEST_VIAL_${t.id}`,
+        result_value: vialBarcode,
+      });
+    }
 
     createdVialOrders.push({
-      ...vialOrderRow, orderId: thisOrderId, date: todayDate, createdAt: nowIso, created_at: nowIso, barcode: vialBarcode,
-      allBarcodes: barcodeList, barcodesList: barcodeList, doctor: referringDoctor, receiptNo: receiptNo,
-      patient: { id: patientId, name: patientData.name, age: patientData.age, gender: patientData.gender, phone: patientData.phone, doctor: referringDoctor, address: `Ref: ${referringDoctor}` },
-      tests: testsForThisVial, vialTests: testsForThisVial, vials: [v],
-      order_tests: testsForThisVial.map(t => ({ test_id: t.id, test: t })),
-      billing: { subTotal: vialSubtotal, discount: finalDiscountPercent, netPayable: vialNet, paid: isMaster ? finalPaidTotal : vialNet, due: isMaster ? finalDue : 0, paidCash: isMaster ? finalPaidCash : vialNet, paidOnline: isMaster ? finalPaidOnline : 0 },
-      results: {}, qcStatus: "Pending", isLocked: false, verifierRemarks: "", dept_remarks: {}, deptRemarks: {}
+      ...vialOrderRow,
+      orderId: thisOrderId,
+      date: todayDate,
+      createdAt: nowIso,
+      created_at: nowIso,
+      barcode: vialBarcode,
+      allBarcodes: barcodeList,
+      barcodesList: barcodeList,
+      doctor: referringDoctor,
+      receiptNo: receiptNo,
+      patient: {
+        id: patientId,
+        name: patientData.name,
+        age: patientData.age,
+        gender: patientData.gender,
+        phone: patientData.phone,
+        doctor: referringDoctor,
+        address: `Ref: ${referringDoctor}`,
+      },
+      tests: testsForThisVial,
+      vialTests: testsForThisVial,
+      vials: [v],
+      order_tests: testsForThisVial.map((t) => ({ test_id: t.id, test: t })),
+      billing: {
+        subTotal: vialSubtotal,
+        discount: finalDiscountPercent,
+        netPayable: vialNet,
+        paid: isMaster ? finalPaidTotal : vialNet,
+        due: isMaster ? finalDue : 0,
+        paidCash: isMaster ? finalPaidCash : vialNet,
+        paidOnline: isMaster ? finalPaidOnline : 0,
+      },
+      results: {},
+      qcStatus: "Pending",
+      isLocked: false,
+      verifierRemarks: "",
+      dept_remarks: {},
+      deptRemarks: {},
     });
   }
 
-  const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_vial_orders", {
-    p_payload: { orders: ordersPayload, order_tests: orderTestsPayload, results_metadata: resultsMetadataPayload }
-  });
+  const { data: rpcResult, error: rpcErr } = await supabase.rpc(
+    "create_vial_orders",
+    {
+      p_payload: {
+        orders: ordersPayload,
+        order_tests: orderTestsPayload,
+        results_metadata: resultsMetadataPayload,
+      },
+    }
+  );
 
   if (rpcErr) {
     console.error("[createNewOrder] create_vial_orders failed:", rpcErr.message);
-    throw new Error("Could not save the order atomically: " + rpcErr.message);
+    throw new Error(
+      "Could not save the order atomically: " + rpcErr.message
+    );
   }
 
   const returnedIds = new Set((rpcResult || []).map((r) => r.id));
   for (const p of ordersPayload) {
-    if (!returnedIds.has(p.id)) throw new Error("Order was not persisted: " + p.id);
+    if (!returnedIds.has(p.id)) {
+      throw new Error("Order was not persisted: " + p.id);
+    }
   }
 
-  // LOG SPLIT PAYMENTS
+  // ── Split payment records (only if the amount is > 0) ──
   if (finalPaidTotal > 0) {
     try {
       if (finalPaidCash > 0) {
         await supabase.from("payments").insert({
-          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
-          payment_date: todayDate, amount: finalPaidCash, payment_method: "Cash", order_id: createdVialOrders[0].orderId
+          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(
+            Math.random() * 900 + 100
+          )}`,
+          payment_date: todayDate,
+          amount: finalPaidCash,
+          payment_method: "Cash",
+          order_id: createdVialOrders[0].orderId,
         });
       }
       if (finalPaidOnline > 0) {
         await supabase.from("payments").insert({
-          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
-          payment_date: todayDate, amount: finalPaidOnline, payment_method: "Online", order_id: createdVialOrders[0].orderId
+          id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(
+            Math.random() * 900 + 100
+          )}`,
+          payment_date: todayDate,
+          amount: finalPaidOnline,
+          payment_method: "Online",
+          order_id: createdVialOrders[0].orderId,
         });
       }
-    } catch (e) { console.warn("Payment log failed:", e); }
+    } catch (e) {
+      console.warn("Payment log failed:", e);
+    }
   }
 
+  // ── Local cache ──
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_orders") || "[]");
-    const newIds = new Set(createdVialOrders.map(o => o.orderId));
-    localStorage.setItem("apex_local_orders", JSON.stringify([...createdVialOrders, ...local.filter(o => !newIds.has(o.orderId))].slice(0, 500)));
-  } catch (e) {}
+    const newIds = new Set(createdVialOrders.map((o) => o.orderId));
+    localStorage.setItem(
+      "apex_local_orders",
+      JSON.stringify(
+        [...createdVialOrders, ...local.filter((o) => !newIds.has(o.orderId))].slice(
+          0,
+          500
+        )
+      )
+    );
+  } catch {}
 
   const masterForPrint = {
-    ...createdVialOrders[0], tests: selectedTests, order_tests: selectedTests.map(t => ({ test_id: t.id, test: t })), vials: departmentVials, allBarcodes: barcodeList, barcodesList: barcodeList,
-    billing: { subTotal: subTotal, discount: finalDiscountPercent, netPayable: finalNet, paid: finalPaidTotal, due: finalDue, paidCash: finalPaidCash, paidOnline: finalPaidOnline }
+    ...createdVialOrders[0],
+    tests: selectedTests,
+    order_tests: selectedTests.map((t) => ({ test_id: t.id, test: t })),
+    vials: departmentVials,
+    allBarcodes: barcodeList,
+    barcodesList: barcodeList,
+    billing: {
+      subTotal,
+      discount: finalDiscountPercent,
+      netPayable: finalNet,
+      paid: finalPaidTotal,
+      due: finalDue,
+      paidCash: finalPaidCash,
+      paidOnline: finalPaidOnline,
+    },
   };
 
   return masterForPrint;
 }
 
-// ==========================================
-// 7. SETTLE DUE & RESULT ENTRY
-// ==========================================
 export async function settleOrderDue(orderId, collectedCash, collectedOnline) {
-  const amtCash = parseFloat(collectedCash) || 0;
-  const amtOnline = parseFloat(collectedOnline) || 0;
-  const totalClear = amtCash + amtOnline;
-  
-  const { data: currentOrd } = await supabase.from("orders").select("paid_amount, due_amount").eq("id", orderId).single();
+  const amtCash = Math.max(0, parseFloat(collectedCash) || 0);
+  const amtOnline = Math.max(0, parseFloat(collectedOnline) || 0);
+  const totalTendered = amtCash + amtOnline;
 
-  let newPaid = totalClear;
+  const { data: currentOrd } = await supabase
+    .from("orders")
+    .select("paid_amount, due_amount")
+    .eq("id", orderId)
+    .single();
+
+  let newPaid = totalTendered;
   let newDue = 0;
+  let cashToRecord = amtCash;
+  let onlineToRecord = amtOnline;
+  let changeReturned = 0;
+
   if (currentOrd) {
     const prevPaid = parseFloat(currentOrd.paid_amount) || 0;
     const prevDue = parseFloat(currentOrd.due_amount) || 0;
-    newPaid = prevPaid + Math.min(totalClear, prevDue);
-    newDue = Math.max(0, prevDue - totalClear);
+    const amountToApply = Math.min(totalTendered, prevDue);
+
+    if (totalTendered > prevDue) {
+      // The patient overpaid. Record only what settles the bill,
+      // and report back how much change the receptionist owes them.
+      changeReturned = totalTendered - prevDue;
+      const cashCut = Math.min(cashToRecord, changeReturned);
+      cashToRecord -= cashCut;
+      const onlineCut = changeReturned - cashCut;
+      if (onlineCut > 0) onlineToRecord = Math.max(0, onlineToRecord - onlineCut);
+    }
+
+    newPaid = prevPaid + amountToApply;
+    newDue = Math.max(0, prevDue - amountToApply);
   }
 
-  await supabase.from("orders").update({ paid_amount: newPaid, due_amount: newDue }).eq("id", orderId);
+  await supabase
+    .from("orders")
+    .update({ paid_amount: newPaid, due_amount: newDue })
+    .eq("id", orderId);
 
-  // LOG SPLIT PAYMENTS
-  if (amtCash > 0) {
+  const paymentDate = new Date().toISOString().slice(0, 10);
+
+  if (cashToRecord > 0) {
     await supabase.from("payments").insert({
-      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
-      payment_date: new Date().toISOString().slice(0, 10), amount: amtCash, payment_method: "Cash", order_id: orderId
+      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(
+        Math.random() * 900 + 100
+      )}`,
+      payment_date: paymentDate,
+      amount: cashToRecord,
+      payment_method: "Cash",
+      order_id: orderId,
     });
   }
-  if (amtOnline > 0) {
+  if (onlineToRecord > 0) {
     await supabase.from("payments").insert({
-      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`,
-      payment_date: new Date().toISOString().slice(0, 10), amount: amtOnline, payment_method: "Online", order_id: orderId
+      id: `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(
+        Math.random() * 900 + 100
+      )}`,
+      payment_date: paymentDate,
+      amount: onlineToRecord,
+      payment_method: "Online",
+      order_id: orderId,
     });
   }
 
-  return { newPaid, newDue };
+  return { newPaid, newDue, changeReturned };
 }
 
 export async function saveTestResult(orderId, parameterId, resultValue, statusFlag = "ENTERED") {

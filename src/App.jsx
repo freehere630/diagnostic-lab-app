@@ -157,11 +157,12 @@ export default function App() {
   const [receiveStockInitialItemId, setReceiveStockInitialItemId] = useState(null);
   const [selectedPOId, setSelectedPOId] = useState(null);
   const [receivePOId, setReceivePOId] = useState(null);
-  
+
   // ============================================================
   // 2. REFS
   // ============================================================
   const lastActiveOrderRef = useRef(null);
+  const savingRef = useRef(false);          // <-- guards handleSaveOrderToDb
   const resultWriteTimers = useRef({});
   const recentlyWrittenRef = useRef({});
   const fetchSeqRef = useRef(0);
@@ -244,9 +245,11 @@ export default function App() {
       if (!grouped[groupKey]) {
         const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
         grouped[groupKey] = {
-          dept: { id: groupKey,
-             name: groupName || baseDept.name,
-              icon: groupIcon || baseDept.icon || "🔬" },
+          dept: {
+            id: groupKey,
+            name: groupName || baseDept.name,
+            icon: groupIcon || baseDept.icon || "🔬",
+          },
           tests: [], ownerOrderId: null, ownerBarcode: null, ownerLocked: false, ownerOrder: null,
         };
       }
@@ -290,7 +293,7 @@ export default function App() {
           setVerificationError("Report record not found or invalid certificate.");
           return;
         }
-        
+
         // Normalize results for the portal
         const normalizedResults = (() => {
           const raw = rpcData.results;
@@ -415,7 +418,7 @@ export default function App() {
     if (!currentUser) return;
     const mySeq = ++fetchSeqRef.current;
     if (!silent) setIsLoading(true);
-    
+
     try {
       const res = await getOrdersPaginated({
         page: currentPage, pageSize: 20, dateFrom: dateRange.from, dateTo: dateRange.to, searchQuery: dashboardSearch,
@@ -650,47 +653,188 @@ export default function App() {
     } catch (e) { console.error("Recollection error:", e); alert("Error marking sample recollected: " + (e.message || e)); } finally { setIsLoading(false); }
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // FIXED: handleSaveOrderToDb
+  //  • Ref guard kills double-click duplicate orders
+  //  • UHID collision pre-flight prevents silent patient overwrite
+  //  • Payment capping prevents revenue overstatement
+  //  • Filter reset ensures the new order is visible on the dashboard
+  // ─────────────────────────────────────────────────────────────
   const handleSaveOrderToDb = async () => {
-    if (!patientForm.name || !patientForm.phone || selectedTestIds.length === 0) {
-      return alert("Please fill Patient Name, Phone Number, and select at least one Test.");
-    }
+    // 1. Re-entrancy guard — set synchronously, before any await.
+    if (savingRef.current) return;
+
+    // 2. Validation
+    if (!patientForm.name?.trim()) return alert("Please enter the patient's name.");
+    if (!patientForm.phone?.trim()) return alert("Please enter the patient's phone number.");
+    if (selectedTestIds.length === 0) return alert("Please select at least one test.");
+
+    savingRef.current = true;
     setIsLoading(true);
+
     try {
+      // 3. UHID collision pre-flight — only when a returning patient is linked.
+      if (patientForm.id) {
+        const { data: existing, error: lookupErr } = await supabase
+          .from("patients")
+          .select("id, name, phone")
+          .eq("id", patientForm.id)
+          .maybeSingle();
+
+        if (lookupErr) {
+          console.warn("UHID lookup failed:", lookupErr.message);
+        } else if (existing) {
+          const nameChanged = existing.name !== patientForm.name;
+          const phoneChanged = existing.phone !== patientForm.phone;
+          if (nameChanged || phoneChanged) {
+            const ok = window.confirm(
+              `This UHID already belongs to an existing patient.\n\n` +
+                `UHID:   ${patientForm.id}\n` +
+                `Saved name:   ${existing.name}\n` +
+                `Saved phone:  ${existing.phone}\n\n` +
+                `You are about to overwrite with:\n` +
+                `New name:   ${patientForm.name}\n` +
+                `New phone:  ${patientForm.phone}\n\n` +
+                `Continue and modify the existing record?`
+            );
+            if (!ok) {
+              savingRef.current = false;
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+      }
+
+      // 4. Billing math
       const chosen = testCatalog.filter((t) => selectedTestIds.includes(t.id));
       const sub = chosen.reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
-      const net = sub - (sub * discountVal) / 100;
-      
-      const finalPaidCash = parseFloat(paidCashVal) || 0;
-      const finalPaidOnline = parseFloat(paidOnlineVal) || 0;
-      const finalPaidTotal = finalPaidCash + finalPaidOnline;
+      const net = Math.max(0, sub - (sub * discountVal) / 100);
+
+      // 5. Cap overpayment so revenue reconciles with the cash drawer.
+      //    Any excess is treated as "change to return", not as income.
+      let cash = Math.max(0, parseFloat(paidCashVal) || 0);
+      let online = Math.max(0, parseFloat(paidOnlineVal) || 0);
+      const rawTotal = cash + online;
+
+      let changeReturned = 0;
+      if (rawTotal > net) {
+        changeReturned = rawTotal - net;
+        const cashCut = Math.min(cash, changeReturned);
+        cash -= cashCut;
+        const remainingCut = changeReturned - cashCut;
+        if (remainingCut > 0) online = Math.max(0, online - remainingCut);
+      }
+
+      const finalPaidTotal = cash + online;
       const finalDue = Math.max(0, net - finalPaidTotal);
 
+      // 6. Persist atomically.
       const createdOrder = await createNewOrder({
-        patientData: patientForm, testIds: selectedTestIds, discount: discountVal, netPayable: net,
-        paidCash: finalPaidCash, paidOnline: finalPaidOnline, dueAmount: finalDue, testCatalog,
+        patientData: patientForm,
+        testIds: selectedTestIds,
+        discount: discountVal,
+        netPayable: net,
+        paidCash: cash,
+        paidOnline: online,
+        dueAmount: finalDue,
+        testCatalog,
       });
 
-      setOrders((prev) => [createdOrder, ...prev.filter((o) => o.orderId !== createdOrder.orderId)]);
+      // 7. Local state update.
+      setOrders((prev) => [
+        createdOrder,
+        ...prev.filter((o) => o.orderId !== createdOrder.orderId),
+      ]);
       setSelectedOrderId(createdOrder.orderId);
-      setPatientForm({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
-      setSelectedTestIds([]); setDiscountVal(0); setPaidCashVal(""); setPaidOnlineVal("");
 
-      try { printMoneyReceiptA5(createdOrder, labSettings); } catch (err) { console.warn("Receipt print:", err); }
+      // 8. Form reset.
+      setPatientForm({ id: "", name: "", age: "", gender: "Male", phone: "", doctor: "Self" });
+      setSelectedTestIds([]);
+      setDiscountVal(0);
+      setPaidCashVal("");
+      setPaidOnlineVal("");
+
+      // 9. Print receipt (non-blocking — a print failure must not lose the order).
+      try {
+        printMoneyReceiptA5(createdOrder, labSettings);
+      } catch (err) {
+        console.warn("Receipt print:", err);
+      }
+
+      // 10. Reset dashboard filters so the new order is actually visible.
+      //     Without this, a receptionist who was viewing "Yesterday" won't
+      //     see today's order on the dashboard.
+      setActivePreset("TODAY");
+      setDateRange({ from: todayStr, to: todayStr });
+      setCurrentPage(1);
       setActiveTab("dashboard");
       fetchPaginatedOrders(true);
-    } catch (e) { alert("Error saving order: " + e.message); } finally { setIsLoading(false); }
+
+      // 11. Inform the cashier of the change owed (after print dialog closes).
+      if (changeReturned > 0) {
+        setTimeout(() => {
+          alert(
+            `Receipt printed.\n\n` +
+              `Change to return to patient: ৳${changeReturned.toFixed(0)}\n\n` +
+              `(Recorded paid amount has been capped at the net payable to keep the cash drawer balanced.)`
+          );
+        }, 100);
+      }
+    } catch (e) {
+      alert("Error saving order: " + e.message);
+    } finally {
+      savingRef.current = false;
+      setIsLoading(false);
+    }
   };
 
-  const handleSettleDue = async (orderId, collectedAmount) => {
+  const handleSettleDue = async (orderId, collectedCash, collectedOnline) => {
     setIsLoading(true);
     try {
-      const { newPaid, newDue } = await settleOrderDue(orderId, collectedAmount, 0); // Passing cash only for now
+      // 1. Update the database with the split payment
+      const { newPaid, newDue, changeReturned } = await settleOrderDue(orderId, collectedCash, collectedOnline);
+      
+      // 2. Update local state immediately
       setOrders((prev) => prev.map((o) => o.orderId === orderId ? { ...o, billing: { ...o.billing, paid: newPaid, due: newDue } } : o));
-      alert(`✅ Payment Collected!\nTotal Paid: ৳${newPaid}\nRemaining Due: ৳${newDue}`);
+      
+      // 3. Prepare the updated receipt (fetch all historical payments to show accurate Cash/Online split)
       const matched = orders.find((o) => o.orderId === orderId);
-      if (matched) printMoneyReceiptA5({ ...matched, billing: { ...matched.billing, paid: newPaid, due: newDue } }, labSettings);
+      if (matched) {
+        const { data: pays } = await supabase.from('payments').select('*').eq('order_id', orderId);
+        let totalCash = 0;
+        let totalOnline = 0;
+        
+        if (pays) {
+          pays.forEach(p => {
+            if (p.payment_method === 'Cash') totalCash += parseFloat(p.amount);
+            else totalOnline += parseFloat(p.amount);
+          });
+        }
+
+        printMoneyReceiptA5({ 
+          ...matched, 
+          billing: { 
+            ...matched.billing, 
+            paid: newPaid, 
+            due: newDue, 
+            paidCash: totalCash, 
+            paidOnline: totalOnline 
+          } 
+        }, labSettings);
+      }
+
+      alert(
+        `✅ Payment Collected!\nTotal Paid: ৳${newPaid}\nRemaining Due: ৳${newDue}` +
+        (changeReturned > 0 ? `\n\n⚠ Change to return: ৳${changeReturned}` : "")
+      );
+      
       fetchPaginatedOrders(true);
-    } catch (e) { alert("Error collecting due: " + e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert("Error collecting due: " + e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleResultInput = async (paramId, val) => {
@@ -708,7 +852,7 @@ export default function App() {
 
     setOrders((prev) => prev.map((o) => (o.orderId === targetOrderId || o.id === targetOrderId) ? { ...o, sample_status: "In Analysis", verifierRemarks: cleanRemarks, results: { ...o.results, [paramId]: { value: cleanVal } } } : o));
     setSaveStatus({ state: "saving", message: "Syncing..." });
-    
+
     recentlyWrittenRef.current[paramId] = Date.now() + 3000;
 
     if (resultWriteTimers.current[paramId]) clearTimeout(resultWriteTimers.current[paramId]);
@@ -1053,37 +1197,35 @@ export default function App() {
 
       {/* INVENTORY TABS */}
       {activeTab === "inventory-dashboard" && <InventoryDashboard onNavigate={(tab) => setActiveTab(tab)} />}
-      
+
       {activeTab === "inventory-items" && <InventoryItems onReceiveStock={openReceiveStock} onNavigate={setActiveTab} departments={departments} />}
-      
+
       {activeTab === "inventory-suppliers" && <SupplierManagement />}
-      
+
       {activeTab === "inventory-ledger" && <StockLedger />}
-      
+
       {activeTab === "inventory-machines" && <MachineDashboard departments={departments} />}
-      
+
       {activeTab === "inventory-ops" && <StockOperations onNavigate={setActiveTab} />}
-      
+
       {activeTab === "inventory-reports" && <InventoryReports />}
-      
+
       {activeTab === "inventory-po" && !selectedPOId && <PurchaseOrders onOpenPO={(id) => setSelectedPOId(id)} />}
-      
+
       {activeTab === "inventory-po" && selectedPOId && <PurchaseOrderDetail poId={selectedPOId} onBack={() => setSelectedPOId(null)} onReceive={(id) => setReceivePOId(id)} />}
       {activeTab === "role-permissions" && <RolePermissions />}
       {/* FINANCE TABS */}
       {activeTab === "finance" && <FinanceDashboard />}
       {activeTab === "finance-closing" && <CashClosing />}
-                  {activeTab === "doctor-commissions" && !selectedDoctorForProfile && (
-        <DoctorCommissions 
+      {activeTab === "doctor-commissions" && !selectedDoctorForProfile && (
+        <DoctorCommissions
           onSelectDoctor={(id, name) => setSelectedDoctorForProfile({ id, name })}
-          // If they click "Pay Out" directly from the list, we can open the profile 
-          // and they can pay from there
           onPayOut={(doc) => setSelectedDoctorForProfile({ id: doc.id, name: doc.name })}
         />
       )}
 
       {activeTab === "doctor-commissions" && selectedDoctorForProfile && (
-        <DoctorProfile 
+        <DoctorProfile
           doctorId={selectedDoctorForProfile.id}
           doctorName={selectedDoctorForProfile.name}
           labSettings={labSettings}

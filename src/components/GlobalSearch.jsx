@@ -58,7 +58,7 @@ export default function GlobalSearch({ onPickPatient, onPickOrder }) {
           supabase
             .from("orders")
             .select("id, barcode, order_date, patient_id, patient:patients(id, name, phone)")
-            .or(`barcode.ilike.%${q}%,id.ilike.%${q}%`)
+            .or(`barcode.ilike.%${q}%,receipt_no.ilike.%${q}%,id.ilike.%${q}%`)
             .order("order_date", { ascending: false })
             .limit(6),
         ]);

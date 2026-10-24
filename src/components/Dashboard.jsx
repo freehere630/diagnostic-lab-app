@@ -33,49 +33,53 @@ export default function Dashboard({
   isLoading
 }) {
   const [settleOrder, setSettleOrder] = useState(null);
-  const [collectionAmount, setCollectionAmount] = useState("");
+  const [settleCash, setSettleCash] = useState("");
+  const [settleOnline, setSettleOnline] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [isBubbleOpen, setIsBubbleOpen] = useState(false);
   const [localOrders, setLocalOrders] = useState(orders);
-// ---- SEARCH BAR STATE ----
-const [searchInput, setSearchInput] = useState(dashboardSearch || "");
-const searchRef = useRef(null);
+  
+  // ---- SEARCH BAR STATE ----
+  const [searchInput, setSearchInput] = useState(dashboardSearch || "");
+  const searchRef = useRef(null);
 
-// Debounce: push searchInput → dashboardSearch after 300ms,
-// and reset the page to 1 so a search never lands on an empty page.
-useEffect(() => {
-  const t = setTimeout(() => {
-    if (searchInput !== dashboardSearch) {
-      setDashboardSearch(searchInput);
-      setCurrentPage?.(1);
+  // Debounce: push searchInput → dashboardSearch after 300ms,
+  // and reset the page to 1 so a search never lands on an empty page.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (searchInput !== dashboardSearch) {
+        setDashboardSearch(searchInput);
+        setCurrentPage?.(1);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput, dashboardSearch, setDashboardSearch, setCurrentPage]);
+
+  // Sync external changes back into the input (e.g. parent clears it)
+  useEffect(() => {
+    if (dashboardSearch !== searchInput) {
+      setSearchInput(dashboardSearch || "");
     }
-  }, 300);
-  return () => clearTimeout(t);
-}, [searchInput, dashboardSearch, setDashboardSearch, setCurrentPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardSearch]);
 
-// Sync external changes back into the input (e.g. parent clears it)
-useEffect(() => {
-  if (dashboardSearch !== searchInput) {
-    setSearchInput(dashboardSearch || "");
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [dashboardSearch]);
+  // Keyboard shortcuts: "/" or Ctrl/Cmd+K focuses the search box
+  useEffect(() => {
+    const onKey = (e) => {
+      const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+      if (!inField && (e.key === "/" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"))) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-// Keyboard shortcuts: "/" or Ctrl/Cmd+K focuses the search box
-useEffect(() => {
-  const onKey = (e) => {
-    const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
-    if (!inField && (e.key === "/" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"))) {
-      e.preventDefault();
-      searchRef.current?.focus();
-    }
-  };
-  window.addEventListener("keydown", onKey);
-  return () => window.removeEventListener("keydown", onKey);
-}, []);
   useEffect(() => {
     setLocalOrders(orders);
   }, [orders]);
+
   // Group sibling vial-orders (same receiptNo) into one row per visit
   const visitGroups = useMemo(() => {
     const groups = new Map();
@@ -130,6 +134,7 @@ useEffect(() => {
       };
     });
   }, [localOrders]);
+
   // Universal multi-barcode search: Matches primary, secondary, and test barcodes
   const sortedOrders = useMemo(() => {
     const q = (dashboardSearch || "").trim().toLowerCase();
@@ -150,6 +155,7 @@ useEffect(() => {
         return timeB - timeA;
       });
   }, [visitGroups, dashboardSearch]);
+
   const recollectionOrders = useMemo(() => {
     return sortedOrders.filter((g) => {
       const status = (g.master.sample_status || g.master.sampleStatus || "").toLowerCase();
@@ -159,7 +165,7 @@ useEffect(() => {
         return false;
       }
 
-            return (
+      return (
         status.includes("repeat collection required") ||
         status === "repeat collection" ||
         (remarks.includes("RECOLLECTION REQUIRED") && !status.includes("recollected"))
@@ -176,14 +182,21 @@ useEffect(() => {
     // Find the sibling that actually carries the due balance
     const withDue = g.vials.find((v) => (v.billing?.due || 0) > 0) || g.master;
     setSettleOrder(withDue);
-    setCollectionAmount(withDue.billing?.due || g.totalDue || "");
+    // Auto-fill cash with the exact due amount by default
+    setSettleCash(withDue.billing?.due || "");
+    setSettleOnline("");
   };
 
   const submitSettlement = () => {
     if (!settleOrder) return;
-    const amt = parseFloat(collectionAmount);
-    if (isNaN(amt) || amt <= 0) return alert("Please enter a valid collection amount.");
-    handleSettleDue(settleOrder.orderId || settleOrder.id, amt);
+    const cash = parseFloat(settleCash) || 0;
+    const online = parseFloat(settleOnline) || 0;
+    
+    if (cash <= 0 && online <= 0) {
+      return alert("Please enter a valid collection amount.");
+    }
+    
+    handleSettleDue(settleOrder.orderId || settleOrder.id, cash, online);
     setSettleOrder(null);
   };
 
@@ -234,15 +247,13 @@ useEffect(() => {
     return dateStr || "Today";
   };
 
-
-
   return (
     <div className="space-y-4 max-w-[1720px] mx-auto text-slate-900">
 
       {/* 1. ANALYTICS STRIP */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Page Orders</span>
+                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Page Receipts</span>
           <span className="text-lg font-bold text-slate-800">{sortedOrders.length}</span>
         </div>
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
@@ -267,75 +278,70 @@ useEffect(() => {
         </div>
       </div>
 
-{/* 2b. SEARCH BAR */}
-<div className="bg-white px-3 py-2 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-2.5">
-  <div className="relative flex-1 min-w-0">
-    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-    <input
-      ref={searchRef}
-      type="text"
-      value={searchInput}
-      onChange={(e) => setSearchInput(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          setSearchInput("");
-          setDashboardSearch("");
-          setCurrentPage?.(1);
-          e.currentTarget.blur();
-        }
-      }}
-      placeholder="Search by patient name, UHID, phone, receipt number, or barcode…"
-      className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition font-medium text-slate-800 placeholder:text-slate-400"
-      spellCheck={false}
-      autoComplete="off"
-    />
+      {/* 2. SEARCH BAR */}
+      <div className="bg-white px-3 py-2 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-2.5">
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            ref={searchRef}
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setSearchInput("");
+                setDashboardSearch("");
+                setCurrentPage?.(1);
+                e.currentTarget.blur();
+              }
+            }}
+            placeholder="Search by patient name, UHID, phone, receipt number, or barcode…"
+            className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition font-medium text-slate-800 placeholder:text-slate-400"
+            spellCheck={false}
+            autoComplete="off"
+          />
 
-    {searchInput && (
-      <button
-        type="button"
-        onClick={() => {
-          setSearchInput("");
-          setDashboardSearch("");
-          setCurrentPage?.(1);
-          searchRef.current?.focus();
-        }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition"
-        title="Clear search (Esc)"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
-    )}
-  </div>
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setDashboardSearch("");
+                setCurrentPage?.(1);
+                searchRef.current?.focus();
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition"
+              title="Clear search (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
 
-  {searchInput.trim() ? (
-    <span className="text-[11px] font-semibold whitespace-nowrap shrink-0">
-      <span className="text-blue-600 font-bold">{sortedOrders.length}</span>
-      <span className="text-slate-400 mx-0.5">/</span>
-      <span className="text-slate-700">{visitGroups.length}</span>
-      <span className="text-slate-400 font-normal ml-1">matched</span>
-    </span>
-  ) : (
-    <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap shrink-0 hidden sm:inline">
-      {visitGroups.length} visit{visitGroups.length !== 1 ? "s" : ""} on this page
-    </span>
-  )}
+        {searchInput.trim() ? (
+          <span className="text-[11px] font-semibold whitespace-nowrap shrink-0">
+            <span className="text-blue-600 font-bold">{sortedOrders.length}</span>
+            <span className="text-slate-400 mx-0.5">/</span>
+            <span className="text-slate-700">{visitGroups.length}</span>
+            <span className="text-slate-400 font-normal ml-1">matched</span>
+          </span>
+        ) : (
+          <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap shrink-0 hidden sm:inline">
+            {visitGroups.length} visit{visitGroups.length !== 1 ? "s" : ""} on this page
+          </span>
+        )}
 
-  <kbd
-    className="hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono font-bold text-slate-500 border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 shrink-0"
-    title="Focus search"
-  >
-    Ctrl K
-  </kbd>
-</div>
+        <kbd
+          className="hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono font-bold text-slate-500 border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 shrink-0"
+          title="Focus search"
+        >
+          Ctrl K
+        </kbd>
+      </div>
 
       {/* 3. PATIENT QUEUE TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
-        {/* Full-screen spinner only when there are no rows to show yet.
-            When rows exist and a background sync is running, keep the
-            table visible with a translucent overlay — the previous
-            behaviour (swapping the whole table for a spinner) caused a
-            visible flash on every page change and every keystroke. */}
         {sortedOrders.length === 0 && isLoading ? (
           <div className="py-16 text-center text-slate-400 text-xs">
             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
@@ -360,7 +366,7 @@ useEffect(() => {
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                              <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100">
                   {sortedOrders.map((g) => {
                     const masterId = g.master.orderId || g.master.id;
                     const hasDue = g.totalDue > 0;
@@ -480,42 +486,42 @@ useEffect(() => {
                             <Barcode className="w-3 h-3" /> Vials
                           </button>
 
-                                                  <button
-                          onClick={async () => {
-                            // Fetch the split payments for this visit from the database
-                            const orderIds = g.vials.map(v => v.orderId || v.id);
-                            const { data: pays } = await supabase.from('payments').select('*').in('order_id', orderIds);
-                            
-                            let paidCash = 0;
-                            let paidOnline = 0;
-                            if (pays && pays.length > 0) {
-                              pays.forEach(p => {
-                                if (p.payment_method === 'Cash') paidCash += parseFloat(p.amount);
-                                else paidOnline += parseFloat(p.amount);
-                              });
-                            } else {
-                              // Fallback for older orders that didn't have the payments table
-                              paidCash = parseFloat(g.master.billing?.paid) || 0;
-                            }
+                          <button
+                            onClick={async () => {
+                              // Fetch the split payments for this visit from the database
+                              const orderIds = g.vials.map(v => v.orderId || v.id);
+                              const { data: pays } = await supabase.from('payments').select('*').in('order_id', orderIds);
+                              
+                              let paidCash = 0;
+                              let paidOnline = 0;
+                              if (pays && pays.length > 0) {
+                                pays.forEach(p => {
+                                  if (p.payment_method === 'Cash') paidCash += parseFloat(p.amount);
+                                  else paidOnline += parseFloat(p.amount);
+                                });
+                              } else {
+                                // Fallback for older orders that didn't have the payments table
+                                paidCash = parseFloat(g.master.billing?.paid) || 0;
+                              }
 
-                            const fullVisitOrder = {
-                              ...g.master,
-                              tests: g.allTests,
-                              allBarcodes: g.allBarcodes,
-                              barcodesList: g.allBarcodes,
-                              vials: g.vials,
-                              billing: {
-                                ...(g.master.billing || {}),
-                                paidCash,     // Injecting the fetched split
-                                paidOnline,   // Injecting the fetched split
-                                subTotal: g.allTests.reduce(
-                                  (s, t) => s + parseFloat(t.price || 0),
-                                  0
-                                ),
-                              },
-                            };
-                            handlePrintMoneyReceipt(fullVisitOrder);
-                          }}
+                              const fullVisitOrder = {
+                                ...g.master,
+                                tests: g.allTests,
+                                allBarcodes: g.allBarcodes,
+                                barcodesList: g.allBarcodes,
+                                vials: g.vials,
+                                billing: {
+                                  ...(g.master.billing || {}),
+                                  paidCash,     // Injecting the fetched split
+                                  paidOnline,   // Injecting the fetched split
+                                  subTotal: g.allTests.reduce(
+                                    (s, t) => s + parseFloat(t.price || 0),
+                                    0
+                                  ),
+                                },
+                              };
+                              handlePrintMoneyReceipt(fullVisitOrder);
+                            }}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-medium transition inline-flex items-center gap-1"
                           >
                             <Receipt className="w-3 h-3" /> Receipt
@@ -554,7 +560,7 @@ useEffect(() => {
         {/* 4. PAGINATION FOOTER */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 border-t border-slate-100 text-[11px] bg-slate-50/50">
           <span className="text-slate-500 font-medium">
-            Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b>–<b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> entries
+            Showing <b>{sortedOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</b>–<b>{Math.min(currentPage * pageSize, totalCount)}</b> of <b>{totalCount}</b> receipts
           </span>
 
           <div className="flex items-center gap-1">
@@ -641,7 +647,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* 6. SETTLE DUE PAYMENT MODAL */}
+      {/* 6. SETTLE DUE PAYMENT MODAL (SPLIT PAYMENT ENABLED) */}
       {settleOrder && (
         <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl border border-slate-200 overflow-hidden text-xs">
@@ -670,14 +676,32 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">Amount Collected (৳)</label>
-                <input
-                  type="number"
-                  value={collectionAmount}
-                  onChange={(e) => setCollectionAmount(e.target.value)}
-                  className="w-full p-2 text-sm font-mono font-bold border border-amber-300 bg-amber-50/40 rounded-lg outline-none focus:ring-1 focus:ring-amber-500"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Cash (৳)</label>
+                  <input
+                    type="number" min="0"
+                    value={settleCash}
+                    onChange={(e) => setSettleCash(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                    className="w-full p-2 text-sm font-mono font-bold border border-amber-300 bg-amber-50/40 rounded-lg outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Online (৳)</label>
+                  <input
+                    type="number" min="0"
+                    value={settleOnline}
+                    onChange={(e) => setSettleOnline(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                    className="w-full p-2 text-sm font-mono font-bold border border-blue-300 bg-blue-50/40 rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                <span className="text-[11px] font-bold text-emerald-800">Remaining Due:</span>
+                <span className="font-mono font-bold text-emerald-700 text-sm">
+                  ৳{Math.max(0, (settleOrder.billing?.due || 0) - ((parseFloat(settleCash) || 0) + (parseFloat(settleOnline) || 0)))}
+                </span>
               </div>
 
               <div className="flex justify-end gap-1.5 pt-2">

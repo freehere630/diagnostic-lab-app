@@ -331,7 +331,13 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
       }
     }
   }
+  
   for (const rk of Object.keys(results || {})) {
+    // FIX: Ignore internal metadata keys so barcodes don't print as results
+    if (rk.startsWith("TEST_VIAL_") || rk.startsWith("VIAL_") || rk === "SPECIMEN_VIALS" || rk.startsWith("DEPT_REMARKS_")) {
+      continue;
+    }
+
     const rkLow = rk.toLowerCase().trim();
     if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
       const val = results[rk]?.value ?? results[rk];
@@ -1799,7 +1805,6 @@ export async function downloadDepartmentReportPdf({
   }
 }
 
-// 10. A5 MONEY RECEIPT ENGINE (SCANNABLE ORDER BARCODE)
 export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
   const activeOrd = orderToPrint || {
     receiptNo: "RCP-0914-001",
@@ -1896,14 +1901,24 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
 
           <div style="border: 1px dashed #000; padding: 4px 6px; margin-bottom: 5px; font-size: 7.5pt; background: #fafafa;">
             <table style="width: 100%; border-collapse: collapse; font-family: inherit;">
-              <tr>
-                <td style="padding: 1px 0;"><b>RECEIPT NO:</b> ${esc(activeOrd.receiptNo) || "RCP-0914-001"}</td>
-                <td style="padding: 1px 0; text-align: right;"><b>DATE:</b> ${esc(activeOrd.date) || new Date().toISOString().slice(0, 10)}</td>
-              </tr>
-              <tr>
+            <tr>
                 <td style="padding: 1px 0;"><b>PATIENT ID:</b> <span style="font-weight: bold;">${esc(patientId)}</span></td>
                 <td style="padding: 1px 0; text-align: right;"><b>PHONE:</b> ${esc(activeOrd.patient?.phone) || "N/A"}</td>
+              </tr>  
+            <tr>
+                
+                <td style="padding: 1px 0; text-align: left; vertical-align: top;">
+                  <b>DATE:</b> ${esc(activeOrd.date) || new Date().toISOString().slice(0, 10)}
+                </td>
+                <td style="padding: 1px 0; position : absolute; display: flex; justify-content: flex-end; flex-direction: column; right:6px; vertical-align: top;">
+                  
+                  <div style="margin-top: 2px;  max-width: 200px;">
+                    ${generateSvgBarcodeHtml(activeOrd.receiptNo, 24)}
+                  </div>
+                  <span style= " position : relative; right: -6px;"><b>RECEIPT NO:</b> ${esc(activeOrd.receiptNo) || "RCP-0914-001"}</span>
+                </td>
               </tr>
+              
               <tr>
                 <td colspan="2" style="padding: 1px 0;"><b>PATIENT:</b> ${esc(activeOrd.patient?.name) || "Patient"} (${esc(activeOrd.patient?.age) || ""}Y / ${esc(activeOrd.patient?.gender) || ""})</td>
               </tr>
@@ -1932,12 +1947,19 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
                 <tr style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: 900; font-size: 9pt;">
                   <td>NET PAYABLE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.netPayable) || 0}</td>
                 </tr>
-                ${(activeOrd.billing?.paidCash !== undefined && activeOrd.billing?.paidOnline !== undefined) ? `
-                  ${activeOrd.billing.paidCash > 0 ? `<tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing.paidCash}</td></tr>` : ''}
-                  ${activeOrd.billing.paidOnline > 0 ? `<tr><td>PAID (ONLINE):</td><td style="text-align: right; font-weight: bold;">৳ ${activeOrd.billing.paidOnline}</td></tr>` : ''}
-                ` : `
-                  <tr><td>PAID (TOTAL):</td><td style="text-align: right; font-weight: bold;">৳ ${esc(activeOrd.billing?.paid) || 0}</td></tr>
-                `}
+                ${(() => {
+                  const cashVal = parseFloat(activeOrd.billing?.paidCash) || 0;
+                  const onlineVal = parseFloat(activeOrd.billing?.paidOnline) || 0;
+                  const totalPaid = parseFloat(activeOrd.billing?.paid) || 0;
+                  
+                  if (cashVal > 0 || onlineVal > 0) {
+                    return `
+                      ${cashVal > 0 ? `<tr><td>PAID (CASH):</td><td style="text-align: right; font-weight: bold;">৳ ${cashVal.toLocaleString()}</td></tr>` : ''}
+                      ${onlineVal > 0 ? `<tr><td>PAID (ONLINE):</td><td style="text-align: right; font-weight: bold;">৳ ${onlineVal.toLocaleString()}</td></tr>` : ''}
+                    `;
+                  }
+                  return `<tr><td>PAID (TOTAL):</td><td style="text-align: right; font-weight: bold;">৳ ${totalPaid.toLocaleString()}</td></tr>`;
+                })()}
                 <tr style="font-weight: bold; color: ${activeOrd.billing?.due > 0 ? '#b91c1c' : '#000'};">
                   <td>DUE BALANCE:</td><td style="text-align: right;">৳ ${esc(activeOrd.billing?.due) || 0}</td>
                 </tr>
@@ -1947,12 +1969,21 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             <div style="text-align: right; font-style: italic; font-size: 7pt; color: #475569; margin-top: 4px;">
               [ Continued on Page ${pageNum + 1}... ]
             </div>
-          `}
-        </div>
+              `}
+            </div>
 
-        <div style="margin-top: 6px;">
-          <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: flex-end; gap: 4px;">
-
+            <!-- New Footer Wrapper with Flexbox (No Margins) -->
+            <div style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
+              
+              <!-- PAID / DUE Stamp (NOW ON EVERY PAGE) -->
+              <div style="text-align: center; width: 100%;">
+                <div style="display: inline-block; border: 2px solid #000; padding: 4px 30px; font-size: 12pt; font-weight: 900; color: #000; letter-spacing: 3px; text-transform: uppercase; font-family: 'Consolas', monospace;">
+                  ${(activeOrd.billing?.due || 0) <= 0 ? 'PAID' : 'DUE'}
+                </div>
+              </div>
+              
+              <!-- Actual Footer Line & Content -->
+              <div style="border-top: 1.5px dashed #000; padding: 4px 0 2px 0; display: flex; justify-content: space-between; align-items: flex-end; gap: 4px;">
             <div style="text-align: center; width: 150px; flex-shrink: 0;">
               ${generateSvgBarcodeHtml(patientId, 26)}
               <p style="margin: 1px 0 0 0; font-size: 7pt; font-weight: 900; letter-spacing: 0.5px; font-family: 'Consolas', monospace;">

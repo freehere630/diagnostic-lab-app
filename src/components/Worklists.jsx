@@ -89,10 +89,13 @@ export default function Worklists({ orders = [], departments = [], setSelectedOr
         const matchDept = deptFilter === "ALL" ||
           g.allTests.some((t) => (t.dept_id || t.deptId) === deptFilter);
         const q = worklistSearch.trim().toLowerCase();
+        
         const matchSearch = !q ||
           g.allBarcodes.some((b) => String(b).toLowerCase().includes(q)) ||
           (g.patient?.name && g.patient.name.toLowerCase().includes(q)) ||
-          (g.patient?.id && String(g.patient.id).toLowerCase().includes(q));
+          (g.patient?.id && String(g.patient.id).toLowerCase().includes(q)) ||
+          (g.receiptNo && g.receiptNo.toLowerCase().includes(q)); // <--- ADDED receiptNo HERE
+          
         return matchDept && matchSearch;
       })
       .sort((a, b) => {

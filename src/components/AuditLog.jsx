@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   ShieldAlert, Search, RefreshCw, ChevronDown, ChevronRight,
-  PlusCircle, Edit, Trash2, Clock, Calendar
+  PlusCircle, Edit, Trash2, Clock, Calendar, X
 } from "lucide-react";
 import { getAuditLogs } from "../services/auditApi";
 
@@ -66,13 +66,15 @@ const getChangeSummary = (log) => {
 };
 
 export default function AuditLog() {
-  const todayStr = toLocalDateStr();
-
+  const today = toLocalDateStr();
+  
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState(todayStr);
-  const [dateTo, setDateTo] = useState(todayStr);
+  
+  // Set default dates to Today
+  const [dateFrom, setDateFrom] = useState(today);
+  const [dateTo, setDateTo] = useState(today);
   const [expandedRow, setExpandedRow] = useState(null);
 
   const loadData = async () => {
@@ -87,8 +89,14 @@ export default function AuditLog() {
     }
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadData(); }, []);
+  // Debounced auto-search: triggers 300ms after you stop typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadData();
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, dateFrom, dateTo]);
 
   const formatTime = (iso) => {
     try {
@@ -121,7 +129,7 @@ export default function AuditLog() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="bg-transparent text-[11px] font-mono outline-none text-slate-700"
+              className="bg-transparent text-[11px] font-mono outline-none text-slate-700 w-28"
               title="From Date"
             />
           </div>
@@ -132,21 +140,28 @@ export default function AuditLog() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="bg-transparent text-[11px] font-mono outline-none text-slate-700"
+              className="bg-transparent text-[11px] font-mono outline-none text-slate-700 w-28"
               title="To Date"
             />
           </div>
 
-          <div className="relative w-full sm:w-56">
+          <div className="relative w-full sm:w-72">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search Table or ID..."
+              placeholder="Search Table, ID, Action, or Receipt No..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && loadData()}
-              className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-slate-800 bg-slate-50"
+              className="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-slate-800 bg-slate-50 transition"
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1.5 p-0.5 text-slate-400 hover:text-slate-700 rounded"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <button 
@@ -167,7 +182,7 @@ export default function AuditLog() {
           </div>
         ) : logs.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-xs italic">
-            No audit records found for this period.
+            No audit records found for this filter.
           </div>
         ) : (
           <div className="overflow-x-auto">
