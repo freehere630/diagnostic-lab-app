@@ -322,7 +322,7 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
   for (const test of tests) {
     const params = test.test_parameters || test.parameters || [];
     for (const p of params) {
-      const pName = (p.name || "").toLowerCase().trim();
+      const pName = String(p.name || "").toLowerCase().trim();
       if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
         const val = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
         if (val !== undefined && val !== null && String(val).trim() !== "" && String(val).toLowerCase() !== "undefined") {
@@ -333,10 +333,9 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
   }
   
   for (const rk of Object.keys(results || {})) {
-    // FIX: Ignore internal metadata keys so barcodes don't print as results
-    if (rk.startsWith("TEST_VIAL_") || rk.startsWith("VIAL_") || rk === "SPECIMEN_VIALS" || rk.startsWith("DEPT_REMARKS_")) {
-      continue;
-    }
+    // FIX 1: Ignore internal metadata keys and array indices
+    if (rk.startsWith("TEST_VIAL_") || rk.startsWith("VIAL_") || rk === "SPECIMEN_VIALS" || rk.startsWith("DEPT_REMARKS_")) continue;
+    if (/^\d+$/.test(rk)) continue; 
 
     const rkLow = rk.toLowerCase().trim();
     if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
@@ -1158,6 +1157,9 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
     const isProfile = isTestProfile(test);
 
+    // FIX: Wrap every test in a tbody to prevent profiles from breaking across pages
+    tableRows += `<tbody style="page-break-inside: avoid;">`;
+
     if (isProfile) {
       tableRows += `
         <tr style=" border-bottom: 1px solid #000000; page-break-inside: avoid;">
@@ -1188,9 +1190,12 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         }
       }
 
-      const displayName = (!isProfile && (!p.name || p.name.trim() === "" || p.name.toLowerCase() === "result"))
-        ? (test.name || "Test")
-        : (p.name || test.name || "Parameter");
+      const pNameStr = String(p.name || "").trim();
+      const testNameStr = String(test.name || "").trim();
+      
+      const displayName = (!isProfile && (!pNameStr || pNameStr.toLowerCase() === "result"))
+        ? (testNameStr || "Test")
+        : (pNameStr || testNameStr || "Parameter");
 
       let refRange = "Normal";
       const hasRefText = (p.reference_text || p.ref_text) &&
@@ -1198,7 +1203,6 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
                          String(p.reference_text || p.ref_text).toLowerCase() !== "undefined";
 
       if (hasRefText) {
-        // ESCAPE FIRST, then restore newlines as <br>.
         refRange = escWithBreaks(String(p.reference_text || p.ref_text).trim());
       } else if (p.param_type === "numeric") {
         const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "" && String(p.min_range) !== "undefined";
@@ -1225,6 +1229,9 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         </tr>
       `;
     });
+
+    // Close the tbody for this test
+    tableRows += `</tbody>`;
   });
 
   if (!tableRows && descriptiveSheets) return descriptiveSheets;
@@ -1247,7 +1254,48 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
   return standardTable + descriptiveSheets;
 }
+function paginateGroupTests(group, usePadMode) {
+  const tests = group.tests || [];
+  const pages = [];
+  let currentPage = [];
+  let currentWeight = 0;
 
+  // Strict limit for A4 (12). Pad mode can handle more (24).
+  const MAX_WEIGHT = usePadMode ? 24 : 12; 
+
+  for (const test of tests) {
+    let weight = 1;
+    if (isDescriptiveInvestigation(test, group.dept?.id, group.dept?.name)) {
+      weight = 10; 
+    } else if (isTestProfile(test)) {
+      const params = test.test_parameters || test.parameters || [];
+      weight = 2 + params.length; 
+    }
+
+    const params = test.test_parameters || test.parameters || [];
+    let longTextCount = 0;
+    if (String(test.name || "").length > 40) weight += 1;
+
+    params.forEach(p => {
+      const refText = String(p.reference_text || p.ref_text || "").trim();
+      if (refText.length > 30) longTextCount++;
+      if (refText.length > 60) longTextCount++; 
+    });
+    weight += longTextCount;
+
+    if (currentWeight + weight > MAX_WEIGHT && currentPage.length > 0) {
+      pages.push(currentPage);
+      currentPage = [];
+      currentWeight = 0;
+    }
+    
+    currentPage.push(test);
+    currentWeight += weight;
+  }
+  
+  if (currentPage.length > 0) pages.push(currentPage);
+  return pages;
+}
 // 8. COMPLETE A4 REPORT RENDERER
 export function renderDepartmentReportHtml({
   group,
@@ -1265,10 +1313,7 @@ export function renderDepartmentReportHtml({
   const footerHeightPx = (layout?.footer?.height) || 72;
   const headerHeightMm = (headerHeightPx * PX_TO_MM).toFixed(1);
   const footerHeightMm = (footerHeightPx * PX_TO_MM).toFixed(1);
-  // Subtract a 1.5mm safety buffer to absorb fractional rounding drift
-  // between the CSS @page margin and Chrome's rendered content area.
-  // Without this, print output occasionally spills the signature block
-  // or last table row onto a second page.
+  
   const contentHeightMm = Math.max(
     50,
     297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm) - 1.5
@@ -1303,18 +1348,14 @@ export function renderDepartmentReportHtml({
 
   const techUser = staffList.find((u) => u.role === "technologist") || {
     full_name: "MD. Abdullah AL Tarek",
-    designation: isDescriptive
-      ? "Senior Medical Technologist / Radiographer"
-      : "Medical Technologist (Lab)",
+    designation: isDescriptive ? "Senior Medical Technologist / Radiographer" : "Medical Technologist (Lab)",
     signature_data: ""
   };
   const verifierUser = staffList.find(
     (u) => u.role === "verifier" || u.role === "biochemist" || u.role === "manager" || u.role === "admin"
   ) || {
     full_name: "Prof. Col. Dr. Md. Monirul Islam",
-    designation: isDescriptive
-      ? "MBBS, MD / FCPS - Consultant Pathologist & Radiologist"
-      : "MBBS, MCPS, DCP, FCPS (Haematology) - Consultant Hematologist",
+    designation: isDescriptive ? "MBBS, MD / FCPS - Consultant Pathologist & Radiologist" : "MBBS, MCPS, DCP, FCPS (Haematology) - Consultant Hematologist",
     signature_data: ""
   };
 
@@ -1326,9 +1367,16 @@ export function renderDepartmentReportHtml({
     return `<div style="font-family: 'Lora', Georgia, serif; font-size: 10pt; font-weight: 700; color: #000000; height: 30px; line-height: 30px; text-align: center;">${esc(sigData || fallbackName)}</div>`;
   };
 
-  const rawDeptName = group.dept?.name || "Clinical Pathology";
+  let rawDeptName = group.dept?.name || "Clinical Pathology";
+  const deptId = (group.dept?.id || "").toUpperCase();
+  
+  if (deptId.includes("IMM")) rawDeptName = "Immunology & Endocrinology";
+  else if (deptId.includes("HEM")) rawDeptName = "Hematology & Coagulation";
+  else if (deptId.includes("BIO")) rawDeptName = "Clinical Biochemistry";
+  else if (deptId.includes("MIC")) rawDeptName = "Microbiology & Serology";
+  else if (deptId.includes("PAT")) rawDeptName = "Clinical Pathology";
+
   const cleanDeptName = rawDeptName.replace(/^department of\s+/i, "").toUpperCase();
-  const deptId = group.dept?.id || "";
 
   let resolvedDeptRemark = "";
   const remarkSources = [owner, activeOrder].filter(Boolean);
@@ -1342,9 +1390,7 @@ export function renderDepartmentReportHtml({
       resolvedDeptRemark = src.deptRemarks[deptId];
       break;
     }
-    const r =
-      src.results?.[`DEPT_REMARKS_${deptId}`]?.value ??
-      src.results?.[`DEPT_REMARKS_${deptId}`];
+    const r = src.results?.[`DEPT_REMARKS_${deptId}`]?.value ?? src.results?.[`DEPT_REMARKS_${deptId}`];
     if (r !== undefined && r !== null && String(r).trim() !== "") {
       resolvedDeptRemark = String(r).trim();
       break;
@@ -1353,15 +1399,12 @@ export function renderDepartmentReportHtml({
 
   if (!resolvedDeptRemark) {
     for (const src of remarkSources) {
-      if (typeof src.verifierRemarks === "string" &&
-          !src.verifierRemarks.startsWith("{") &&
-          src.verifierRemarks.trim()) {
+      if (typeof src.verifierRemarks === "string" && !src.verifierRemarks.startsWith("{") && src.verifierRemarks.trim()) {
         resolvedDeptRemark = src.verifierRemarks;
         break;
       }
     }
   }
-
   if (!resolvedDeptRemark || !resolvedDeptRemark.trim()) {
     resolvedDeptRemark = "Clinically correlated and verified with internal quality control standards.";
   }
@@ -1371,7 +1414,7 @@ export function renderDepartmentReportHtml({
     : `<span style="font-weight: 700;">Barcode:</span> <b style="font-family: 'Consolas', monospace; font-weight: 800;">${esc(deptBarcode)}</b>`;
 
   const signaturesBlockHtml = isVerified ? `
-    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px;padding-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
+    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '10px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid;">
       <div style="text-align: center; width: 200px;">
         ${renderSignatureHtml(techUser.signature_data, techUser.full_name)}
         <div style="border-top: 1.5px dashed #000000; padding-top: 2px;">
@@ -1388,17 +1431,9 @@ export function renderDepartmentReportHtml({
       </div>
     </div>
   ` : `
-    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '14px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; height: 38px;">
-      <div style="text-align: center; width: 230px;">
-        <div style=" padding-top: 2px;">
-          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div>
-        </div>
-      </div>
-      <div style="text-align: center; width: 230px;">
-        <div style=" padding-top: 2px;">
-          <div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div>
-        </div>
-      </div>
+    <div style="margin: ${usePadMode ? '10px 8mm 2px 8mm' : '10px 8mm 4px 8mm'}; padding-top: 3px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; height: 38px;">
+      <div style="text-align: center; width: 230px;"><div style="padding-top: 2px;"><div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div></div></div>
+      <div style="text-align: center; width: 230px;"><div style="padding-top: 2px;"><div style="font-size: 7.5pt; color: #94a3b8; font-style: italic;"></div></div></div>
     </div>
   `;
 
@@ -1407,10 +1442,7 @@ export function renderDepartmentReportHtml({
     if (isPreview) {
       headerHtml = `
         <div style="height: ${headerHeightMm}mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
-          <div>
-            <span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${esc((labSettings?.lab_name || "AL FATTAH DIAGNOSTIC")).toUpperCase()}</span>
-            <p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: ${headerHeightMm}mm Reserved Margin ]</p>
-          </div>
+          <div><span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${esc((labSettings?.lab_name || "AL FATTAH DIAGNOSTIC")).toUpperCase()}</span><p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: ${headerHeightMm}mm Reserved Margin ]</p></div>
           <span style="background: #e2e8f0; color: #334155; font-weight: 800; font-size: 7pt; padding: 2px 6px; border-radius: 4px;">PAD MODE</span>
         </div>
       `;
@@ -1442,11 +1474,9 @@ export function renderDepartmentReportHtml({
   };
 
   const billTime = fmtTime(owner.created_at || owner.createdAt || owner.date);
-  const deliveryTime = isVerified
-    ? fmtTime(owner.verified_at || owner.verifiedAt || new Date().toISOString())
-    : "Pending";
+  const deliveryTime = isVerified ? fmtTime(owner.verified_at || owner.verifiedAt || new Date().toISOString()) : "Pending";
 
-  const patientDetailsHtml = (pageNum = 1, totalPages = 1) => `
+  const patientDetailsHtml = `
     <div style="padding: 6px 8px; border: 1px solid #000000; border-radius: 5px; margin: 3px 8mm 0px 8mm; font-size: 9pt; color: #000000; page-break-inside: avoid; font-family: 'Lora', Georgia, serif;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <table style="width: 100%; border-collapse: collapse; color: #000000; font-size: 9pt; font-family: 'Lora', Georgia, serif;">
@@ -1468,55 +1498,66 @@ export function renderDepartmentReportHtml({
         </table>
         <div style="width: 58px; text-align: center; margin-left: 8px; flex-shrink: 0;">
           ${pageQrSvg}
-          <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase; font-family: 'Lora', Georgia, serif;">
-            ${totalPages > 1 ? `Pg ${pageNum}/${totalPages}` : 'Verify'}
-          </span>
+          <span style="font-size: 5pt; font-weight: 800; display: block; text-align: center; text-transform: uppercase; font-family: 'Lora', Georgia, serif;">Verify</span>
         </div>
       </div>
     </div>
   `;
 
-  const fullResultsHtml = buildUnifiedResultsTable(
-    group.tests || [],
-    owner.results || {},
-    group.dept?.id,
-    group.dept?.name,
-    owner.patient || activeOrder.patient || {}
-  );
-
+  // Remarks are now generated for every page
   const remarksHtml = isDescriptive ? "" : `
-    <div style="margin-top: 25px; margin-left: 8mm; margin-right: 8mm; font-size: 9pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
+    <div style="margin-top: 10px; margin-left: 8mm; margin-right: 8mm; font-size: 9pt; color: #000000; line-height: 1.35; font-family: 'Lora', Georgia, serif; page-break-inside: avoid;">
       <span style="font-weight: 700; text-transform: uppercase; color: #000000; font-size: 8pt;">Pathologist Remarks:</span>
       <span style="font-weight: 700; margin-left: 6px; color: #000000; font-style: italic;">${esc(resolvedDeptRemark)}</span>
     </div>
   `;
 
   const pageHeightCss = isPreview
-    ? 'min-height: 297mm; height: 297mm;'
-    : (usePadMode
-        ? `min-height: ${contentHeightMm}mm; height: ${contentHeightMm}mm; max-height: ${contentHeightMm}mm;`
-        : 'min-height: 297mm; height: 297mm;');
+    ? 'height: 297mm;'
+    : (usePadMode ? `height: ${contentHeightMm}mm;` : 'height: 290mm;');
 
-  return `
-    <div style="padding: 0; margin: 0; ${pageHeightCss} display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; font-family: 'Lora', Georgia, serif; background: #ffffff; color: #000000; width: 100%;">
-      <div>
-        ${headerHtml}
-        ${patientDetailsHtml(1, 1)}
-        <div style="text-align: center; margin: 5px 0 2px 0; page-break-inside: avoid;">
-          <span style="font-size: 10pt; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; color: #000000;">
-            DEPARTMENT OF ${esc(cleanDeptName)}
-          </span>
+  const pagesOfTests = paginateGroupTests(group, usePadMode);
+  let combinedHtml = "";
+
+  for (let i = 0; i < pagesOfTests.length; i++) {
+    const isLast = i === pagesOfTests.length - 1;
+    const pageTests = pagesOfTests[i];
+
+    const fullResultsHtml = buildUnifiedResultsTable(
+      pageTests,
+      owner.results || {},
+      group.dept?.id,
+      group.dept?.name,
+      owner.patient || activeOrder.patient || {}
+    );
+
+    combinedHtml += `
+      <div class="report-page" style="position: relative; width: 100%; height: ${usePadMode ? contentHeightMm + 'mm' : '285mm'}; overflow: hidden; page-break-after: ${isLast ? 'auto' : 'always'}; background: #ffffff; font-family: 'Lora', Georgia, serif; color: #000000; box-sizing: border-box;">
+        
+        <!-- TOP ZONE: Table is trapped here. Padding bottom prevents it from touching the signatures -->
+        <div style="height: 100%; padding-bottom: 55mm; box-sizing: border-box; overflow: hidden;">
+          ${headerHtml}
+          ${patientDetailsHtml}
+          <div style="text-align: center; margin: 5px 0 2px 0; page-break-inside: avoid;">
+            <span style="font-size: 10pt; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; color: #000000;">
+              DEPARTMENT OF ${esc(cleanDeptName)}
+            </span>
+          </div>
+          ${fullResultsHtml}
+          ${remarksHtml}
         </div>
-        ${fullResultsHtml}
-        ${remarksHtml}
-      </div>
 
-      <div style="margin-top: auto; flex-shrink: 0; page-break-inside: avoid;">
-        ${signaturesBlockHtml}
-        ${footerHtml}
+        <!-- BOTTOM ZONE: Signatures are physically pinned to the bottom 55mm -->
+        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 55mm; page-break-inside: avoid; background: #ffffff; z-index: 10;">
+          ${signaturesBlockHtml}
+          ${footerHtml}
+        </div>
+
       </div>
-    </div>
-  `;
+    `;
+  }
+
+  return combinedHtml;
 }
 
 export function printDepartmentA4Report(
@@ -1641,28 +1682,14 @@ export async function downloadDepartmentReportPdf({
     return;
   }
 
-  // Exact A4 dimensions at 96 DPI. Each page is 794×1123 px, which
-  // maps 1:1 onto a 210×297 mm PDF page.
   const A4_W_PX = 794;
   const A4_H_PX = 1123;
   const A4_W_MM = 210;
   const A4_H_MM = 297;
-  const TOTAL_PAGES = deptGroupsToPrint.length;
 
-  // ─── Backdrop (progress indicator) ────────────────────────────
   const backdrop = document.createElement("div");
   backdrop.setAttribute("data-apex-pdf-backdrop", "1");
-  backdrop.style.cssText = [
-    "position: fixed",
-    "inset: 0",
-    "background: #0f172a",
-    "z-index: 2147483647",
-    "display: flex",
-    "align-items: center",
-    "justify-content: center",
-    "color: #ffffff",
-    "font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
-  ].join(";");
+  backdrop.style.cssText = "position: fixed; inset: 0; background: #0f172a; z-index: 2147483647; display: flex; align-items: center; justify-content: center; color: #ffffff; font-family: system-ui, sans-serif;";
   backdrop.innerHTML = `
     <div style="text-align:center">
       <div style="width:42px;height:42px;border:3px solid rgba(255,255,255,0.2);border-top-color:#ffffff;border-radius:50%;animation:apex-pdf-spin 0.9s linear infinite;margin:0 auto 14px"></div>
@@ -1680,43 +1707,29 @@ export async function downloadDepartmentReportPdf({
   };
 
   try {
-    // Wait for Lora to be ready — otherwise text renders invisibly
-    // in the canvas.
     setProgress("Loading fonts…");
-    try {
-      if (document.fonts?.ready) await document.fonts.ready;
-    } catch { /* silent */ }
+    try { if (document.fonts?.ready) await document.fonts.ready; } catch { }
 
-    // ─── Render each department sheet to its own canvas ─────────
+    // 1. Render all HTML and split by .report-page
+    const allPagesHtml = deptGroupsToPrint.map(group => renderDepartmentReportHtml({
+      group, activeOrder, staffList, labSettings, usePadMode: false, isPreview: false
+    })).join("");
+
+    const tempContainer = document.createElement("div");
+    tempContainer.innerHTML = allPagesHtml;
+    const pageDivs = Array.from(tempContainer.children);
+
+    setProgress(`Rendering ${pageDivs.length} pages…`);
     const canvases = [];
 
-    for (let i = 0; i < TOTAL_PAGES; i++) {
-      const group = deptGroupsToPrint[i];
-      setProgress(`Rendering page ${i + 1} of ${TOTAL_PAGES}…`);
+    for (let i = 0; i < pageDivs.length; i++) {
+      const pageDiv = pageDivs[i];
+      pageDiv.style.pageBreakAfter = 'auto'; // Disable CSS page breaks for canvas
 
-      // On-screen host at (0,0). html2canvas skips elements that
-      // live far off-screen — this must be visible, and is hidden
-      // from the user by the opaque backdrop above it.
       const host = document.createElement("div");
       host.setAttribute("data-apex-pdf-host", "1");
-      host.style.cssText = [
-        "position: fixed",
-        "top: 0",
-        "left: 0",
-        `width: ${A4_W_PX}px`,
-        `height: ${A4_H_PX}px`,
-        "background: #ffffff",
-        "color: #000000",
-        "z-index: 2147483646",
-        "pointer-events: none",
-        "overflow: hidden",
-        "font-family: 'Lora', Georgia, serif",
-      ].join(";");
-
-      // Force the report template's outer wrapper to exactly
-      // A4_H_PX. Its mm-based min-height resolves inconsistently
-      // inside html2canvas's clone and can leave a few px of slack,
-      // which is what pushed content past the last page before.
+      host.style.cssText = `position: fixed; top: 0; left: 0; width: ${A4_W_PX}px; height: ${A4_H_PX}px; background: #ffffff; color: #000000; z-index: 2147483646; pointer-events: none; overflow: hidden; font-family: 'Lora', Georgia, serif;`;
+      
       const overrideStyle = document.createElement("style");
       overrideStyle.textContent = `
         [data-apex-pdf-host] > div > div {
@@ -1726,78 +1739,44 @@ export async function downloadDepartmentReportPdf({
           overflow: hidden !important;
         }
       `;
-      host.appendChild(overrideStyle);
-
+      
       const inner = document.createElement("div");
-      inner.style.cssText = [
-        `width: ${A4_W_PX}px`,
-        `height: ${A4_H_PX}px`,
-        "overflow: hidden",
-        "background: #ffffff",
-      ].join(";");
-      inner.innerHTML = renderDepartmentReportHtml({
-        group,
-        activeOrder,
-        staffList,
-        labSettings,
-        usePadMode: false,
-        isPreview: false,
-      });
+      inner.style.cssText = `width: ${A4_W_PX}px; height: ${A4_H_PX}px; overflow: hidden; background: #ffffff;`;
+      inner.appendChild(pageDiv); // Append the split page
+      
+      host.appendChild(overrideStyle);
       host.appendChild(inner);
-
       document.body.appendChild(host);
 
-      // Let layout + images settle for this page.
+      setProgress(`Rendering page ${i + 1} of ${pageDivs.length}…`);
       await new Promise((r) => setTimeout(r, 180));
 
       const canvas = await html2canvas(host, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-        width: A4_W_PX,
-        height: A4_H_PX,
-        windowWidth: A4_W_PX,
-        windowHeight: A4_H_PX,
-        scrollX: 0,
-        scrollY: 0,
-        x: 0,
-        y: 0,
+        scale: 2, useCORS: true, allowTaint: true, backgroundColor: "#ffffff", logging: false,
+        width: A4_W_PX, height: A4_H_PX, windowWidth: A4_W_PX, windowHeight: A4_H_PX,
+        scrollX: 0, scrollY: 0, x: 0, y: 0,
       });
 
       canvases.push(canvas);
-
       if (host.parentNode) host.parentNode.removeChild(host);
     }
 
-    // ─── Assemble with jsPDF — one image per page, no slicing ───
     setProgress("Assembling PDF…");
-
-    const pdf = new jsPDF({
-      unit: "mm",
-      format: "a4",
-      orientation: "portrait",
-      compress: true,
-    });
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
 
     for (let i = 0; i < canvases.length; i++) {
       if (i > 0) pdf.addPage();
       const imgData = canvases[i].toDataURL("image/jpeg", 0.95);
-      // (imageData, format, x, y, width, height, alias, compression)
       pdf.addImage(imgData, "JPEG", 0, 0, A4_W_MM, A4_H_MM, undefined, "FAST");
     }
 
-    const barcodeForFile = String(activeOrder.barcode || activeOrder.orderId || "report")
-      .split(/[\s,]+/)[0];
+    const barcodeForFile = String(activeOrder.barcode || activeOrder.orderId || "report").split(/[\s,]+/)[0];
     pdf.save(`Report-${barcodeForFile}.pdf`);
-
     setProgress("Done");
   } catch (err) {
     console.error("[downloadDepartmentReportPdf] failed:", err);
     alert("Could not generate PDF: " + (err?.message || err));
   } finally {
-    // Small delay so pdf.save()'s anchor click has flushed.
     setTimeout(() => {
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
       if (onProgress) onProgress(null);

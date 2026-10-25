@@ -224,13 +224,29 @@ export default function App() {
     allTests.forEach((test) => {
       const code = (test.code || "").toUpperCase();
       const name = (test.name || "").toUpperCase();
-      const baseDeptId = test.dept_id || test.deptId || "DEP-BIO";
+      
+      // FIX: Normalize short IDs like "IMM" or "HEM" to "DEP-IMM" / "DEP-HEM"
+      let baseDeptId = (test.dept_id || test.deptId || "DEP-BIO").toUpperCase();
+      if (baseDeptId === "IMM") baseDeptId = "DEP-IMM";
+      if (baseDeptId === "HEM") baseDeptId = "DEP-HEM";
+      if (baseDeptId === "BIO") baseDeptId = "DEP-BIO";
+      if (baseDeptId === "PAT") baseDeptId = "DEP-PAT";
+      if (baseDeptId === "MIC") baseDeptId = "DEP-MIC";
 
       let groupKey = baseDeptId;
       let groupName = null;
       let groupIcon = null;
 
-      if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
+      // Explicitly map names so they are always full and correct
+      if (baseDeptId === "DEP-IMM") {
+        groupKey = "DEP-IMM"; groupName = "Immunology & Endocrinology"; groupIcon = "🧬";
+      } else if (baseDeptId === "DEP-HEM") {
+        groupKey = "DEP-HEM"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
+      } else if (baseDeptId === "DEP-BIO") {
+        groupKey = "DEP-BIO"; groupName = "Clinical Biochemistry"; groupIcon = "🧪";
+      } else if (baseDeptId === "DEP-MIC") {
+        groupKey = "DEP-MIC"; groupName = "Microbiology & Serology"; groupIcon = "🔬";
+      } else if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
         groupKey = "DEP-HEM-CBC"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
       } else if (code.includes("URINE") || name.includes("URINE")) {
         groupKey = "DEP-PAT-URINE"; groupName = "Clinical Pathology & Urine Analysis"; groupIcon = "🧫";
@@ -245,15 +261,17 @@ export default function App() {
       if (!grouped[groupKey]) {
         const baseDept = departments.find((d) => d.id === baseDeptId) || { id: baseDeptId, name: "General Pathology", icon: "🔬" };
         grouped[groupKey] = {
-          dept: {
-            id: groupKey,
-            name: groupName || baseDept.name,
-            icon: groupIcon || baseDept.icon || "🔬",
+          dept: { 
+            id: groupKey, 
+            name: groupName || baseDept.name, 
+            icon: groupIcon || baseDept.icon || "🔬" 
           },
           tests: [], ownerOrderId: null, ownerBarcode: null, ownerLocked: false, ownerOrder: null,
         };
       }
       grouped[groupKey].tests.push(test);
+      
+      // ... (leave the rest of the original logic exactly as it is)
 
       if (!grouped[groupKey].ownerOrderId && test._owningOrderId) {
         const owner = sources.find((o) => (o.orderId || o.id) === test._owningOrderId);
