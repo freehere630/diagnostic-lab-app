@@ -587,8 +587,9 @@ export default function TestManager({
                       >
                         <option value="numeric">Simple Numeric (Min - Max)</option>
                         <option value="multirange">Multi-Range (Line Breaks Allowed)</option>
-                        <option value="qualitative">Qualitative (Negative / Nil)</option>
+                        <option value="qualitative">Qualitative (Negative / Positive)</option>
                         <option value="text">Descriptive / Narrative Text</option>
+                        <option value="header">Section Header (Group Title)</option>
                       </select>
                     </div>
 
@@ -1106,8 +1107,9 @@ export default function TestManager({
                           >
                             <option value="numeric">Simple Numeric (Min-Max)</option>
                             <option value="multirange">Multi-Range (Line Breaks Allowed)</option>
-                            <option value="qualitative">Qualitative (Negative/Nil)</option>
+                            <option value="qualitative">Qualitative (Negative/Positive)</option>
                             <option value="text">Descriptive / Narrative Text</option>
+                            <option value="header">Section Header (Group Title)</option>
                           </select>
                         </div>
 

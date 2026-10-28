@@ -1190,13 +1190,30 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         <tr style=" border-bottom: 1px solid #000000; page-break-inside: avoid;">
           <td colspan="4" style="padding: 4.5px 4px; font-weight: 800; font-size: 9pt; color: #000000; text-transform: uppercase;">
             ${esc(test.name)} ${test.code ? `(${esc(test.code)})` : ""}
-            <span style="font-size: 7pt; font-weight: 600; color: #475569; margin-left: 6px; text-transform: none;">[Multi-Parameter Profile]</span>
           </td>
         </tr>
       `;
     }
 
+    let inSection = false; // Tracks if we are under a "Differential Count" header
+
     params.forEach((p, idx) => {
+      const pNameStr = String(p.name || "").trim();
+
+      // --- RENDER SECTION HEADER ---
+      if (p.param_type === "header") {
+        tableRows += `
+          <tr style="border-bottom: 1px solid #cbd5e1; background: #f8fafc; page-break-inside: avoid;">
+            <td colspan="4" style="padding: 5px 4px; font-size: 9.5pt; font-weight: 800; color: #000; text-transform: uppercase;">
+              ${esc(pNameStr)}
+            </td>
+          </tr>
+        `;
+        inSection = true;
+        return; // Skip to the next parameter
+      }
+
+      // --- RENDER NORMAL PARAMETER ---
       const paramKey = p.id || `P-${test.id}-${idx + 1}`;
       const rawVal = results?.[p.id]?.value ??
                      results?.[paramKey]?.value ??
@@ -1215,9 +1232,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         }
       }
 
-      const pNameStr = String(p.name || "").trim();
       const testNameStr = String(test.name || "").trim();
-      
       const displayName = (!isProfile && (!pNameStr || pNameStr.toLowerCase() === "result"))
         ? (testNameStr || "Test")
         : (pNameStr || testNameStr || "Parameter");
@@ -1241,16 +1256,23 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
         refRange = "Negative";
       }
 
+      // Indent sub-items that fall under a Section Header
+      const paddingLeft = inSection ? "20px" : "4px";
+
       tableRows += `
-        <tr style="border-bottom: 1px dotted #e2e8f0; page-break-inside: avoid;">
-          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000; font-weight: ${isProfile ? "500" : "700"}; padding-left: ${isProfile ? "12px" : "4px"}; vertical-align: top;">
+        <tr style="border-bottom: 1px solid #cbd5e1; page-break-inside: avoid;">
+          <td style="padding: 4px 4px; font-size: 9pt; color: #000000; font-weight: 500; vertical-align: top;">
             ${esc(displayName)}
           </td>
-          <td style="padding: 3.8px 4px; vertical-align: top;">
+          <td style="padding: 4px 4px; font-size: 9pt; color: #000000; font-weight: 500; vertical-align: top;">
             ${formatResultCell(val, p.min_range, p.max_range, "", p.param_type)}
           </td>
-          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; vertical-align: top;">${esc(p.unit || test.unit) || "—"}</td>
-          <td style="padding: 3.8px 4px; font-size: 9pt; color: #000000;font-weight:600; font-variant-numeric: tabular-nums; line-height: 1.35; vertical-align: top; white-space: pre-line;">${refRange}</td>
+          <td style="padding: 4px 4px; font-size: 9pt; color: #000000; font-weight: 500; vertical-align: top;">
+            ${esc(p.unit || test.unit) || "—"}
+          </td>
+          <td style="padding: 4px 4px; font-size: 9pt; color: #000000; font-weight: 500; vertical-align: top;">
+            ${refRange}
+          </td>
         </tr>
       `;
     });
@@ -1264,11 +1286,11 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   const standardTable = tableRows ? `
     <table style="width: 92%; border-collapse: collapse; margin: 4px auto 0 auto; font-family: 'Lora', Georgia, serif;">
       <thead>
-        <tr style="border-top: none; border-bottom: 1.5px solid #000000; font-size: 9pt; background: transparent; page-break-inside: avoid;">
-          <th style="padding: 5px 4px; text-align: left; width: 38%; font-weight: 700; border: none;">Investigation / Parameter</th>
-          <th style="padding: 5px 4px; text-align: left; width: 22%; font-weight: 700; border: none;">Observed Result</th>
-          <th style="padding: 5px 4px; text-align: left; width: 12%; font-weight: 700; border: none;">Unit</th>
-          <th style="padding: 5px 4px; text-align: left; width: 28%; font-weight: 700; border: none;">Reference Range</th>
+        <tr style="border-bottom: 1.5px solid #000000; font-size: 9pt; background: #f8fafc; page-break-inside: avoid;">
+          <th style="padding: 6px 4px; text-align: left; width: 32%; font-weight: 700; border: none;">Parameter</th>
+          <th style="padding: 6px 4px; text-align: left; width: 18%; font-weight: 700; border: none;">Observed Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 12%; font-weight: 700; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 38%; font-weight: 700; border: none;">Reference Value</th>
         </tr>
       </thead>
       <tbody>
