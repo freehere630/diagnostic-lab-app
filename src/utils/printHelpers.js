@@ -319,23 +319,40 @@ function isTestProfile(test) {
 // ─────────────────────────────────────────────────────────────
 function extractResultValue(tests = [], results = {}, keywords = [], fallback = "—") {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
-  for (const test of tests) {
-    const params = test.test_parameters || test.parameters || [];
-    for (const p of params) {
-      const pName = String(p.name || "").toLowerCase().trim();
-      if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
-        const val = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id];
+
+  const findVal = (exact) => {
+    for (const test of tests) {
+      const params = test.test_parameters || test.parameters || [];
+      for (const p of params) {
+        const pName = String(p.name || "").toLowerCase().trim();
+        
+        if (exact) {
+          if (!keys.some(k => pName === k.toLowerCase())) continue;
+        } else {
+          if (!keys.some(k => pName.includes(k.toLowerCase()))) continue;
+        }
+
+        const val = results?.[p.id]?.value ?? results?.[p.name]?.value ?? results?.[p.id] ?? results?.[test.id]?.value ?? results?.[test.id];
         if (val !== undefined && val !== null && String(val).trim() !== "" && String(val).toLowerCase() !== "undefined") {
           return String(val).trim();
         }
       }
     }
-  }
-  
+    return null;
+  };
+
+  // Try exact name match first (e.g. "Hemoglobin" won't match "MCHC")
+  const exactMatch = findVal(true);
+  if (exactMatch !== null) return exactMatch;
+
+  // Then try partial match
+  const fuzzyMatch = findVal(false);
+  if (fuzzyMatch !== null) return fuzzyMatch;
+
+  // Final fallback: search by raw result keys
   for (const rk of Object.keys(results || {})) {
-    // FIX 1: Ignore internal metadata keys and array indices
     if (rk.startsWith("TEST_VIAL_") || rk.startsWith("VIAL_") || rk === "SPECIMEN_VIALS" || rk.startsWith("DEPT_REMARKS_")) continue;
-    if (/^\d+$/.test(rk)) continue; 
+    if (/^\d+$/.test(rk)) continue;
 
     const rkLow = rk.toLowerCase().trim();
     if (keys.some(k => rkLow === k.toLowerCase() || rkLow.includes(k.toLowerCase()))) {
@@ -350,52 +367,45 @@ function extractResultValue(tests = [], results = {}, keywords = [], fallback = 
 
 function getParamDetails(tests = [], keywords = [], defaultUnit = "", defaultRef = "", defaultMin = null, defaultMax = null) {
   const keys = Array.isArray(keywords) ? keywords : [keywords];
-  for (const test of tests) {
-    const params = test.test_parameters || test.parameters || [];
-    for (const p of params) {
-      const pName = (p.name || "").toLowerCase().trim();
-      if (keys.some(k => pName === k.toLowerCase() || pName.includes(k.toLowerCase()))) {
-        let refText = (p.reference_text || p.ref_text || "").trim();
 
-        if (!refText) {
-          const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "";
-          const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "";
-          if (hasMin && hasMax) refText = `${p.min_range} – ${p.max_range}`;
-          else if (hasMin) refText = `≥ ${p.min_range}`;
-          else if (hasMax) refText = `≤ ${p.max_range}`;
+  const findParam = (exact) => {
+    for (const test of tests) {
+      const params = test.test_parameters || test.parameters || [];
+      for (const p of params) {
+        const pName = (p.name || "").toLowerCase().trim();
+        if (exact) {
+          if (keys.some(k => pName === k.toLowerCase())) return p;
+        } else {
+          if (keys.some(k => pName.includes(k.toLowerCase()))) return p;
         }
-
-        // ESCAPE FIRST, then restore line breaks. This is the single
-        // most important safety point in the file — ref text is
-        // user-controlled via the Test Catalog editor.
-        const formattedRef = refText
-          ? escWithBreaks(refText)
-          : escWithBreaks(defaultRef);
-
-        const minVal = p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : defaultMin);
-        const maxVal = p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : defaultMax);
-        const unitVal = p.unit !== undefined && p.unit !== null && p.unit !== "" ? p.unit : defaultUnit;
-
-        return {
-          param: p,
-          name: p.name || keys[0],
-          unit: unitVal,
-          ref: formattedRef,
-          min: minVal,
-          max: maxVal
-        };
       }
     }
+    return null;
+  };
+
+  // Try exact name match first (e.g. "Hemoglobin" won't match "MCHC")
+  const p = findParam(true) || findParam(false);
+
+  if (p) {
+    let refText = (p.reference_text || p.ref_text || "").trim();
+
+    if (!refText) {
+      const hasMin = p.min_range !== null && p.min_range !== undefined && p.min_range !== "";
+      const hasMax = p.max_range !== null && p.max_range !== undefined && p.max_range !== "";
+      if (hasMin && hasMax) refText = `${p.min_range} – ${p.max_range}`;
+      else if (hasMin) refText = `≥ ${p.min_range}`;
+      else if (hasMax) refText = `≤ ${p.max_range}`;
+    }
+
+    const formattedRef = refText ? escWithBreaks(refText) : escWithBreaks(defaultRef);
+    const minVal = p.min_range !== null && p.min_range !== undefined ? p.min_range : (p.min !== undefined ? p.min : defaultMin);
+    const maxVal = p.max_range !== null && p.max_range !== undefined ? p.max_range : (p.max !== undefined ? p.max : defaultMax);
+    const unitVal = p.unit !== undefined && p.unit !== null && p.unit !== "" ? p.unit : defaultUnit;
+
+    return { param: p, name: p.name || keys[0], unit: unitVal, ref: formattedRef, min: minVal, max: maxVal };
   }
 
-  return {
-    param: null,
-    name: keys[0],
-    unit: defaultUnit,
-    ref: defaultRef ? escWithBreaks(defaultRef) : "",
-    min: defaultMin,
-    max: defaultMax
-  };
+  return { param: null, name: keys[0], unit: defaultUnit, ref: defaultRef ? escWithBreaks(defaultRef) : "", min: defaultMin, max: defaultMax };
 }
 
 // 1. HAEMATOLOGY / CBC FORMATTER
@@ -406,7 +416,8 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   const hbInfo = getInfo(["Hemoglobin (Hb)", "Haemoglobin", "Hb"], "g/dL", "Adult Men: 13.0 - 17.5\nAdult Women: 11.5 - 15.5", 11.5, 16.5);
   const rbcInfo = getInfo(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"], "10^12/L", "Men: 4.5 - 5.8\nWomen: 3.8 - 5.2", 3.8, 5.8);
   const pcvInfo = getInfo(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"], "%", "Men: 40 - 50\nWomen: 36 - 46", 36.0, 50.0);
-  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR"], "mm/1st hr", "Men: 0 - 10\nWomen: 0 - 20", 0, 20);
+  const esrInfo = getInfo(["ESR (Westergren Method)", "ESR", "Erythrocyte Sedimentation"], "mm/1st hr", "Men: 0 - 10\nWomen: 0 - 20", 0, 20);
+  if (esrInfo) esrInfo.unit = "mm/1st hr"; // Force correct unit even if the catalog has a typo
   const mcvInfo = getInfo(["Mean Corpuscular Volume (MCV)", "MCV"], "fL", "78.0 - 98.0", 78.0, 98.0);
   const mchInfo = getInfo(["Mean Corpuscular Hemoglobin (MCH)", "MCH"], "pg", "27.0 - 32.0", 27.0, 32.0);
   const mchcInfo = getInfo(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"], "g/dL", "31.0 - 36.0", 31.0, 36.0);
@@ -428,7 +439,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   const hb = getVal(["Hemoglobin (Hb)", "Haemoglobin", "Hb"]);
   const rbc = getVal(["Total Red Blood Cell Count (RBC)", "Total RBC", "RBC"]);
   const pcv = getVal(["Packed Cell Volume (PCV / Hematocrit)", "PCV", "HCT"]);
-  const esr = getVal(["ESR (Westergren Method)", "ESR"]);
+  const esr = getVal(["ESR (Westergren Method)", "ESR", "Erythrocyte Sedimentation"]);
   const mcv = getVal(["Mean Corpuscular Volume (MCV)", "MCV"]);
   const mch = getVal(["Mean Corpuscular Hemoglobin (MCH)", "MCH"]);
   const mchc = getVal(["Mean Corpuscular Hb Concentration (MCHC)", "MCHC"]);
@@ -482,8 +493,8 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
   `;
 
   const secHeader = (title) => `
-    <tr style="">
-      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px;">${esc(title)}</td>
+    <tr style="border-bottom: 1px solid #cbd5e1;">
+      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px; background: #f8fafc;">${esc(title)}</td>
     </tr>
   `;
 
@@ -1076,9 +1087,19 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
 export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", deptName = "", patient = {}) {
   let descriptiveSheets = "";
 
-  const isHematology = (deptId || "").includes("HEM") ||
-                       (deptName || "").toLowerCase().includes("hematology") ||
-                       (tests || []).some(t => (t.name || "").toLowerCase().includes("blood count") || (t.code || "").toUpperCase().includes("CBC"));
+  // Route through the dedicated CBC template ONLY when the whole group is CBC.
+  // Mixed groups (CBC + PT/ESR/…, or non-CBC coagulation only) fall through to
+  // the standard 4-column table so no parameter is silently dropped.
+  const isCbcGroup =
+    (deptId || "").includes("CBC") ||
+    (
+      (tests || []).length > 0 &&
+      (tests || []).every((t) => {
+        const c = (t.code || "").toUpperCase();
+        const n = (t.name || "").toUpperCase();
+        return c.includes("CBC") || n.includes("CBC") || n.includes("COMPLETE BLOOD COUNT");
+      })
+    );
 
   const isUrine = (deptId || "").includes("PAT") &&
                   (tests || []).some(t => {
@@ -1115,9 +1136,13 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
     }
   });
 
-  if (isHematology && nonDescriptiveTests.length > 0) {
+  // Disabled the hard-coded CBC renderer so the report perfectly matches
+  // the user's Test Catalog. The standard table below will render it.
+  /*
+  if (isCbcGroup && nonDescriptiveTests.length > 0) {
     return renderCustomCbcHematologyReport(nonDescriptiveTests, results, patient) + descriptiveSheets;
   }
+  */
   if (isUrine && nonDescriptiveTests.length > 0) {
     return renderCustomUrineRmeReport(nonDescriptiveTests, results) + descriptiveSheets;
   }
@@ -1254,47 +1279,61 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
 
   return standardTable + descriptiveSheets;
 }
-function paginateGroupTests(group, usePadMode) {
-  const tests = group.tests || [];
+const PX_TO_MM_BUDGET = 25.4 / 96;
+
+// Both print modes reserve the SAME vertical budget for the results table.
+//   page        = 297 mm
+//   header area = headerMm  (designer value)
+//   footer area = footerMm  (designer value)
+//   signatures  = 30 mm
+//   safety      = 0.5 mm    (prevents blank "overflow" pages)
+function contentBudgetPx(layout) {
+  const headerMm = (layout?.header?.height || 132) * PX_TO_MM_BUDGET;
+  const footerMm = (layout?.footer?.height || 72) * PX_TO_MM_BUDGET;
+  const sigMm    = 30;
+  const safety   = 0.5;
+  const contentMm = Math.max(50, 297 - headerMm - footerMm - sigMm - safety);
+
+  const patientMm = 22;   // patient demographics box
+  const deptMm    = 10;   // "DEPARTMENT OF X" title
+  const remarksMm = 16;   // pathologist remarks row
+  const resultsMm = contentMm - patientMm - deptMm - remarksMm;
+  return Math.max(80, resultsMm / PX_TO_MM_BUDGET);
+}
+
+// Rough pixel height of one test as it will render in the results table.
+function testHeightPx(test, dept) {
+  if (isDescriptiveInvestigation(test, dept?.id, dept?.name)) return 380;
+
+  const params = test.test_parameters || test.parameters || [];
+  const headerPx = isTestProfile(test) ? 28 : 0;
+  const rowPx = 24 * Math.max(1, params.length);
+  const refOverhead = params.reduce((acc, p) => {
+    const len = String(p.reference_text || "").length;
+    if (len > 30)  acc += 10;
+    if (len > 100) acc += 10;
+    return acc;
+  }, 0);
+  return headerPx + rowPx + refOverhead + 8;
+}
+
+function paginateGroupTests(group, layout) {
+  const budget = contentBudgetPx(layout);
   const pages = [];
-  let currentPage = [];
-  let currentWeight = 0;
+  let page = [], used = 0;
 
-  // Strict limit for A4 (12). Pad mode can handle more (24).
-  const MAX_WEIGHT = usePadMode ? 24 : 12; 
-
-  for (const test of tests) {
-    let weight = 1;
-    if (isDescriptiveInvestigation(test, group.dept?.id, group.dept?.name)) {
-      weight = 10; 
-    } else if (isTestProfile(test)) {
-      const params = test.test_parameters || test.parameters || [];
-      weight = 2 + params.length; 
+  for (const test of (group.tests || [])) {
+    const h = testHeightPx(test, group.dept);
+    if (used + h > budget && page.length > 0) {
+      pages.push(page);
+      page = [];
+      used = 0;
     }
-
-    const params = test.test_parameters || test.parameters || [];
-    let longTextCount = 0;
-    if (String(test.name || "").length > 40) weight += 1;
-
-    params.forEach(p => {
-      const refText = String(p.reference_text || p.ref_text || "").trim();
-      if (refText.length > 30) longTextCount++;
-      if (refText.length > 60) longTextCount++; 
-    });
-    weight += longTextCount;
-
-    if (currentWeight + weight > MAX_WEIGHT && currentPage.length > 0) {
-      pages.push(currentPage);
-      currentPage = [];
-      currentWeight = 0;
-    }
-    
-    currentPage.push(test);
-    currentWeight += weight;
+    page.push(test);
+    used += h;
   }
-  
-  if (currentPage.length > 0) pages.push(currentPage);
-  return pages;
+  if (page.length) pages.push(page);
+  return pages.length ? pages : [[]];
 }
 // 8. COMPLETE A4 REPORT RENDERER
 export function renderDepartmentReportHtml({
@@ -1311,13 +1350,15 @@ export function renderDepartmentReportHtml({
   const layout = getReportLayout(labSettings);
   const headerHeightPx = (layout?.header?.height) || 132;
   const footerHeightPx = (layout?.footer?.height) || 72;
-  const headerHeightMm = (headerHeightPx * PX_TO_MM).toFixed(1);
-  const footerHeightMm = (footerHeightPx * PX_TO_MM).toFixed(1);
-  
-  const contentHeightMm = Math.max(
-    50,
-    297 - parseFloat(headerHeightMm) - parseFloat(footerHeightMm) - 1.5
-  ).toFixed(1);
+
+  // Reserve EXACTLY the designer's header/footer heights in both print modes.
+  // Both modes then use the same content area, so switching between plain A4
+  // and a pre-printed pad never shifts a single row on the page.
+  const headerMm = parseFloat((headerHeightPx * PX_TO_MM).toFixed(2));
+  const footerMm = parseFloat((footerHeightPx * PX_TO_MM).toFixed(2));
+  const sigMm    = 30;           // fixed space for the two signatures
+  const SAFETY   = 0.5;          // prevents a blank "overflow" page
+  const contentMm = Math.max(50, 297 - headerMm - footerMm - sigMm - SAFETY);
 
   const owner = group.ownerOrder || activeOrder;
   const orderId = owner.orderId || owner.id || activeOrder.orderId || activeOrder.id || "";
@@ -1369,6 +1410,8 @@ export function renderDepartmentReportHtml({
 
   let rawDeptName = group.dept?.name || "Clinical Pathology";
   const deptId = (group.dept?.id || "").toUpperCase();
+  // Artificial CBC groups should still look up remarks under the real Dept ID
+  const remarkDeptId = deptId === "DEP-HEM-CBC" ? "DEP-HEM" : deptId;
   
   if (deptId.includes("IMM")) rawDeptName = "Immunology & Endocrinology";
   else if (deptId.includes("HEM")) rawDeptName = "Hematology & Coagulation";
@@ -1382,15 +1425,15 @@ export function renderDepartmentReportHtml({
   const remarkSources = [owner, activeOrder].filter(Boolean);
 
   for (const src of remarkSources) {
-    if (src.dept_remarks && src.dept_remarks[deptId]) {
-      resolvedDeptRemark = src.dept_remarks[deptId];
+    if (src.dept_remarks && src.dept_remarks[remarkDeptId]) {
+      resolvedDeptRemark = src.dept_remarks[remarkDeptId];
       break;
     }
-    if (src.deptRemarks && src.deptRemarks[deptId]) {
-      resolvedDeptRemark = src.deptRemarks[deptId];
+    if (src.deptRemarks && src.deptRemarks[remarkDeptId]) {
+      resolvedDeptRemark = src.deptRemarks[remarkDeptId];
       break;
     }
-    const r = src.results?.[`DEPT_REMARKS_${deptId}`]?.value ?? src.results?.[`DEPT_REMARKS_${deptId}`];
+    const r = src.results?.[`DEPT_REMARKS_${remarkDeptId}`]?.value ?? src.results?.[`DEPT_REMARKS_${remarkDeptId}`];
     if (r !== undefined && r !== null && String(r).trim() !== "") {
       resolvedDeptRemark = String(r).trim();
       break;
@@ -1437,32 +1480,11 @@ export function renderDepartmentReportHtml({
     </div>
   `;
 
-  let headerHtml = "";
-  if (usePadMode) {
-    if (isPreview) {
-      headerHtml = `
-        <div style="height: ${headerHeightMm}mm; background: #f8fafc; border-bottom: 1.5px dashed #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #64748b; font-size: 8pt; box-sizing: border-box;">
-          <div><span style="font-weight: 800; font-size: 9pt; color: #1e293b; text-transform: uppercase;">${esc((labSettings?.lab_name || "AL FATTAH DIAGNOSTIC")).toUpperCase()}</span><p style="margin: 2px 0 0 0; font-size: 7.5pt; color: #64748b;">[ Pre-Printed Pad Header: ${headerHeightMm}mm Reserved Margin ]</p></div>
-          <span style="background: #e2e8f0; color: #334155; font-weight: 800; font-size: 7pt; padding: 2px 6px; border-radius: 4px;">PAD MODE</span>
-        </div>
-      `;
-    }
-  } else {
-    headerHtml = buildReportHeaderHtml(labSettings);
-  }
-
-  let footerHtml = "";
-  if (usePadMode) {
-    if (isPreview) {
-      footerHtml = `
-        <div style="height: ${footerHeightMm}mm; margin-top: 4px; border-top: 1.5px dashed #cbd5e1; background: #f8fafc; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 7.5pt; box-sizing: border-box;">
-          [ Pre-Printed Pad Footer: ${footerHeightMm}mm Reserved Margin ]
-        </div>
-      `;
-    }
-  } else {
-    footerHtml = buildReportFooterHtml(labSettings);
-  }
+  // Pad mode: the header/footer are pre-printed on the physical pad, so we
+  // render NOTHING in them — just reserve blank height so content lines up.
+  // Plain A4 mode: render the branding header/footer from Lab Settings.
+  const headerHtml = usePadMode ? "" : buildReportHeaderHtml(labSettings);
+  const footerHtml = usePadMode ? "" : buildReportFooterHtml(labSettings);
 
   const fmtTime = (dateStr) => {
     if (!dateStr) return "—";
@@ -1512,11 +1534,23 @@ export function renderDepartmentReportHtml({
     </div>
   `;
 
-  const pageHeightCss = isPreview
-    ? 'height: 297mm;'
-    : (usePadMode ? `height: ${contentHeightMm}mm;` : 'height: 290mm;');
+  const pagesOfTests = paginateGroupTests(group, layout);
 
-  const pagesOfTests = paginateGroupTests(group, usePadMode);
+  // Warn when a single test is taller than a full page — pagination can only
+  // split between tests, so this test will render clipped. Check the browser
+  // console after opening a report to see if this fires.
+  if (!isPreview) {
+    const budgetPx = contentBudgetPx(layout);
+    const oversized = (group.tests || []).filter(t => testHeightPx(t, group.dept) > budgetPx);
+    if (oversized.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[Report] ${oversized.length} test(s) on "${group.dept?.name}" exceed one page and will be truncated:`,
+        oversized.map(t => `${t.code || t.name} (${testHeightPx(t, group.dept)}px > ${budgetPx}px)`)
+      );
+    }
+  }
+
   let combinedHtml = "";
 
   for (let i = 0; i < pagesOfTests.length; i++) {
@@ -1525,34 +1559,45 @@ export function renderDepartmentReportHtml({
 
     const fullResultsHtml = buildUnifiedResultsTable(
       pageTests,
-      owner.results || {},
+      group.mergedResults || owner.results || {},
       group.dept?.id,
       group.dept?.name,
       owner.patient || activeOrder.patient || {}
     );
 
+    const contentHtml = `
+      ${patientDetailsHtml}
+      <div style="text-align: center; margin: 5px 0 2px 0; page-break-inside: avoid;">
+        <span style="font-size: 10pt; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; color: #000000;">
+          DEPARTMENT OF ${esc(cleanDeptName)}
+        </span>
+      </div>
+      ${fullResultsHtml}
+      ${remarksHtml}
+    `;
+
+    // Section stack — identical CONTENT area (contentMm tall) in every mode.
+    //   Pad  + preview : [blank headerMm] [content] [sig] [blank footerMm]  page = 297 mm
+    //   Pad  + print   : [content] [sig]                                    page = 297 - header - footer mm
+    //   Non-pad (both) : [header] [content] [sig] [footer]                  page = 297 mm
+    const sections = [];
+    if (usePadMode) {
+      if (isPreview) sections.push({ h: headerMm, html: "" });
+      sections.push({ h: contentMm, html: contentHtml });
+      sections.push({ h: sigMm, html: signaturesBlockHtml });
+      if (isPreview) sections.push({ h: footerMm, html: "" });
+    } else {
+      sections.push({ h: headerMm, html: headerHtml });
+      sections.push({ h: contentMm, html: contentHtml });
+      sections.push({ h: sigMm, html: signaturesBlockHtml });
+      sections.push({ h: footerMm, html: footerHtml });
+    }
+
+    const totalMm = sections.reduce((s, x) => s + x.h, 0);
+
     combinedHtml += `
-      <div class="report-page" style="position: relative; width: 100%; height: ${usePadMode ? contentHeightMm + 'mm' : '285mm'}; overflow: hidden; page-break-after: ${isLast ? 'auto' : 'always'}; background: #ffffff; font-family: 'Lora', Georgia, serif; color: #000000; box-sizing: border-box;">
-        
-        <!-- TOP ZONE: Table is trapped here. Padding bottom prevents it from touching the signatures -->
-        <div style="height: 100%; padding-bottom: 55mm; box-sizing: border-box; overflow: hidden;">
-          ${headerHtml}
-          ${patientDetailsHtml}
-          <div style="text-align: center; margin: 5px 0 2px 0; page-break-inside: avoid;">
-            <span style="font-size: 10pt; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; color: #000000;">
-              DEPARTMENT OF ${esc(cleanDeptName)}
-            </span>
-          </div>
-          ${fullResultsHtml}
-          ${remarksHtml}
-        </div>
-
-        <!-- BOTTOM ZONE: Signatures are physically pinned to the bottom 55mm -->
-        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 55mm; page-break-inside: avoid; background: #ffffff; z-index: 10;">
-          ${signaturesBlockHtml}
-          ${footerHtml}
-        </div>
-
+      <div class="report-page" style="position: relative; width: 100%; height: ${totalMm}mm; display: flex; flex-direction: column; overflow: hidden; page-break-after: ${isLast ? 'auto' : 'always'}; background: #ffffff; font-family: 'Lora', Georgia, serif; color: #000000; box-sizing: border-box;">
+        ${sections.map(s => `<div style="height: ${s.h}mm; flex-shrink: 0; overflow: hidden;">${s.html}</div>`).join("")}
       </div>
     `;
   }
@@ -1595,8 +1640,8 @@ export function printDepartmentA4Report(
   const _layout = getReportLayout(labSettings);
   const _headerPx = (_layout?.header?.height) || 132;
   const _footerPx = (_layout?.footer?.height) || 72;
-  const _headerMm = (_headerPx * PX_TO_MM).toFixed(1);
-  const _footerMm = (_footerPx * PX_TO_MM).toFixed(1);
+  const _headerMm = (_headerPx * PX_TO_MM).toFixed(2);
+  const _footerMm = (_footerPx * PX_TO_MM).toFixed(2);
 
   const pagesHtml = (deptGroupsToPrint || []).map((group) => {
     return renderDepartmentReportHtml({

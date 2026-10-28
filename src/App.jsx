@@ -237,16 +237,28 @@ export default function App() {
       let groupName = null;
       let groupIcon = null;
 
+      // Detect CBC up front so a CBC test tagged DEP-HEM still gets its own
+      // dedicated page (rendered by the CBC template, not the normal table).
+      const isCbcTest =
+        code.includes("CBC") ||
+        name.includes("CBC") ||
+        name.includes("COMPLETE BLOOD COUNT");
+
       // Explicitly map names so they are always full and correct
       if (baseDeptId === "DEP-IMM") {
         groupKey = "DEP-IMM"; groupName = "Immunology & Endocrinology"; groupIcon = "🧬";
+      } else if (baseDeptId === "DEP-HEM" && isCbcTest) {
+        // CBC → dedicated page, uses the special CBC renderer.
+        groupKey = "DEP-HEM-CBC"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
       } else if (baseDeptId === "DEP-HEM") {
+        // Any other haematology test (PT, APTT, INR, ESR, D-Dimer…) → normal table.
         groupKey = "DEP-HEM"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
       } else if (baseDeptId === "DEP-BIO") {
         groupKey = "DEP-BIO"; groupName = "Clinical Biochemistry"; groupIcon = "🧪";
       } else if (baseDeptId === "DEP-MIC") {
         groupKey = "DEP-MIC"; groupName = "Microbiology & Serology"; groupIcon = "🔬";
-      } else if (code.includes("CBC") || name.includes("COMPLETE BLOOD COUNT")) {
+      } else if (isCbcTest) {
+        // CBC with a missing/wrong dept_id → still give it the CBC page.
         groupKey = "DEP-HEM-CBC"; groupName = "Hematology & Coagulation"; groupIcon = "🩸";
       } else if (code.includes("URINE") || name.includes("URINE")) {
         groupKey = "DEP-PAT-URINE"; groupName = "Clinical Pathology & Urine Analysis"; groupIcon = "🧫";
@@ -281,6 +293,42 @@ export default function App() {
         grouped[groupKey].ownerOrder = owner || null;
       }
     });
+
+    // Merge EVERY vial's results into one map so multi-vial reports (e.g. a
+    // CBC page that also renders the ESR row from a sibling citrate vial)
+    // can find values that live on a different sibling order.
+    const mergedResults = sources.reduce((acc, vo) => {
+      let vr = vo.results;
+      // If results is an array (e.g. from local cache), convert to object first
+      if (Array.isArray(vr)) {
+        vr = vr.reduce((a, r) => ({ ...a, [r.parameter_id]: { value: r.result_value } }), {});
+      }
+      return { ...acc, ...(vr || {}) };
+    }, {});
+
+    // Attach the merged map to every group. Parameter IDs are unique per
+    // visit, so there is no key collision between vials.
+    Object.values(grouped).forEach((g) => { g.mergedResults = mergedResults; });
+
+    // If there is a CBC group and a separate ESR test, move ESR into the CBC 
+    // group so they print on the same page (matching standard clinical layouts).
+    if (grouped["DEP-HEM-CBC"] && grouped["DEP-HEM"]) {
+      const esrTests = grouped["DEP-HEM"].tests.filter(
+        (t) => (t.name || "").toUpperCase().includes("ESR") || 
+               (t.code || "").toUpperCase().includes("ESR")
+      );
+      if (esrTests.length > 0) {
+        grouped["DEP-HEM-CBC"].tests.push(...esrTests);
+        grouped["DEP-HEM"].tests = grouped["DEP-HEM"].tests.filter(
+          (t) => !esrTests.includes(t)
+        );
+        // If the DEP-HEM group is now empty, delete it
+        if (grouped["DEP-HEM"].tests.length === 0) {
+          delete grouped["DEP-HEM"];
+        }
+      }
+    }
+
     return Object.values(grouped);
   }, [activeOrder, visitOrders, departments]);
 
@@ -486,7 +534,7 @@ export default function App() {
           const fromCat = (testCatalog || []).find((t) => t.id === testId || (t.code && t.code === rawTest.code)) || {};
           const catParams = fromCat.test_parameters || fromCat.parameters || [];
           const rawParams = rawTest.test_parameters || rawTest.parameters || [];
-          const resolvedParams = catParams.length > 0 ? catParams : rawParams;
+          const resolvedParams = rawParams.length > 0 ? rawParams : catParams;
           let specificVialBc = "";
           if (restoredVials.length > 0) {
             const vMatch = restoredVials.find((v) => v.testIds?.includes(testId) || v.testIds?.includes(rawTest.code) || v.testNames?.includes(rawTest.name));

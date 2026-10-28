@@ -22,6 +22,8 @@ export default function ReportsPrint({
   });
   const [activeDeptSheet, setActiveDeptSheet] = useState("ALL");
   const [previewScale, setPreviewScale] = useState(0.85); // 85% default scale
+  // Re-render the preview whenever the user changes the layout in the designer.
+  const layoutKey = `${labSettings?.report_layout?.header?.height || 132}-${labSettings?.report_layout?.footer?.height || 72}`;
 
   const togglePadMode = (val) => {
     setUsePadMode(val);
@@ -269,7 +271,7 @@ export default function ReportsPrint({
                   <span className="text-xs">All Department Sheets Combined</span>
                 </div>
                 <span className="text-[10px] font-mono font-semibold bg-white px-2 py-0.5 rounded border border-slate-200">
-                  {departmentGroupedReports.length} Pages
+                  {groupsForPreview.length} {groupsForPreview.length === 1 ? "Page" : "Pages"}
                 </span>
               </button>
 
@@ -475,33 +477,38 @@ export default function ReportsPrint({
               </div>
             ) : (
               // --- FULL A4 DOCUMENT PREVIEW ---
-              <div
-                className="space-y-6 transition-transform duration-150 origin-top flex flex-col items-center"
-                style={{
-                  transform: `scale(${previewScale})`,
-                  marginBottom: `${-(1 - previewScale) * 297 * 3.78}px`
-                }}
-              >
+              <div className="space-y-4 flex flex-col items-center">
                 {displayedGroups.map((group) => (
                   <div
-                    key={group.dept.id}
-                    className="bg-white text-slate-900 rounded-none shadow-xl border border-slate-300 w-full"
+                    key={`${group.dept.id}-${layoutKey}`}
                     style={{
-                      width: "210mm",
-                      minHeight: "297mm",
+                      width: `calc(210mm * ${previewScale})`,
+                      height: `calc(297mm * ${previewScale})`,
+                      overflow: "hidden",
+                      flexShrink: 0,
                       boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
                     }}
-                    dangerouslySetInnerHTML={{
-                      __html: renderDepartmentReportHtml({
-                        group,
-                        activeOrder,
-                        staffList,
-                        labSettings,
-                        usePadMode,
-                        isPreview: true
-                      })
-                    }}
-                  />
+                  >
+                    <div
+                      className="bg-white text-slate-900 rounded-none"
+                      style={{
+                        width: "210mm",
+                        minHeight: "297mm",
+                        transform: `scale(${previewScale})`,
+                        transformOrigin: "top left"
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: renderDepartmentReportHtml({
+                          group,
+                          activeOrder,
+                          staffList,
+                          labSettings,
+                          usePadMode,
+                          isPreview: true
+                        })
+                      }}
+                    />
+                  </div>
                 ))}
               </div>
             )}
