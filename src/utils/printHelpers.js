@@ -494,7 +494,7 @@ export function renderCustomCbcHematologyReport(tests = [], results = {}, patien
 
   const secHeader = (title) => `
     <tr style="border-bottom: 1px solid #cbd5e1;">
-      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px; background: #f8fafc;">${esc(title)}</td>
+      <td colspan="3" style="padding: 3px 6px; font-size: 9pt; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: 0.3px; background: white;">${esc(title)}</td>
     </tr>
   `;
 
@@ -613,7 +613,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
       <div style="display: grid; grid-template-columns: 1fr 1.15fr; gap: 8px; margin-bottom: 6px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-          <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             I. Physical Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
@@ -628,7 +628,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
         </div>
 
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-          <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             II. Chemical / Dipstick Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
@@ -645,7 +645,7 @@ export function renderCustomUrineRmeReport(tests = [], results = {}) {
       </div>
 
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           III. Microscopic Examination (Centrifuged Deposit)
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -749,7 +749,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-          <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             I. Physical Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
@@ -763,7 +763,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
         </div>
 
         <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-          <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+          <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
             II. Chemical Examination
           </div>
           <table style="width: 100%; border-collapse: collapse;">
@@ -776,7 +776,7 @@ export function renderCustomStoolRmeReport(tests = [], results = {}) {
       </div>
 
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           III. Microscopic Examination
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -861,7 +861,7 @@ export function renderCustomWidalReport(tests = [], results = {}) {
     <div style="margin: 6px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
       <table style="width: 100%; border-collapse: collapse; border: 1.5px solid #000;">
         <thead>
-          <tr style="background: #f8fafc; border-bottom: 1.5px solid #000; font-size: 8pt;">
+          <tr style="background: white; border-bottom: 1.5px solid #000; font-size: 8pt;">
             <th style="padding: 4px 6px; text-align: left; border: 1px solid #000; width: 34%;">Antigen Suspension</th>
             <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:20</th>
             <th style="padding: 4px; text-align: center; border: 1px solid #000; width: 7%;">1:40</th>
@@ -934,7 +934,7 @@ export function renderCustomSemenReport(tests = [], results = {}) {
   return `
     <div style="margin: 4px auto 0 auto; width: 92%; font-family: 'Lora', Georgia, serif; color: #000;">
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden; margin-bottom: 6px;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           I. Physical Examination
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -950,7 +950,7 @@ export function renderCustomSemenReport(tests = [], results = {}) {
       </div>
 
       <div style="border: 1.5px solid #000; border-radius: 4px; overflow: hidden;">
-        <div style="background: #f8fafc; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
+        <div style="background: white; border-bottom: 1.5px solid #000; padding: 3px 6px; font-weight: 900; font-size: 8pt; text-transform: uppercase;">
           II. Microscopic Examination & Motility Profile (WHO Standards)
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -1044,7 +1044,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
       </div>
 
       ${(clinicalIndication || protocolTechnique || test.sample_type) ? `
-        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 9pt; line-height: 1.45;">
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 9pt; line-height: 1.45;">
           ${clinicalIndication ? `
             <div style="margin-bottom: 3px;">
               <b style="text-transform: uppercase; font-size: 8pt; color: #0f172a;">Clinical Indication:</b>
@@ -1070,7 +1070,7 @@ export function renderDescriptiveStudySheet(test, results, deptName) {
       </div>
 
       ${diagnosticImpression ? `
-        <div style="margin-top: 10px; border: 1.5px solid #000; border-radius: 4px; padding: 6px 8px; background: #fafafa;">
+        <div style="margin-top: 10px; border: 1.5px solid #000; border-radius: 4px; padding: 6px 8px; background: white;">
           <b style="text-transform: uppercase; font-size: 9pt; letter-spacing: 0.5px; display: block; margin-bottom: 2px; color: #000;">
             Diagnostic Impression / Conclusion:
           </b>
@@ -1203,7 +1203,7 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
       // --- RENDER SECTION HEADER ---
       if (p.param_type === "header") {
         tableRows += `
-          <tr style="border-bottom: 1px solid #cbd5e1; background: #f8fafc; page-break-inside: avoid;">
+          <tr style="border-bottom: 1px solid #cbd5e1; background: white; page-break-inside: avoid;">
             <td colspan="4" style="padding: 5px 4px; font-size: 9.5pt; font-weight: 800; color: #000; text-transform: uppercase;">
               ${esc(pNameStr)}
             </td>
@@ -1286,10 +1286,10 @@ export function buildUnifiedResultsTable(tests = [], results = {}, deptId = "", 
   const standardTable = tableRows ? `
     <table style="width: 92%; border-collapse: collapse; margin: 4px auto 0 auto; font-family: 'Lora', Georgia, serif;">
       <thead>
-        <tr style="border-bottom: 1.5px solid #000000; font-size: 9pt; background: #f8fafc; page-break-inside: avoid;">
+        <tr style="border-bottom: 1.5px solid #000000; font-size: 11pt; background: white; page-break-inside: avoid;">
           <th style="padding: 6px 4px; text-align: left; width: 32%; font-weight: 700; border: none;">Parameter</th>
-          <th style="padding: 6px 4px; text-align: left; width: 18%; font-weight: 700; border: none;">Observed Result</th>
-          <th style="padding: 6px 4px; text-align: left; width: 12%; font-weight: 700; border: none;">Unit</th>
+          <th style="padding: 6px 4px; text-align: left; width: 14%; font-weight: 700; border: none;">Result</th>
+          <th style="padding: 6px 4px; text-align: left; width: 16%; font-weight: 700; border: none;">Unit</th>
           <th style="padding: 6px 4px; text-align: left; width: 38%; font-weight: 700; border: none;">Reference Value</th>
         </tr>
       </thead>
@@ -1945,7 +1945,7 @@ export function printMoneyReceiptA5(orderToPrint, labSettings = {}) {
             </div>
           </div>
 
-          <div style="border: 1px dashed #000; padding: 4px 6px; margin-bottom: 5px; font-size: 7.5pt; background: #fafafa;">
+          <div style="border: 1px dashed #000; padding: 4px 6px; margin-bottom: 5px; font-size: 7.5pt; background: white;">
             <table style="width: 100%; border-collapse: collapse; font-family: inherit;">
             <tr>
                 <td style="padding: 1px 0;"><b>PATIENT ID:</b> <span style="font-weight: bold;">${esc(patientId)}</span></td>
