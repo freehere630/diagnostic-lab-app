@@ -388,7 +388,7 @@ export default function Dashboard({
 
                         {/* Receipt & All Specimen Vials */}
                         <td className="py-2 px-3">
-                          <span className="font-mono font-bold text-slate-800 block text-[11px]">{g.receiptNo}</span>
+                          <span className="font-mono font-bold text-slate-800 block text-[12px]">{g.receiptNo}</span>
 
                           <div className="flex flex-wrap gap-1 mt-0.5 max-w-xs">
                             {g.allBarcodes.map((bc, vIdx) => {
@@ -400,7 +400,7 @@ export default function Dashboard({
                               return (
                                 <span
                                   key={vIdx}
-                                  className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-semibold border flex items-center gap-0.5 ${
+                                  className={`px-1.5 py-0.2 rounded font-mono text-[11px] font-semibold border flex items-center gap-0.5 ${
                                     isMatchedSearch
                                       ? "bg-blue-600 text-white border-blue-600 font-bold ring-2 ring-blue-300"
                                       : "bg-slate-100 text-slate-700 border-slate-200"
