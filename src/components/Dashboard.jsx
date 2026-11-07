@@ -31,6 +31,7 @@ export default function Dashboard({
   totalCount,
   totalDueCount = 0,
   totalClearedCount = 0,
+  onOpenPrescription,
   pageSize = 20,
   isLoading
 }) {

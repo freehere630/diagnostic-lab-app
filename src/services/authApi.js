@@ -37,15 +37,20 @@ export async function fetchProfileForUser(userId) {
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
+
   if (error) {
-    // Surface RLS / policy problems. Previously this error was
-    // swallowed and the login screen showed a misleading
-    // "No staff profile linked to this account" message even when
-    // the profile existed but wasn't readable.
     console.error("[fetchProfileForUser] query failed:", error.message, error);
     return null;
   }
-  return data || null;
+  if (!data) return null;
+
+  let doctorId = null;
+  if (data.role === 'doctor') {
+    const { data: docData } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+    if (docData) doctorId = docData.id;
+  }
+
+  return { ...data, doctorId };
 }
 
 export function mapUser(authUser, profile) {
@@ -54,6 +59,7 @@ export function mapUser(authUser, profile) {
     email: authUser.email,
     name: profile.full_name,
     role: profile.role,
+    doctorId: profile.doctorId || null,
     designation: profile.designation || "",
     signature_data: profile.signature_data || profile.full_name,
     is_active: profile.is_active,
@@ -67,6 +73,7 @@ export async function createStaffUser({
   role,
   designation,
   signatureData,
+  doctorData,
 }) {
   const session = await getCurrentSession();
   if (!session) throw new Error("Not authenticated");
@@ -85,6 +92,7 @@ export async function createStaffUser({
       role,
       designation,
       signatureData,
+      doctorData,
     }),
   });
 

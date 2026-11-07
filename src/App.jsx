@@ -3,6 +3,8 @@ import AnalyzerSettings from "./components/AnalyzerSettings";
 import AuditLog from "./components/AuditLog";
 import DoctorProfile from "./components/DoctorProfile";
 import MonthlyAnalytics from "./components/MonthlyAnalytics";
+import PrescriptionForm from "./components/PrescriptionForm";
+import DoctorDashboard from "./components/DoctorDashboard";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import DoctorCommissions from "./components/DoctorCommissions";
 import {
@@ -1141,19 +1143,54 @@ export default function App() {
   const handleSaveDoctor = async (docData) => {
     setIsLoading(true);
     try {
-      await createOrUpdateDoctor(docData);
-      setDoctorsList((await getDoctorsList()) || []);
+      if (!docData.id && docData.password && docData.email) {
+        await createStaffUser({
+          fullName: docData.name,
+          email: docData.email,
+          password: docData.password,
+          role: "doctor",
+          designation: docData.designation,
+          signatureData: docData.name,
+          doctorData: docData,
+        });
+        setDoctorsList((await getDoctorsList()) || []);
+      } else {
+        await createOrUpdateDoctor(docData);
+        setDoctorsList((await getDoctorsList()) || []);
+      }
       alert("✅ Doctor Saved!");
       return true;
     } catch (e) { alert("Error saving doctor: " + e.message); return false; } finally { setIsLoading(false); }
   };
 
-  const handleDeleteDoctor = async (docId) => {
+  const handleDeleteDoctor = async (doc) => {
+    if (!window.confirm(`Delete doctor "${doc.name}"?\n\nThis will also revoke their portal login access.`)) return;
+    
     setIsLoading(true);
     try {
-      await deleteDoctor(docId);
+      // 1. If the doctor has a linked login account, delete it from Supabase Auth
+      if (doc.user_id) {
+        try {
+          await deleteStaffUserAuth(doc.user_id);
+        } catch (authErr) {
+          // Ignore "User not found" errors. This happens if the login was 
+          // already deleted manually via Supabase, but the doctor row remains.
+          if (!authErr.message.includes("not found")) {
+            console.warn("Auth deletion warning:", authErr.message);
+          }
+        }
+      }
+      
+      // 2. Delete the doctor record from the database
+      await deleteDoctor(doc.id);
+      
+      // 3. Refresh the list
       setDoctorsList((await getDoctorsList()) || []);
-    } catch (e) { alert("Error deleting doctor: " + e.message); } finally { setIsLoading(false); }
+    } catch (e) { 
+      alert("Error deleting doctor: " + e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleSaveSettings = async (settingsData) => {
@@ -1214,6 +1251,17 @@ export default function App() {
     );
   }
 
+  // DOCTOR PORTAL INTERCEPT
+  if (currentUser.role === "doctor") {
+    return (
+      <DoctorDashboard 
+        currentUser={currentUser} 
+        labSettings={labSettings} 
+        onLogout={async () => { await authLogout(); setCurrentUser(null); }} 
+      />
+    );
+  }
+
   // ============================================================
   // 7. MAIN RENDER
   // ============================================================
@@ -1242,7 +1290,9 @@ export default function App() {
       )}
 
       {activeTab === "dashboard" && (
-        <Dashboard orders={orders} departments={departments} testCatalog={testCatalog} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} handleSettleDue={handleSettleDue} handleMarkRecollected={handleMarkRecollected} dashboardSearch={dashboardSearch} setDashboardSearch={setDashboardSearch} dateRange={dateRange} setDateRange={setDateRange} activePreset={activePreset} setPreset={handlePresetSwitch} currentPage={currentPage} setCurrentPage={setCurrentPage} totalPages={totalPages} totalCount={totalCount} totalDueCount={totalDueCount} totalClearedCount={totalClearedCount} pageSize={20} isLoading={isLoading} />
+        <Dashboard 
+          orders={orders} departments={departments} testCatalog={testCatalog} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} handleSettleDue={handleSettleDue} handleMarkRecollected={handleMarkRecollected} dashboardSearch={dashboardSearch} setDashboardSearch={setDashboardSearch} dateRange={dateRange} setDateRange={setDateRange} activePreset={activePreset} setPreset={handlePresetSwitch} currentPage={currentPage} setCurrentPage={setCurrentPage} totalPages={totalPages} totalCount={totalCount} totalDueCount={totalDueCount} totalClearedCount={totalClearedCount} pageSize={20} isLoading={isLoading} 
+        />
       )}
 
       {activeTab === "monthly-analytics" && <MonthlyAnalytics departments={departments} />}

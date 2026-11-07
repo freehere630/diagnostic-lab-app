@@ -18,7 +18,10 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
 
   const openNewDoctorModal = () => {
     setEditingDoctor(null);
-    setFormData({ name: "", degrees: "", designation: "", chamber: "", phone: "", email: "", commission_rate: "20" });
+    setFormData({ 
+      name: "", degrees: "", designation: "", chamber: "", phone: "", 
+      email: "", password: "", commission_rate: "20" 
+    });
     setIsModalOpen(true);
   };
 
@@ -150,11 +153,7 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                   <Edit className="w-3 h-3" /> Edit
                 </button>
                 <button
-                  onClick={() => {
-                    if (window.confirm(`Delete doctor "${doc.name}"?`)) {
-                      handleDeleteDoctor(doc.id);
-                    }
-                  }}
+                  onClick={() => handleDeleteDoctor(doc)}
                   className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
                   title="Delete Record"
                 >
@@ -216,8 +215,8 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-1">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
                   <label className="font-semibold text-slate-600 text-[11px] block mb-1">Phone</label>
                   <input
                     type="text"
@@ -227,7 +226,7 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                     className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono"
                   />
                 </div>
-                <div className="col-span-1">
+                <div>
                   <label className="font-semibold text-slate-600 text-[11px] block mb-1">Designation</label>
                   <input
                     type="text"
@@ -237,7 +236,33 @@ export default function DoctorManagement({ doctorsList = [], handleSaveDoctor, h
                     className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none"
                   />
                 </div>
-                <div className="col-span-1">
+                {!editingDoctor && (
+                  <>
+                    <div>
+                      <label className="font-semibold text-slate-600 text-[11px] block mb-1">Login Email *</label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="doctor@lab.com"
+                        value={formData.email || ""}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-slate-600 text-[11px] block mb-1">Login Password *</label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••"
+                        value={formData.password || ""}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none font-mono focus:border-blue-500"
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="col-span-2">
                   <label className="font-semibold text-slate-600 text-[11px] block mb-1 text-indigo-700">Commission %</label>
                   <input
                     type="number"

@@ -314,8 +314,13 @@ export async function seedRadiologyCatalog() {
 export async function getDoctorsList() {
   try {
     const { data, error } = await supabase.from("doctors").select("*").order("name");
-    if (!error && data && data.length > 0) {
-      try { localStorage.setItem("apex_local_doctors", JSON.stringify(data)); } catch (e) {}
+    if (!error && data) {
+      if (data.length > 0) {
+        try { localStorage.setItem("apex_local_doctors", JSON.stringify(data)); } catch (e) {}
+      } else {
+        // Clear local storage if the database is truly empty
+        try { localStorage.removeItem("apex_local_doctors"); } catch (e) {}
+      }
       return data;
     }
   } catch (e) {}
@@ -325,11 +330,7 @@ export async function getDoctorsList() {
     if (local.length > 0) return local;
   } catch (e) {}
 
-  return [
-    { id: "DOC-001", name: "Prof. Dr. M. A. Rahman", degrees: "MBBS, FCPS (Medicine)", chamber: "Dhaka Medical College Hospital", phone: "01711000001" },
-    { id: "DOC-002", name: "Dr. Farhana Yasmin", degrees: "MBBS, DGO, MCPS (Gyne & Obs)", chamber: "Popular Diagnostic Center", phone: "01819000002" },
-    { id: "DOC-003", name: "Dr. K. S. Hossain", degrees: "MBBS, MD (Cardiology)", chamber: "National Heart Foundation", phone: "01912000003" }
-  ];
+  return []; // Return empty array instead of fake doctors
 }
 
 export async function createOrUpdateDoctor(docData) {
@@ -358,7 +359,9 @@ export async function createOrUpdateDoctor(docData) {
 }
 
 export async function deleteDoctor(docId) {
-  try { await supabase.from("doctors").delete().eq("id", docId); } catch (e) {}
+  const { error } = await supabase.from("doctors").delete().eq("id", docId);
+  if (error) throw new Error(error.message);
+  
   try {
     const local = JSON.parse(localStorage.getItem("apex_local_doctors") || "[]");
     localStorage.setItem("apex_local_doctors", JSON.stringify(local.filter((d) => d.id !== docId)));

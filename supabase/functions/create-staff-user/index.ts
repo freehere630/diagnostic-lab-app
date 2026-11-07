@@ -48,7 +48,7 @@ serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { email, password, fullName, role, designation, signatureData } = body || {};
+    const { email, password, fullName, role, designation, signatureData, doctorData } = body || {};
 
     if (!email || !password || !fullName || !role) {
       return json({ error: "Missing required fields" }, 400);
@@ -56,7 +56,7 @@ serve(async (req) => {
 
     const validRoles = [
       "developer", "manager", "admin", "verifier",
-      "biochemist", "technologist", "receptionist",
+      "biochemist", "technologist", "receptionist", "doctor",
     ];
     if (!validRoles.includes(role)) {
       return json({ error: "Invalid role" }, 400);
@@ -79,6 +79,7 @@ serve(async (req) => {
       return json({ error: createErr?.message || "User creation failed" }, 400);
     }
 
+    // 1. Create Staff Profile
     const { error: insertErr } = await adminClient
       .from("staff_profiles")
       .insert({
@@ -94,6 +95,29 @@ serve(async (req) => {
       // Roll back auth user so we don't leave an orphan
       await adminClient.auth.admin.deleteUser(created.user.id);
       return json({ error: insertErr.message }, 500);
+    }
+
+    // 2. If role is doctor, also insert into doctors table
+    if (role === "doctor" && doctorData) {
+      const { error: docErr } = await adminClient
+        .from("doctors")
+        .insert({
+          id: doctorData.id || `DOC-${Math.floor(1000 + Math.random() * 9000)}`,
+          user_id: created.user.id,
+          name: String(doctorData.name).trim(),
+          degrees: doctorData.degrees || "",
+          designation: doctorData.designation || "",
+          chamber: doctorData.chamber || "",
+          phone: doctorData.phone || "",
+          email: String(email).trim().toLowerCase(),
+          commission_rate: parseFloat(doctorData.commission_rate) || 20
+        });
+
+      if (docErr) {
+        // Roll back auth user and staff profile if doctor insert fails
+        await adminClient.auth.admin.deleteUser(created.user.id);
+        return json({ error: docErr.message }, 500);
+      }
     }
 
     return json({
