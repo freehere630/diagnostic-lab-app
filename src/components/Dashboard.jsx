@@ -29,6 +29,8 @@ export default function Dashboard({
   setCurrentPage,
   totalPages,
   totalCount,
+  totalDueCount = 0,
+  totalClearedCount = 0,
   pageSize = 20,
   isLoading
 }) {
@@ -173,8 +175,6 @@ export default function Dashboard({
     });
   }, [sortedOrders]);
 
-  const totalRevenue = sortedOrders.reduce((acc, g) => acc + g.totalPaid, 0);
-  const totalDue = sortedOrders.reduce((acc, g) => acc + g.totalDue, 0);
   const pendingQC = sortedOrders.filter((g) => g.anyPending).length;
   const verifiedCount = sortedOrders.filter((g) => !g.anyPending).length;
 
@@ -252,7 +252,7 @@ export default function Dashboard({
 
       {/* 1. ANALYTICS STRIP */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Page Receipts</span>
           <span className="text-lg font-bold text-slate-800">{sortedOrders.length}</span>
         </div>
@@ -269,12 +269,12 @@ export default function Dashboard({
           <span className="text-lg font-bold text-emerald-600">{verifiedCount}</span>
         </div>
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Collected</span>
-          <span className="text-lg font-bold text-slate-900 font-mono">৳{totalRevenue.toLocaleString()}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Due</span>
+          <span className="text-lg font-bold text-rose-600">{totalDueCount}</span>
         </div>
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Outstanding Due</span>
-          <span className="text-lg font-bold text-rose-600 font-mono">৳{totalDue.toLocaleString()}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Cleared</span>
+          <span className="text-lg font-bold text-emerald-600">{totalClearedCount}</span>
         </div>
       </div>
 

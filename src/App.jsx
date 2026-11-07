@@ -2,6 +2,7 @@ import RolePermissions from "./components/RolePermissions";
 import AnalyzerSettings from "./components/AnalyzerSettings";
 import AuditLog from "./components/AuditLog";
 import DoctorProfile from "./components/DoctorProfile";
+import MonthlyAnalytics from "./components/MonthlyAnalytics";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import DoctorCommissions from "./components/DoctorCommissions";
 import {
@@ -112,6 +113,8 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalDueCount, setTotalDueCount] = useState(0);
+  const [totalClearedCount, setTotalClearedCount] = useState(0);
 
   // Date filter
   const readSavedDateFilter = () => {
@@ -514,6 +517,21 @@ export default function App() {
           setSelectedOrderId(matchedLocal[0].orderId || matchedLocal[0].id);
           setTotalPages(1);
           setTotalCount(matchedLocal.length);
+
+          // Group local matches by receipt and count due / cleared per visit
+          const byReceipt = new Map();
+          matchedLocal.forEach((o) => {
+            const key = o.receiptNo || o.receipt_no || o.orderId || o.id;
+            if (!key) return;
+            const due = parseFloat(o.billing?.due) || 0;
+            if (due > (byReceipt.get(key) || 0)) byReceipt.set(key, due);
+          });
+          let dueCount = 0;
+          let clearedCount = 0;
+          byReceipt.forEach((due) => { if (due > 0) dueCount++; else clearedCount++; });
+          setTotalDueCount(dueCount);
+          setTotalClearedCount(clearedCount);
+
           if (!silent) setIsLoading(false);
           return;
         }
@@ -601,6 +619,8 @@ export default function App() {
       setOrders(formatted);
       setTotalPages(res.totalPages || 1);
       setTotalCount(res.totalCount || 0);
+      setTotalDueCount(res.totalDueCount || 0);
+      setTotalClearedCount(res.totalClearedCount || 0);
       if (formatted.length > 0 && !selectedOrderId) setSelectedOrderId(formatted[0].orderId);
     } catch (err) {
       if (mySeq === fetchSeqRef.current) console.error("Pagination load error:", err);
@@ -1222,8 +1242,10 @@ export default function App() {
       )}
 
       {activeTab === "dashboard" && (
-        <Dashboard orders={orders} departments={departments} testCatalog={testCatalog} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} handleSettleDue={handleSettleDue} handleMarkRecollected={handleMarkRecollected} dashboardSearch={dashboardSearch} setDashboardSearch={setDashboardSearch} dateRange={dateRange} setDateRange={setDateRange} activePreset={activePreset} setPreset={handlePresetSwitch} currentPage={currentPage} setCurrentPage={setCurrentPage} totalPages={totalPages} totalCount={totalCount} pageSize={20} isLoading={isLoading} />
+        <Dashboard orders={orders} departments={departments} testCatalog={testCatalog} setSelectedOrderId={setSelectedOrderId} setActiveTab={setActiveTab} handlePrintMoneyReceipt={(ord) => printMoneyReceiptA5(ord, labSettings)} handleSettleDue={handleSettleDue} handleMarkRecollected={handleMarkRecollected} dashboardSearch={dashboardSearch} setDashboardSearch={setDashboardSearch} dateRange={dateRange} setDateRange={setDateRange} activePreset={activePreset} setPreset={handlePresetSwitch} currentPage={currentPage} setCurrentPage={setCurrentPage} totalPages={totalPages} totalCount={totalCount} totalDueCount={totalDueCount} totalClearedCount={totalClearedCount} pageSize={20} isLoading={isLoading} />
       )}
+
+      {activeTab === "monthly-analytics" && <MonthlyAnalytics departments={departments} />}
 
       {activeTab === "reception" && (
         <ReceptionPOS testCatalog={testCatalog} patientForm={patientForm} setPatientForm={setPatientForm} selectedTestIds={selectedTestIds} setSelectedTestIds={setSelectedTestIds} discountVal={discountVal} setDiscountVal={setDiscountVal} paidCashVal={paidCashVal} setPaidCashVal={setPaidCashVal} paidOnlineVal={paidOnlineVal} setPaidOnlineVal={setPaidOnlineVal} handleSaveOrderToDb={handleSaveOrderToDb} activeOrder={activeOrder} isLoading={isLoading} doctorsList={doctorsList} />

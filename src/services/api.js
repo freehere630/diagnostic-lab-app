@@ -435,7 +435,7 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
   // 1. Fetch orders to find UNIQUE receipts
   let query = supabase
     .from("orders")
-    .select("receipt_no, order_date, barcode, patient_id, id")
+    .select("receipt_no, order_date, barcode, patient_id, id, due_amount")
     .order("order_date", { ascending: false });
 
   if (dateFrom && dateTo) {
@@ -465,13 +465,39 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
   const totalReceiptCount = uniqueReceipts.length;
   const totalPages = Math.max(1, Math.ceil(totalReceiptCount / pageSize));
 
+  // Per-receipt due: only the master vial carries a non-zero due_amount,
+  // siblings carry 0. Taking the max per receipt gives the visit's true due.
+  const receiptDueMap = new Map();
+  (allOrders || []).forEach((o) => {
+    if (!o.receipt_no) return;
+    const due = parseFloat(o.due_amount) || 0;
+    if (due > (receiptDueMap.get(o.receipt_no) || 0)) {
+      receiptDueMap.set(o.receipt_no, due);
+    }
+  });
+
+  let totalDueCount = 0;
+  let totalClearedCount = 0;
+  for (const r of uniqueReceipts) {
+    if ((receiptDueMap.get(r.receiptNo) || 0) > 0) totalDueCount++;
+    else totalClearedCount++;
+  }
+
   // 3. Paginate UNIQUE receipts
   const fromIndex = (page - 1) * pageSize;
   const toIndex = fromIndex + pageSize;
   const paginatedReceipts = uniqueReceipts.slice(fromIndex, toIndex).map(r => r.receiptNo);
 
   if (paginatedReceipts.length === 0) {
-    return { orders: [], totalCount: totalReceiptCount, page, pageSize, totalPages };
+    return {
+      orders: [],
+      totalCount: totalReceiptCount,
+      totalDueCount,
+      totalClearedCount,
+      page,
+      pageSize,
+      totalPages,
+    };
   }
 
   // 4. Fetch the full details for ONLY the paginated receipts
@@ -485,10 +511,12 @@ export async function getOrdersPaginated({ page = 1, pageSize = 20, dateFrom = "
 
   return {
     orders: fullOrders || [],
-    totalCount: totalReceiptCount, // Now correctly returns the count of RECEIPTS, not vials
+    totalCount: totalReceiptCount, // Count of RECEIPTS, not vials
+    totalDueCount,
+    totalClearedCount,
     page,
     pageSize,
-    totalPages
+    totalPages,
   };
 }
 

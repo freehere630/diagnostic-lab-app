@@ -3,34 +3,15 @@ import {
   ShieldCheck, Save, RefreshCw, Check, X
 } from "lucide-react";
 import { getRolePermissions, saveRolePermissions } from "../services/api";
+import { NAV_GROUPS } from "./AppLayout";
 
 // Import the NAV_GROUPS structure directly from AppLayout so it's always in sync
 // NOTE: You need to export NAV_GROUPS from AppLayout.jsx for this to work!
 // Or, we can just hardcode the list of all tabs here:
-const ALL_TABS = [
-  { id: "reception", label: "Reception POS" },
-  { id: "samples", label: "Vials & Barcodes" },
-  { id: "worklists", label: "Worklists" },
-  { id: "verifier", label: "QC & Verification" },
-  { id: "reports", label: "Reports & Print" },
-  { id: "dashboard", label: "Dashboard" },
-  { id: "doctor-manager", label: "Doctors" },
-  { id: "test-manager", label: "Test Catalog" },
-  { id: "staff-manager", label: "Staff" },
-  { id: "lab-settings", label: "Branding" },
-  { id: "inventory-dashboard", label: "Inventory Home" },
-  { id: "inventory-items", label: "Item Master" },
-  { id: "inventory-suppliers", label: "Suppliers" },
-  { id: "inventory-ledger", label: "Stock Ledger" },
-  { id: "inventory-machines", label: "Machine Dashboard" },
-  { id: "inventory-ops", label: "Stock Operations" },
-  { id: "inventory-reports", label: "Reports & Alerts" },
-  { id: "inventory-po", label: "Purchase Orders" },
-  { id: "finance", label: "Finance & Accounts" },
-  { id: "finance-closing", label: "Cash Closing" },
-  { id: "doctor-commissions", label: "Doctor Payouts" },
-  { id: "audit-log", label: "Audit Logs" },
-];
+// Derived from NAV_GROUPS so it can never drift out of sync with the sidebar.
+const ALL_TABS = NAV_GROUPS.flatMap((group) =>
+  group.items.map((item) => ({ id: item.id, label: item.label }))
+);
 
 const ROLES = [
   "receptionist", "technologist", "verifier", "biochemist", 
@@ -42,11 +23,37 @@ export default function RolePermissions() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const computeDefaultPermissions = () => {
+    const map = {};
+    ROLES.forEach((role) => { map[role] = []; });
+    NAV_GROUPS.forEach((group) => {
+      group.items.forEach((item) => {
+        (item.roles || []).forEach((role) => {
+          if (!map[role]) map[role] = [];
+          if (!map[role].includes(item.id)) map[role].push(item.id);
+        });
+      });
+    });
+    return map;
+  };
+
   const load = async () => {
     setLoading(true);
     try {
       const data = await getRolePermissions();
-      setPermissions(data);
+      const merged = computeDefaultPermissions();
+
+      // DB wins only if the role has a stored row. An empty array
+      // stored in the DB still counts as "intentionally none".
+      if (data && typeof data === "object") {
+        Object.entries(data).forEach(([role, tabs]) => {
+          if (tabs !== undefined && tabs !== null) {
+            merged[role] = Array.isArray(tabs) ? tabs : [];
+          }
+        });
+      }
+
+      setPermissions(merged);
     } catch (e) {
       alert("Load failed: " + e.message);
     } finally {
@@ -57,14 +64,13 @@ export default function RolePermissions() {
   useEffect(() => { load(); }, []);
 
   const togglePermission = (role, tabId) => {
+    if (role === "developer") return; // developer is always full access
     setPermissions(prev => {
       const currentList = prev[role] || [];
       const hasTab = currentList.includes(tabId);
-      
-      const newList = hasTab 
+      const newList = hasTab
         ? currentList.filter(id => id !== tabId)
         : [...currentList, tabId];
-
       return { ...prev, [role]: newList };
     });
   };
@@ -72,12 +78,12 @@ export default function RolePermissions() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Save each role
       for (const role of ROLES) {
+        if (role === "developer") continue; // AppLayout always grants developer full access
         await saveRolePermissions(role, permissions[role] || []);
       }
       alert("✅ Permissions updated successfully.");
-      // Note: Other users will see the changes when they refresh their browser.
+      // Other users will see the changes when they refresh their browser.
     } catch (e) {
       alert("Save failed: " + e.message);
     } finally {
@@ -146,9 +152,10 @@ export default function RolePermissions() {
                     {tab.label}
                   </td>
                   {ROLES.map(role => {
-                    const isAllowed = (permissions[role] || []).includes(tab.id);
-                    // Prevent unchecking developer access to critical tabs
-                    const isDevLock = role === "developer" && ["role-permissions", "dashboard"].includes(tab.id);
+                    const isDevLock = role === "developer";
+                    const isAllowed = isDevLock
+                      ? true // developer always has access — never greyed out
+                      : (permissions[role] || []).includes(tab.id);
 
                     return (
                       <td key={role} className="py-2 px-2 text-center border-r border-slate-100 last:border-0">
@@ -156,10 +163,10 @@ export default function RolePermissions() {
                           onClick={() => togglePermission(role, tab.id)}
                           disabled={isDevLock}
                           className={`w-6 h-6 rounded flex items-center justify-center mx-auto transition ${
-                            isAllowed 
-                              ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" 
+                            isAllowed
+                              ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
                               : "bg-slate-100 text-slate-300 hover:bg-slate-200"
-                          } ${isDevLock ? "opacity-50 cursor-not-allowed" : ""}`}
+                          } ${isDevLock ? "opacity-60 cursor-not-allowed" : ""}`}
                         >
                           {isAllowed ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                         </button>

@@ -7,13 +7,15 @@ import {
   Cpu, ShieldAlert , ArrowRightLeft,BarChart3, Wallet,Calculator,
 } from "lucide-react";
 import GlobalSearch from "./GlobalSearch";
+import { getRolePermissions } from "../services/api";
 
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   {
     id: "business",
     label: "Business",
     items: [
       { id: "dashboard",      label: "Dashboard", icon: Activity,    roles: ["developer","manager","admin","verifier","biochemist","technologist","receptionist"] },
+      { id: "monthly-analytics", label: "Monthly Analytics", icon: BarChart3, roles: ["developer","manager","admin"] },
       { id: "doctor-manager", label: "Doctors",   icon: Stethoscope, roles: ["developer","manager","admin","receptionist"] },
       { id: "doctor-commissions", label: "Doctor Payouts", icon: Stethoscope, roles: ["developer","manager","admin"] },
     ],
@@ -83,6 +85,7 @@ export default function AppLayout({
   );
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [rolePermissions, setRolePermissions] = useState({});
 
   useEffect(() => {
     localStorage.setItem("apex_sidebar_collapsed", String(collapsed));
@@ -92,13 +95,40 @@ export default function AppLayout({
     setMobileOpen(false);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    getRolePermissions()
+      .then((data) => setRolePermissions(data || {}))
+      .catch(() => setRolePermissions({}));
+  }, [currentUser?.id]);
+
   const userRole = (currentUser?.role || "").toLowerCase();
 
   const visibleGroups = useMemo(() => {
+    // Developer always has full access — prevents permanent lockout.
+    if (userRole === "developer") return NAV_GROUPS;
+
+    const dbAllowed = rolePermissions[userRole];
+    const hasDbRule = dbAllowed !== undefined && dbAllowed !== null;
+
     return NAV_GROUPS
-      .map((g) => ({ ...g, items: g.items.filter((i) => i.roles.includes(userRole)) }))
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((i) => {
+          if (hasDbRule) return Array.isArray(dbAllowed) && dbAllowed.includes(i.id);
+          return i.roles.includes(userRole);
+        }),
+      }))
       .filter((g) => g.items.length > 0);
-  }, [userRole]);
+  }, [userRole, rolePermissions]);
+
+  // Bounce the user off any tab they no longer have access to.
+  useEffect(() => {
+    const visibleIds = visibleGroups.flatMap((g) => g.items.map((i) => i.id));
+    if (visibleIds.length > 0 && activeTab && !visibleIds.includes(activeTab)) {
+      setActiveTab(visibleIds[0]);
+    }
+  }, [visibleGroups, activeTab, setActiveTab]);
 
   const labName = labSettings?.lab_name || "Apex Clinical LIMS";
   const logoData = labSettings?.logo_data || "";
