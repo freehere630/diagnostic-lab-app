@@ -6,7 +6,7 @@ import {
   Barcode, Search
 } from "lucide-react";
 import { sendRecollectionWhatsApp } from "../utils/whatsappHelper";
-import { markSampleRecollected } from "../services/api";
+import { markSampleRecollected, getDashboardStats } from "../services/api";
 import { getAllOrderVials } from "../utils/printHelpers";
 import { supabase } from "../supabaseClient";
 
@@ -41,6 +41,19 @@ export default function Dashboard({
   const [actionLoading, setActionLoading] = useState(false);
   const [isBubbleOpen, setIsBubbleOpen] = useState(false);
   const [localOrders, setLocalOrders] = useState(orders);
+  const [stats, setStats] = useState({ total_collected: 0, total_due: 0, pending_qc: 0, verified_ready: 0 });
+
+  // Fetch accurate stats whenever the date range changes
+  useEffect(() => {
+    let mounted = true;
+    getDashboardStats({ 
+      dateFrom: dateRange?.from, 
+      dateTo: dateRange?.to 
+    }).then((res) => {
+      if (mounted) setStats(res);
+    });
+    return () => { mounted = false; };
+  }, [dateRange]);
   
   // ---- SEARCH BAR STATE ----
   const [searchInput, setSearchInput] = useState(dashboardSearch || "");
@@ -176,9 +189,10 @@ export default function Dashboard({
     });
   }, [sortedOrders]);
 
-  const pendingQC = sortedOrders.filter((g) => g.anyPending).length;
-  const verifiedCount = sortedOrders.filter((g) => !g.anyPending).length;
-
+  const totalRevenue = parseFloat(stats.total_collected) || 0;
+  const totalDue = parseFloat(stats.total_due) || 0;
+  const pendingQC = parseInt(stats.pending_qc, 10) || 0;
+  const verifiedCount = parseInt(stats.verified_ready, 10) || 0;
   const openSettleModal = (g) => {
     // Find the sibling that actually carries the due balance
     const withDue = g.vials.find((v) => (v.billing?.due || 0) > 0) || g.master;
@@ -271,11 +285,11 @@ export default function Dashboard({
         </div>
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Due</span>
-          <span className="text-lg font-bold text-rose-600">{totalDueCount}</span>
+          <span className="text-lg font-bold text-rose-600 font-mono">৳{totalDue.toLocaleString()}</span>
         </div>
         <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Total Cleared</span>
-          <span className="text-lg font-bold text-emerald-600">{totalClearedCount}</span>
+          <span className="text-lg font-bold text-emerald-600 font-mono">৳{totalRevenue.toLocaleString()}</span>
         </div>
       </div>
 

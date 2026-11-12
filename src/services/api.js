@@ -1467,3 +1467,20 @@ export async function deleteAnalyzer(analyzerId, analyzerName) {
 
   if (error) throw new Error(error.message);
 }
+
+// ==========================================
+// Dashboard Accurate Stats
+// ==========================================
+export async function getDashboardStats({ dateFrom, dateTo }) {
+  try {
+    const { data, error } = await supabase.rpc("get_dashboard_stats", {
+      p_start_date: dateFrom || null,
+      p_end_date: dateTo || null,
+    });
+    if (error) throw error;
+    return data || { total_collected: 0, total_due: 0, pending_qc: 0, verified_ready: 0 };
+  } catch (e) {
+    console.warn("Dashboard stats failed:", e);
+    return { total_collected: 0, total_due: 0, pending_qc: 0, verified_ready: 0 };
+  }
+}
