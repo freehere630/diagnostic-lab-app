@@ -634,10 +634,12 @@ const resolvedOrderTests = useMemo(() => {
     });
   };
 
-  // targetDeptId is optional. Pass a department ID to verify just that dept,
-  // or call with no args to verify every department in the visit.
-  const onVerifyClick = async (targetDeptId = null) => {
-    if (activeOrder.isLocked) return;
+const onVerifyClick = async (targetDeptId = null) => {
+  let ordersToVerify = sourceOrders;
+  if (targetDeptId) {
+    ordersToVerify = ordersToVerify.filter((vo) => (vo.tests || []).some((t) => (t.dept_id || t.deptId) === targetDeptId));
+  }
+  if (ordersToVerify.length > 0 && ordersToVerify.every((vo) => vo.isLocked === true || vo.qcStatus === "Verified")) return;
 
     // Commit any pending remark shadows before verifying
     Object.keys(localDeptRemarks).forEach((deptId) => {
