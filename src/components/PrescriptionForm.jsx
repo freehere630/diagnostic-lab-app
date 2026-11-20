@@ -18,13 +18,23 @@ const EMPTY_ITEM = {
   instructions: "",
 };
 
+// crypto.randomUUID() throws on non-HTTPS LAN deployments. Fall back safely.
+const genLocalId = () => {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch (_) { /* ignore */ }
+  return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+};
+
 export default function PrescriptionForm({ order, doctorsList = [], currentUser, labSettings = {}, onClose, onSaved }) {
   const [diagnosis, setDiagnosis] = useState("");
   const [advice, setAdvice] = useState("");
   const [followUp, setFollowUp] = useState("");
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [vitals, setVitals] = useState({ bp: "", pulse: "", temp: "", weight: "" });
-  const [items, setItems] = useState([{ ...EMPTY_ITEM, id: crypto.randomUUID() }]);
+  const [items, setItems] = useState([{ ...EMPTY_ITEM, id: genLocalId() }]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [suggestions, setSuggestions] = useState([]);
   const [sugLoading, setSugLoading] = useState(false);
@@ -34,10 +44,32 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
   const debounceRef = useRef(null);
   const suggestionWrapRef = useRef(null);
 
+  // ── BUG FIX #1: normalize the order ID once ─────────────────────
+  // Doctor-portal orders come from financeApi with `.id`, not `.orderId`.
+  const orderId = order?.orderId || order?.id || null;
+
+  // ── BUG FIX #2: doctor attribution ──────────────────────────────
+  // Prefer the logged-in doctor. Fall back to matching the referral string.
+  const referralName = order?.patient?.doctor || order?.patient?.address?.replace("Ref: ", "") || "";
+  const matchedByReferral = doctorsList.find(
+    (d) => d?.name?.toLowerCase() === referralName.toLowerCase()
+  );
+  const resolvedDoctorId = currentUser?.doctorId || matchedByReferral?.id || null;
+  const resolvedDoctorName =
+    (currentUser?.role === "doctor" && currentUser?.name) || referralName || "Self";
+
+  // Signature to print: prefer the matched doctor record, then the current user's stamp.
+  const matchedDoctorRecord =
+    doctorsList.find((d) => d?.id === resolvedDoctorId) || doctorsList[0] || null;
+  const doctorSignature = (() => {
+    const raw = matchedDoctorRecord?.signature_data || currentUser?.signature_data || "";
+    return String(raw).startsWith("data:image") ? raw : "";
+  })();
+
   useEffect(() => {
     (async () => {
-      if (!order?.orderId) return;
-      const rx = await getPrescriptionByOrder(order.orderId);
+      if (!orderId) return;
+      const rx = await getPrescriptionByOrder(orderId);
       if (rx) {
         setExistingId(rx.id);
         setDiagnosis(rx.diagnosis || "");
@@ -61,11 +93,11 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
                 duration: it.duration || "",
                 instructions: it.instructions || "",
               }))
-            : [{ ...EMPTY_ITEM, id: crypto.randomUUID() }]
+            : [{ ...EMPTY_ITEM, id: genLocalId() }]
         );
       }
     })();
-  }, [order?.orderId]);
+  }, [orderId]);
 
   useEffect(() => {
     const onDown = (e) => {
@@ -96,7 +128,7 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
     updateItem(idx, { medicine_name: text, medicine_id: null });
     setActiveIdx(idx);
     setShowDropdown(true); // Open dropdown when typing
-    
+
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.trim().length < 2) {
       setSuggestions([]);
@@ -127,7 +159,7 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
     setShowDropdown(false); // Instantly close dropdown so "No matches" doesn't show
   };
 
-  const addLine = () => setItems((prev) => [...prev, { ...EMPTY_ITEM, id: crypto.randomUUID() }]);
+  const addLine = () => setItems((prev) => [...prev, { ...EMPTY_ITEM, id: genLocalId() }]);
   const removeLine = (idx) => {
     if (items.length <= 1) return;
     setItems((prev) => prev.filter((_, i) => i !== idx));
@@ -141,10 +173,10 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
     setSaving(true);
     try {
       const res = await savePrescription({
-        orderId: order.orderId,
+        orderId,                                 // ← Bug #1 fixed
         patientId: order.patient.id,
-        doctorId: doctorsList.find((d) => d.name?.toLowerCase() === (order.patient?.doctor || "").toLowerCase())?.id || null,
-        doctorName: order.patient?.doctor || "Self",
+        doctorId: resolvedDoctorId,              // ← Bug #2 fixed
+        doctorName: resolvedDoctorName,          // ← Bug #2 fixed
         diagnosis,
         advice,
         followUpDate: followUp,
@@ -168,7 +200,8 @@ export default function PrescriptionForm({ order, doctorsList = [], currentUser,
     if (cleanItems.length === 0) return alert("Add at least one medicine first.");
     printPrescription({
       order,
-      doctorName: order.patient?.doctor || "Self",
+      doctorName: resolvedDoctorName,            // ← Bug #2 fixed
+      doctorSignature,                           // ← signature now prints
       diagnosis,
       advice,
       followUpDate: followUp,

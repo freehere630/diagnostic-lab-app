@@ -797,6 +797,27 @@ export async function createNewOrder({
       ? Math.max(0, parseFloat(dueAmount) || 0)
       : Math.max(0, finalNet - finalPaidTotal);
 
+  // Resolve referring doctor once (explicit doctor_id written below).
+  let resolvedDoctorId = null;
+  try {
+    const referringName = String(patientData.doctor || "").trim();
+    if (referringName && referringName.toLowerCase() !== "self") {
+      const norm = (s) =>
+        String(s || "")
+          .toLowerCase()
+          .replace(/ref:/gi, "")
+          .split("(")[0]
+          .replace(/[^a-z0-9]/g, "")
+          .trim();
+      const { data: docs } = await supabase.from("doctors").select("id, name");
+      const key = norm(referringName);
+      const hit = (docs || []).find((d) => norm(d.name) === key);
+      if (hit) resolvedDoctorId = hit.id;
+    }
+  } catch (_) {
+    // Non-fatal — the DB trigger will still set doctor_id when it can.
+  }
+
   const ordersPayload = [];
   const orderTestsPayload = [];
   const resultsMetadataPayload = [];
@@ -825,6 +846,7 @@ export async function createNewOrder({
     const vialOrderRow = {
       id: thisOrderId,
       patient_id: patientId,
+      doctor_id: resolvedDoctorId,
       barcode: vialBarcode,
       order_date: todayDate,
       created_at: nowIso,

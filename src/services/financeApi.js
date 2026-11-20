@@ -224,52 +224,43 @@ export async function getDoctorPayouts() {
   return data || [];
 }
 export async function getDoctorProfileData(doctorId, doctorName) {
-  // 1. Get doctor info
-  const { data: doctor } = await supabase.from("doctors").select("*").eq("id", doctorId).single();
+  if (!doctorId) {
+    return {
+      doctor: { id: null, name: doctorName || "Unknown", commission_rate: 20 },
+      orders: [],
+      payouts: [],
+      stats: { totalRevenue: 0, totalCommission: 0, totalPaid: 0, outstanding: 0, rate: 20 },
+    };
+  }
 
-  // 2. Fetch ALL orders (with patient details)
-  const { data: allOrders } = await supabase
+  const { data: doctor } = await supabase
+    .from("doctors").select("*").eq("id", doctorId).maybeSingle();
+
+  const { data: allOrders, error: ordErr } = await supabase
     .from("orders")
     .select(`id, order_date, net_payable, patient:patients(name, id, address)`)
+    .eq("doctor_id", doctorId)
     .order("order_date", { ascending: false });
 
-  // 3. Fetch payouts for this doctor
+  if (ordErr) console.warn("[getDoctorProfileData] orders fetch:", ordErr.message);
+
   const { data: payouts } = await supabase
     .from("doctor_payouts")
     .select("*")
     .eq("doctor_id", doctorId)
     .order("payout_date", { ascending: false });
 
-  // 4. Normalize names to match exactly what we do in getDoctorCommissions
-  const normalizeName = (name) => {
-    if (!name) return "";
-    return name
-      .toLowerCase()
-      .replace(/ref:/gi, "") 
-      .split("(")[0]         
-      .replace(/[^a-z0-9]/g, "") 
-      .trim();
-  };
-
-  const targetName = normalizeName(doctorName);
-
-  // 5. Filter orders in JavaScript
-  const orders = (allOrders || []).filter(o => {
-    let docName = o.patient?.address?.replace("Ref: ", "") || "Self";
-    return normalizeName(docName) === targetName;
-  });
-
-  // 6. Calculate stats
-  const totalRevenue = orders.reduce((sum, o) => sum + (parseFloat(o.net_payable) || 0), 0);
+  const orders = allOrders || [];
+  const totalRevenue = orders.reduce((s, o) => s + (parseFloat(o.net_payable) || 0), 0);
   const rate = parseFloat(doctor?.commission_rate) || 20;
   const totalCommission = (totalRevenue * rate) / 100;
-  const totalPaid = (payouts || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  const totalPaid = (payouts || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const outstanding = Math.max(0, totalCommission - totalPaid);
 
   return {
     doctor: doctor || { name: doctorName, commission_rate: rate },
-    orders: orders,
+    orders,
     payouts: payouts || [],
-    stats: { totalRevenue, totalCommission, totalPaid, outstanding, rate }
+    stats: { totalRevenue, totalCommission, totalPaid, outstanding, rate },
   };
 }

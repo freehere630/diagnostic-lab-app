@@ -1252,7 +1252,7 @@ export default function App() {
   }
 
   // DOCTOR PORTAL INTERCEPT
-  if (currentUser.role === "doctor") {
+if ((currentUser.role || "").toLowerCase() === "doctor") {
     return (
       <DoctorDashboard 
         currentUser={currentUser} 

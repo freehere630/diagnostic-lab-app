@@ -1,12 +1,35 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { FlaskConical, Lock, Mail, ArrowRight } from "lucide-react";
 import { loginWithEmail } from "../services/authApi";
+import { getLabSettings } from "../services/api";
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [branding, setBranding] = useState({
+    lab_name: "Al Fattah Diagnostic & Consultation Center",
+    tagline: "With Al-Fattah on the Journey to Wellness",
+    logo_data: "",
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const s = await getLabSettings();
+        if (!mounted || !s) return;
+        setBranding({
+          lab_name: s.lab_name || branding.lab_name,
+          tagline: s.tagline || branding.tagline,
+          logo_data: s.logo_data || "",
+        });
+      } catch (_) { /* anon cannot read settings — keep defaults */ }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -26,14 +49,22 @@ export default function Login({ onLoginSuccess }) {
     <div className="min-h-screen bg-slate-100/70 flex items-center justify-center p-4 text-slate-900">
       <div className="max-w-sm w-full bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
         <div className="p-6 pb-4 text-center">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-2.5 text-white shadow-xs">
-            <FlaskConical className="w-5 h-5" />
-          </div>
+          {branding.logo_data ? (
+            <img
+              src={branding.logo_data}
+              alt="Logo"
+              className="w-10 h-10 object-contain rounded-xl mx-auto mb-2.5 border border-slate-200 p-0.5"
+            />
+          ) : (
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-2.5 text-white shadow-xs">
+              <FlaskConical className="w-5 h-5" />
+            </div>
+          )}
           <h1 className="text-base font-bold tracking-tight text-slate-900">
-            Apex Clinical LIMS
+            {branding.lab_name}
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Laboratory Operating & Reporting System
+            {branding.tagline || "Laboratory Operating & Reporting System"}
           </p>
         </div>
 

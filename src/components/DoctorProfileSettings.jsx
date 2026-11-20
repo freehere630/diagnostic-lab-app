@@ -27,9 +27,8 @@ export default function DoctorProfileSettings({ doctor, onUpdated }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("doctors")
-        .update({
+      const { error } = await supabase.rpc("update_my_doctor_profile", {
+        p_patch: {
           name: form.name,
           degrees: form.degrees,
           specialization: form.specialization,
@@ -38,10 +37,9 @@ export default function DoctorProfileSettings({ doctor, onUpdated }) {
           chamber_address: form.chamber_address,
           phone: form.phone,
           signature_data: form.signature_data,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", doctor.id);
-
+        },
+        p_target_id: doctor.id,
+      });
       if (error) throw error;
       alert("Profile updated successfully!");
       if (onUpdated) onUpdated();

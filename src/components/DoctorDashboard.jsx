@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Stethoscope, LogOut, LayoutDashboard, FileText,
-  User, Settings, Plus, Search, Clock, Activity, Users
+  User, Settings, Plus, Search, Clock, Activity, Users, AlertCircle
 } from "lucide-react";
 import { getDoctorProfileData } from "../services/financeApi";
 import { searchPatients } from "../services/api";
@@ -15,30 +15,117 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
   const [patientResults, setPatientResults] = useState([]);
   const [searchingPatients, setSearchingPatients] = useState(false);
   const [data, setData] = useState(null);
+  const [prescriptions, setPrescriptions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");                        // ← Bug #3
   const [prescriptionOrder, setPrescriptionOrder] = useState(null);
   const [doctorRecord, setDoctorRecord] = useState(null);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const res = await getDoctorProfileData(currentUser.doctorId, currentUser.name);
-      setData(res);
-      
-      // Fetch full doctor record for settings
-      const { data: doc } = await supabase.from("doctors").select("*").eq("id", currentUser.doctorId).single();
-      setDoctorRecord(doc);
+  const searchDebounceRef = useRef(null);
+  const searchSeqRef = useRef(0);
 
-    } catch (e) {
-      alert("Failed to load dashboard: " + e.message);
-    } finally {
-      setLoading(false);
+  // ── BUG FIX #3 + #4: mounted guard, explicit error state ────────
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      if (!currentUser?.doctorId) {
+        if (mounted) {
+          setError(
+            "Your login account is not linked to a doctor record. Please ask an administrator to link your account."
+          );
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        const res = await getDoctorProfileData(currentUser.doctorId, currentUser.name);
+        if (!mounted) return;
+        setData(res);
+
+        const { data: doc, error: docErr } = await supabase
+          .from("doctors").select("*").eq("id", currentUser.doctorId).maybeSingle();
+        if (!mounted) return;
+        if (docErr) console.warn("[DoctorDashboard] doctor lookup:", docErr.message);
+        setDoctorRecord(doc || null);
+
+        // Load prescriptions so walk-ins and history are actually retrievable.
+        const { data: rxList } = await supabase
+          .from("prescriptions")
+          .select("id, order_id, patient_id, doctor_name, diagnosis, chief_complaint, updated_at, created_at")
+          .eq("doctor_id", currentUser.doctorId)
+          .order("updated_at", { ascending: false })
+          .limit(200);
+        if (mounted) setPrescriptions(rxList || []);
+      } catch (e) {
+        if (mounted) setError(e.message || "Failed to load dashboard");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [currentUser?.doctorId, currentUser?.name, currentUser]);
+
+  // ── BUG FIX #5: debounced, stale-guarded patient search ─────────
+  const handlePatientSearch = (q) => {
+    setPatientSearch(q);
+
+    if (q.trim().length < 2) {
+      setPatientResults([]);
+      setSearchingPatients(false);
+      searchSeqRef.current++; // invalidate any in-flight response
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      return;
     }
+
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    setSearchingPatients(true);
+    const seq = ++searchSeqRef.current;
+
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await searchPatients(q);
+        if (seq !== searchSeqRef.current) return; // stale — a newer query is in flight
+        setPatientResults(res);
+      } catch (e) {
+        console.error("[DoctorDashboard] patient search:", e);
+      } finally {
+        if (seq === searchSeqRef.current) setSearchingPatients(false);
+      }
+    }, 300);
   };
 
-  useEffect(() => { loadData(); }, [currentUser]);
+  const startWalkIn = (patient) => {
+    setPrescriptionOrder({
+      orderId: null,
+      id: null,
+      patient: {
+        ...patient,
+        doctor: currentUser?.name || patient?.doctor || "Self",
+      },
+    });
+  };
 
-  if (loading || !data) {
+  const openPrescriptionForOrder = (orderRow) => {
+    // Prescription history row → re-open against the linked order (if any)
+    setPrescriptionOrder({
+      orderId: orderRow.order_id,
+      id: orderRow.order_id,
+      patient: {
+        id: orderRow.patient_id,
+        name: orderRow.patient_name || "Patient",
+        doctor: currentUser?.name || orderRow.doctor_name || "Self",
+      },
+    });
+  };
+
+  // ── LOADING / ERROR / DATA GATES ────────────────────────────────
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
@@ -49,38 +136,34 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
     );
   }
 
+  if (error || !data) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl border border-rose-200 shadow-sm p-6 text-center space-y-3">
+          <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <h2 className="text-sm font-bold text-rose-700">Doctor portal cannot load</h2>
+          <p className="text-xs text-slate-600">{error || "No profile data available."}</p>
+          <button
+            onClick={onLogout}
+            className="mt-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const { stats, orders } = data;
 
   const NAV_ITEMS = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "patients", label: "Patient Directory", icon: Users },
-    { id: "prescriptions", label: "Prescription History", icon: FileText },
+    { id: "prescriptions", label: "My Prescriptions", icon: FileText }, // ← Bug #9
     { id: "settings", label: "My Profile", icon: Settings },
   ];
-
-  // Handle Patient Search
-  const handlePatientSearch = async (q) => {
-    setPatientSearch(q);
-    if (q.trim().length < 2) return setPatientResults([]);
-    setSearchingPatients(true);
-    try {
-      const res = await searchPatients(q);
-      setPatientResults(res);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSearchingPatients(false);
-    }
-  };
-
-  // Start a walk-in consultation for an existing patient
-  const startWalkIn = (patient) => {
-    // Fake an order object so PrescriptionForm can process it normally
-    setPrescriptionOrder({
-      orderId: null,
-      patient: patient
-    });
-  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -117,18 +200,20 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        
-        {/* Topbar */}
+        {/* Topbar — Bug #10 fallback to currentUser */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
           <h2 className="text-lg font-bold text-slate-800">
             {NAV_ITEMS.find(i => i.id === activeTab)?.label}
           </h2>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-xs font-bold text-slate-800">{doctorRecord?.name}</p>
-              <p className="text-[10px] text-slate-500">{doctorRecord?.degrees}</p>
+              <p className="text-xs font-bold text-slate-800">
+                {doctorRecord?.name || currentUser.name}
+              </p>
+              <p className="text-[10px] text-slate-500">
+                {doctorRecord?.degrees || currentUser.designation || ""}
+              </p>
             </div>
             <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center border border-slate-300">
               <User className="w-4 h-4 text-slate-500" />
@@ -136,7 +221,6 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
           </div>
         </header>
 
-        {/* Scrollable Page Content */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-6xl mx-auto space-y-6">
 
@@ -175,7 +259,15 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
                 </div>
 
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                  <h3 className="font-bold text-slate-800 mb-4">Recent Patients (Quick Prescription)</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-slate-800">Recent Patients (Quick Prescription)</h3>
+                    <button
+                      onClick={() => setActiveTab("prescriptions")}
+                      className="text-[11px] font-semibold text-blue-600 hover:underline"
+                    >
+                      View all →
+                    </button>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500 font-semibold text-xs uppercase border-y border-slate-200">
@@ -193,7 +285,10 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
                             <td className="py-3 px-4 font-bold text-slate-800">{o.patient?.name}</td>
                             <td className="py-3 px-4 font-mono text-xs text-blue-600">{o.patient?.id}</td>
                             <td className="py-3 px-4 text-right">
-                              <button onClick={() => setPrescriptionOrder(o)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition">
+                              <button
+                                onClick={() => setPrescriptionOrder({ ...o, orderId: o.id })}
+                                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition"
+                              >
                                 <Plus className="w-3 h-3"/> Prescribe
                               </button>
                             </td>
@@ -214,12 +309,12 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
                   <p className="text-sm text-slate-500">Search by Name, Phone, or Patient ID</p>
                   <div className="relative mt-4">
                     <Search className="w-5 h-5 absolute left-4 top-3 text-slate-400" />
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={patientSearch}
                       onChange={(e) => handlePatientSearch(e.target.value)}
-                      placeholder="Type to search..." 
-                      className="w-full pl-12 pr-4 py-3 border-2 border-slate-200 rounded-xl text-sm focus:border-blue-500 outline-none shadow-sm transition" 
+                      placeholder="Type to search..."
+                      className="w-full pl-12 pr-4 py-3 border-2 border-slate-200 rounded-xl text-sm focus:border-blue-500 outline-none shadow-sm transition"
                     />
                   </div>
                 </div>
@@ -248,52 +343,59 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
               </div>
             )}
 
-            {/* PRESCRIPTION HISTORY TAB */}
+            {/* MY PRESCRIPTIONS TAB — Bug #9 fixed */}
             {activeTab === "prescriptions" && (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
                  <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-slate-800">All Prescriptions</h3>
-                    <div className="relative">
-                      <Search className="w-4 h-4 absolute left-3 top-2 text-slate-400" />
-                      <input type="text" placeholder="Search patient..." className="pl-9 pr-4 py-2 border rounded-lg text-sm w-64" />
-                    </div>
+                    <span className="text-xs text-slate-500">{prescriptions.length} total</span>
                  </div>
-                 <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 text-slate-500 font-semibold text-xs uppercase border-y border-slate-200">
-                        <tr>
-                          <th className="py-3 px-4">Date</th>
-                          <th className="py-3 px-4">Patient Name</th>
-                          <th className="py-3 px-4">Patient ID</th>
-                          <th className="py-3 px-4 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {orders.map(o => (
-                          <tr key={o.id} className="hover:bg-slate-50">
-                            <td className="py-3 px-4 font-mono text-xs text-slate-500">{o.order_date}</td>
-                            <td className="py-3 px-4 font-bold text-slate-800">{o.patient?.name}</td>
-                            <td className="py-3 px-4 font-mono text-xs text-blue-600">{o.patient?.id}</td>
-                            <td className="py-3 px-4 text-right">
-                              <button onClick={() => setPrescriptionOrder(o)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">
-                                Edit / View
-                              </button>
-                            </td>
+                 {prescriptions.length === 0 ? (
+                   <div className="text-center py-10 text-slate-400 italic">
+                     No prescriptions written yet. Start a consultation from the Dashboard or Patient Directory.
+                   </div>
+                 ) : (
+                   <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500 font-semibold text-xs uppercase border-y border-slate-200">
+                          <tr>
+                            <th className="py-3 px-4">Last Updated</th>
+                            <th className="py-3 px-4">Patient</th>
+                            <th className="py-3 px-4">Diagnosis</th>
+                            <th className="py-3 px-4 text-right">Action</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                 </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {prescriptions.map(rx => (
+                            <tr key={rx.id} className="hover:bg-slate-50">
+                              <td className="py-3 px-4 font-mono text-xs text-slate-500">
+                                {new Date(rx.updated_at || rx.created_at).toLocaleDateString()}
+                              </td>
+                              <td className="py-3 px-4 font-bold text-slate-800">{rx.patient_id}</td>
+                              <td className="py-3 px-4 text-slate-600">{rx.diagnosis || "—"}</td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={() => openPrescriptionForOrder({ ...rx, patient_name: rx.patient_id })}
+                                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition"
+                                >
+                                  Edit / View
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                   </div>
+                 )}
               </div>
             )}
 
             {/* PROFILE SETTINGS TAB */}
             {activeTab === "settings" && doctorRecord && (
-              <DoctorProfileSettings 
-                doctor={doctorRecord} 
-                onUpdated={() => {
-                  loadData(); // Refresh data so new name/degrees show instantly
-                }} 
+              <DoctorProfileSettings
+                doctor={doctorRecord}
+                currentUser={currentUser}
+                onUpdated={() => setDoctorRecord(null) || setActiveTab("dashboard")}
               />
             )}
 
@@ -301,11 +403,10 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
         </div>
       </main>
 
-      {/* Prescription Modal */}
       {prescriptionOrder && (
         <PrescriptionForm
           order={prescriptionOrder}
-          doctorsList={[doctorRecord]}
+          doctorsList={[doctorRecord, matchedDoctorFallback(doctorRecord, currentUser)].filter(Boolean)}
           currentUser={currentUser}
           labSettings={labSettings}
           onClose={() => setPrescriptionOrder(null)}
@@ -314,4 +415,18 @@ export default function DoctorDashboard({ currentUser, labSettings, onLogout }) 
       )}
     </div>
   );
+}
+
+// Small helper so PrescriptionForm always receives at least one doctor entry,
+// even if the linked `doctors` row could not be fetched for some reason.
+function matchedDoctorFallback(doctorRecord, currentUser) {
+  if (doctorRecord) return null;
+  if (!currentUser?.doctorId) return null;
+  return {
+    id: currentUser.doctorId,
+    name: currentUser.name,
+    degrees: currentUser.designation || "",
+    commission_rate: 0,
+    signature_data: currentUser.signature_data || "",
+  };
 }

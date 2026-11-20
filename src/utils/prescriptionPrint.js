@@ -1,5 +1,5 @@
-export function printPrescription({ order, doctorName, diagnosis, advice, followUpDate, items, labSettings, currentUser, chiefComplaint, vitals }) {
-  if (!order || !items?.length) return;
+// Replace the function signature at the top:
+export function printPrescription({ order, doctorName, doctorSignature, diagnosis, advice, followUpDate, items, labSettings, currentUser, chiefComplaint, vitals }) {  if (!order || !items?.length) return;
 
   const esc = (v) =>
     String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -113,7 +113,13 @@ ${advice ? `<div class="section-label">Advice</div><div class="advice">${esc(adv
 ${followUpDate ? `<div style="margin-top:8px;font-size:9pt;"><b>Follow-up:</b> ${esc(followUpDate)}</div>` : ""}
 
 <div class="sig">
-  <div class="sig-block"><div class="sig-line">Doctor's Signature</div><div class="sig-role">${esc(doctorName || "Consultant")}</div></div>
+  <div class="sig-block">
+    ${(doctorSignature && String(doctorSignature).startsWith("data:image"))
+      ? `<img src="${esc(doctorSignature)}" style="height: 36px; object-fit: contain; display: block; margin: 0 auto 3px auto;" />`
+      : ""}
+    <div class="sig-line">Doctor's Signature</div>
+    <div class="sig-role">${esc(doctorName || "Consultant")}</div>
+  </div>
   <div class="sig-block"><div class="sig-line">Patient / Attendant</div><div class="sig-role">Received medicines as prescribed</div></div>
 </div>
 
