@@ -6,6 +6,7 @@ import MonthlyAnalytics from "./components/MonthlyAnalytics";
 import PrescriptionForm from "./components/PrescriptionForm";
 import DoctorDashboard from "./components/DoctorDashboard";
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import DoctorPortal from "./components/doctor/DoctorPortal"; 
 import DoctorCommissions from "./components/DoctorCommissions";
 import {
   getMasterData, getOrdersPaginated, createNewOrder, saveTestResult,
@@ -1250,17 +1251,32 @@ export default function App() {
       }} />
     );
   }
-
+// Find the doctor's database record based on the logged-in user
+const matchedDoctor = doctorsList?.find(
+  (doc) => 
+    doc.staff_profile_id === currentUser?.id || 
+    doc.user_id === currentUser?.id || 
+    doc.email === currentUser?.email || 
+    doc.doctor_name === currentUser?.full_name
+) || { 
+  // Fallback so the app doesn't crash if the DB link is slightly off
+  id: currentUser?.id, 
+  doctor_name: currentUser?.full_name 
+};
   // DOCTOR PORTAL INTERCEPT
-if ((currentUser.role || "").toLowerCase() === "doctor") {
-    return (
-      <DoctorDashboard 
-        currentUser={currentUser} 
-        labSettings={labSettings} 
-        onLogout={async () => { await authLogout(); setCurrentUser(null); }} 
-      />
-    );
-  }
+if (currentUser?.role === "doctor") {
+  return (
+    <DoctorPortal
+      currentUser={currentUser}
+      matchedDoctor={matchedDoctor}
+      labSettings={labSettings}
+      onLogout={async () => { await authLogout(); setCurrentUser(null); }}
+      prescriptionFormProps={{
+        // Whatever props PrescriptionForm already needs, passed through
+      }}
+    />
+  );
+}
 
   // ============================================================
   // 7. MAIN RENDER
